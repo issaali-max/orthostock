@@ -11,6 +11,8 @@ export const useApp = () => useContext(AppCtx);
 const CORE_TABLES = [
   TABLES.settings, TABLES.users, TABLES.categories,
   TABLES.products, TABLES.variants, TABLES.suppliers,
+  TABLES.customers, TABLES.invoices, TABLES.invoiceItems,
+  TABLES.purchases, TABLES.purchaseItems, TABLES.stockMovements,
 ];
 
 export function AppProvider({ children }) {

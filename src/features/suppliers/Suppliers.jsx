@@ -1,71 +1,64 @@
 import { useMemo, useState } from 'react';
 import { useApp } from '../../app/AppProvider.jsx';
 import { C, CITIES, TABLES } from '../../lib/constants.js';
+import { fmtCur } from '../../lib/money.js';
+import { fmtDate } from '../../lib/dates.js';
+import { supplierStats } from '../../lib/engine.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, SearchBar, Select, Textarea } from '../../ui/components.jsx';
 
 const blank = () => ({ name: '', phone: '', whatsapp: '', city: '', currency: 'AED', notes: '', isActive: true });
 
 export default function Suppliers() {
-  const { t, data, createRow, updateRow, deleteRow } = useApp();
+  const { t, lang, data, displayCurrency, usdRate, createRow, updateRow, deleteRow } = useApp();
   const [q, setQ] = useState('');
   const [editing, setEditing] = useState(null);
+  const [viewing, setViewing] = useState(null);
+
+  const purchases = data[TABLES.purchases] || [];
 
   const list = useMemo(() => {
     const rows = (data[TABLES.suppliers] || []).filter((r) => r.isActive !== false);
     const s = q.trim().toLowerCase();
-    if (!s) return rows;
-    return rows.filter((r) => `${r.name} ${r.phone} ${r.city}`.toLowerCase().includes(s));
+    return s ? rows.filter((r) => `${r.name} ${r.phone} ${r.city}`.toLowerCase().includes(s)) : rows;
   }, [data, q]);
 
   const save = async () => {
-    const rec = editing;
-    if (!rec.name?.trim()) return;
-    const payload = {
-      name: rec.name.trim(), phone: rec.phone || '', whatsapp: rec.whatsapp || '',
-      city: rec.city || '', currency: rec.currency || 'AED', notes: rec.notes || '', isActive: true,
-    };
-    if (rec.id) await updateRow(TABLES.suppliers, rec.id, payload);
-    else await createRow(TABLES.suppliers, payload);
+    const r = editing;
+    if (!r.name?.trim()) return;
+    const payload = { name: r.name.trim(), phone: r.phone || '', whatsapp: r.whatsapp || '', city: r.city || '', currency: r.currency || 'AED', notes: r.notes || '', isActive: true };
+    if (r.id) await updateRow(TABLES.suppliers, r.id, payload); else await createRow(TABLES.suppliers, payload);
     setEditing(null);
   };
+
+  if (viewing) {
+    return <SupplierProfile supplier={viewing} onBack={() => setViewing(null)} onEdit={() => { setEditing({ ...viewing }); setViewing(null); }}
+      {...{ data, t, lang, displayCurrency, usdRate, purchases }} />;
+  }
 
   return (
     <div>
       <PageHeader title={t('suppliers')} action={<Btn onClick={() => setEditing(blank())}>＋ {t('add')}</Btn>} />
       <SearchBar value={q} onChange={setQ} placeholder={t('search')} />
-
-      {list.length === 0 ? (
-        <EmptyState icon="🚚" text={q ? t('searchEmpty') : t('noData')} />
-      ) : (
+      {list.length === 0 ? <EmptyState icon="🚚" text={q ? t('searchEmpty') : t('noData')} /> : (
         <div style={{ display: 'grid', gap: 10 }}>
-          {list.map((s) => (
-            <Card key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 700, color: C.text, display: 'flex', gap: 8, alignItems: 'center' }}>
-                  {s.name} <Badge tone={s.currency === 'USD' ? 'warning' : 'neutral'}>{s.currency}</Badge>
+          {list.map((s) => {
+            const st = supplierStats(purchases, s.id);
+            return (
+              <Card key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }} onClick={() => setViewing(s)}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, color: C.text, display: 'flex', gap: 8, alignItems: 'center' }}>{s.name} <Badge tone={s.currency === 'USD' ? 'warning' : 'neutral'}>{s.currency}</Badge></div>
+                  <div style={{ fontSize: 11, color: C.textMuted }}>{[s.phone, s.city].filter(Boolean).join(' · ') || '—'}</div>
                 </div>
-                <div style={{ fontSize: 12, color: C.textMuted }}>
-                  {[s.phone, s.city].filter(Boolean).join(' · ') || '—'}
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <Btn size="sm" variant="light" onClick={() => setEditing({ ...s })}>{t('edit')}</Btn>
-                <Btn size="sm" variant="outline" onClick={() => { if (window.confirm(t('deactivate') + '?')) deleteRow(TABLES.suppliers, s.id); }} style={{ color: C.danger }}>×</Btn>
-              </div>
-            </Card>
-          ))}
+                {st.totalSpent > 0 && <span style={{ fontSize: 12, color: C.primary, fontWeight: 700 }}>{fmtCur(st.totalSpent, displayCurrency, usdRate)}</span>}
+                <span style={{ color: C.textMuted }}>›</span>
+              </Card>
+            );
+          })}
         </div>
       )}
 
-      <Modal
-        open={!!editing}
-        onClose={() => setEditing(null)}
-        title={editing?.id ? t('edit') : t('add')}
-        footer={<>
-          <Btn variant="ghost" onClick={() => setEditing(null)}>{t('cancel')}</Btn>
-          <Btn onClick={save}>{t('save')}</Btn>
-        </>}
-      >
+      <Modal open={!!editing} onClose={() => setEditing(null)} title={editing?.id ? t('edit') : t('add')}
+        footer={<><Btn variant="ghost" onClick={() => setEditing(null)}>{t('cancel')}</Btn><Btn onClick={save}>{t('save')}</Btn></>}>
         {editing && (
           <div>
             <Field label={t('name')} required><Input value={editing.name} onChange={(v) => setEditing((r) => ({ ...r, name: v }))} /></Field>
@@ -73,16 +66,61 @@ export default function Suppliers() {
               <Field label={t('phone')}><Input value={editing.phone} onChange={(v) => setEditing((r) => ({ ...r, phone: v }))} /></Field>
               <Field label={t('whatsapp')}><Input value={editing.whatsapp} onChange={(v) => setEditing((r) => ({ ...r, whatsapp: v }))} /></Field>
             </div>
-            <Field label={t('city')}>
-              <Select value={editing.city} onChange={(v) => setEditing((r) => ({ ...r, city: v }))} placeholder="—" options={CITIES} />
-            </Field>
-            <Field label={t('currency')}>
-              <Select value={editing.currency} onChange={(v) => setEditing((r) => ({ ...r, currency: v }))} options={['AED', 'USD']} />
-            </Field>
+            <Field label={t('city')}><Select value={editing.city} onChange={(v) => setEditing((r) => ({ ...r, city: v }))} placeholder="—" options={CITIES} /></Field>
+            <Field label={t('currency')}><Select value={editing.currency} onChange={(v) => setEditing((r) => ({ ...r, currency: v }))} options={['AED', 'USD']} /></Field>
             <Field label={t('notes')}><Textarea value={editing.notes} onChange={(v) => setEditing((r) => ({ ...r, notes: v }))} rows={2} /></Field>
+            {editing.id && <Btn variant="outline" onClick={() => { if (window.confirm(t('deactivate') + '?')) { deleteRow(TABLES.suppliers, editing.id); setEditing(null); } }} style={{ color: C.danger }}>{t('delete')}</Btn>}
           </div>
         )}
       </Modal>
+    </div>
+  );
+}
+
+function SupplierProfile({ supplier, onBack, onEdit, data, t, displayCurrency, usdRate, purchases }) {
+  const st = supplierStats(purchases, supplier.id);
+  const items = data[TABLES.purchaseItems] || [];
+  const variants = data[TABLES.variants] || [];
+  const skuOf = (id) => variants.find((v) => v.id === id)?.sku || '—';
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+        <button onClick={onBack} style={{ border: `1px solid ${C.border}`, background: '#fff', borderRadius: 10, padding: '6px 12px', fontWeight: 700, color: C.primary, cursor: 'pointer' }}>← {t('suppliers')}</button>
+        <h2 style={{ fontSize: 16, fontWeight: 800, color: C.text, margin: 0, flex: 1 }}>🚚 {supplier.name}</h2>
+        <Btn size="sm" variant="light" onClick={onEdit}>{t('edit')}</Btn>
+      </div>
+
+      <Card style={{ background: '#EAF1FB', border: 'none', marginBottom: 12 }}>
+        <div style={{ fontSize: 12, color: C.textMid, fontWeight: 700 }}>{t('totalSpent')}</div>
+        <div style={{ fontSize: 26, fontWeight: 800, color: C.primary }}>{fmtCur(st.totalSpent, displayCurrency, usdRate)}</div>
+      </Card>
+
+      <div style={{ fontSize: 13, fontWeight: 800, color: C.text, marginBottom: 8 }}>{t('history')}</div>
+      {st.purchases.length === 0 ? <EmptyState icon="📥" text={t('noPurchases')} /> : (
+        <div style={{ display: 'grid', gap: 8 }}>
+          {st.purchases.slice().reverse().map((po) => {
+            const lines = items.filter((it) => it.purchaseId === po.id);
+            return (
+              <Card key={po.id}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <strong style={{ color: C.text }}>{po.purchaseNumber}</strong>
+                  <span style={{ fontWeight: 700, color: C.primary }}>{fmtCur(po.totalAED, displayCurrency, usdRate)}</span>
+                </div>
+                <div style={{ fontSize: 11, color: C.textMuted, margin: '2px 0 6px' }}>{fmtDate(po.date)}</div>
+                <div style={{ display: 'grid', gap: 2 }}>
+                  {lines.map((l) => (
+                    <div key={l.id} style={{ fontSize: 12, color: C.textMid, display: 'flex', justifyContent: 'space-between' }}>
+                      <span>{skuOf(l.variantId)} × {l.qty}</span>
+                      <span>{fmtCur(l.unitCost, displayCurrency, usdRate)}</span>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

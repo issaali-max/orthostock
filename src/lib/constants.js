@@ -70,3 +70,14 @@ export const CATEGORY_COLORS = [
 ];
 
 export const UNITS = ['piece', 'box', 'pack', 'set', 'pair', 'meter', 'roll'];
+
+// Days of week for clinic working-day selection.
+export const WEEKDAYS = [
+  { key: 'sun', ar: 'الأحد', en: 'Sun' },
+  { key: 'mon', ar: 'الاثنين', en: 'Mon' },
+  { key: 'tue', ar: 'الثلاثاء', en: 'Tue' },
+  { key: 'wed', ar: 'الأربعاء', en: 'Wed' },
+  { key: 'thu', ar: 'الخميس', en: 'Thu' },
+  { key: 'fri', ar: 'الجمعة', en: 'Fri' },
+  { key: 'sat', ar: 'السبت', en: 'Sat' },
+];

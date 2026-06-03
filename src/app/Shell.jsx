@@ -5,9 +5,9 @@ import { CurrencyToggle } from '../ui/components.jsx';
 
 import Dashboard from '../features/dashboard.jsx';
 import Catalogue from '../features/catalogue/Catalogue.jsx';
-import Categories from '../features/categories/Categories.jsx';
-import Products from '../features/products/Products.jsx';
-import Variants from '../features/variants/Variants.jsx';
+import Invoices from '../features/sales/Invoices.jsx';
+import Purchases from '../features/purchases/Purchases.jsx';
+import Customers from '../features/customers/Customers.jsx';
 import Suppliers from '../features/suppliers/Suppliers.jsx';
 import Settings from '../features/settings/Settings.jsx';
 
@@ -21,35 +21,30 @@ function useIsDesktop() {
   return d;
 }
 
-// Nav registry — later phases plug their screens in here.
+// Catalogue is the single hub for all materials (add/edit/delete inside it).
 const NAV = [
-  { key: 'dashboard', labelKey: 'dashboard', icon: '📊', Comp: Dashboard, primary: true },
   { key: 'catalogue', labelKey: 'catalogue', icon: '🗂️', Comp: Catalogue, primary: true },
-  { key: 'products', labelKey: 'products', icon: '📦', Comp: Products, primary: true },
-  { key: 'suppliers', labelKey: 'suppliers', icon: '🚚', Comp: Suppliers, primary: true },
-  { key: 'variants', labelKey: 'variants', icon: '🏷️', Comp: Variants, primary: false },
-  { key: 'categories', labelKey: 'categories', icon: '🗃️', Comp: Categories, primary: false },
+  { key: 'invoices', labelKey: 'invoices', icon: '🧾', Comp: Invoices, primary: true },
+  { key: 'customers', labelKey: 'customers', icon: '🧑‍⚕️', Comp: Customers, primary: true },
+  { key: 'purchases', labelKey: 'purchases', icon: '📥', Comp: Purchases, primary: true },
+  { key: 'suppliers', labelKey: 'suppliers', icon: '🚚', Comp: Suppliers, primary: false },
+  { key: 'dashboard', labelKey: 'dashboard', icon: '📊', Comp: Dashboard, primary: false },
   { key: 'settings', labelKey: 'settings', icon: '⚙️', Comp: Settings, primary: false },
 ];
 
 export default function Shell() {
   const { t, lang, setLang, displayCurrency, toggleCurrency, settings, logout, user } = useApp();
   const isDesktop = useIsDesktop();
-  const [active, setActive] = useState('dashboard');
+  const [active, setActive] = useState('catalogue');
   const [moreOpen, setMoreOpen] = useState(false);
 
-  const Active = useMemo(() => NAV.find((n) => n.key === active)?.Comp || Dashboard, [active]);
+  const Active = useMemo(() => NAV.find((n) => n.key === active)?.Comp || Catalogue, [active]);
   const primaryNav = NAV.filter((n) => n.primary);
   const overflowNav = NAV.filter((n) => !n.primary);
-
   const go = (key) => { setActive(key); setMoreOpen(false); };
 
   const Header = (
-    <header style={{
-      position: 'sticky', top: 0, zIndex: 50, background: C.primary, color: '#fff',
-      padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      boxShadow: SHADOW, paddingTop: 'max(12px, env(safe-area-inset-top))',
-    }}>
+    <header style={{ position: 'sticky', top: 0, zIndex: 50, background: C.primary, color: '#fff', padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: SHADOW, paddingTop: 'max(12px, env(safe-area-inset-top))' }}>
       <div>
         <div style={{ fontSize: 16, fontWeight: 800, lineHeight: 1.1 }}>{settings.companyName || t('appName')}</div>
         <div style={{ fontSize: 11, opacity: 0.8 }}>{t('appSub')}</div>
@@ -64,10 +59,7 @@ export default function Shell() {
   if (isDesktop) {
     return (
       <div style={{ display: 'flex', minHeight: '100vh', background: C.surfaceAlt }}>
-        <aside style={{
-          width: 240, background: '#fff', borderInlineEnd: `1px solid ${C.border}`,
-          display: 'flex', flexDirection: 'column', padding: 16,
-        }}>
+        <aside style={{ width: 240, background: '#fff', borderInlineEnd: `1px solid ${C.border}`, display: 'flex', flexDirection: 'column', padding: 16 }}>
           <div style={{ fontWeight: 800, fontSize: 18, color: C.primary, marginBottom: 4 }}>{settings.companyName || t('appName')}</div>
           <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 20 }}>{t('appSub')}</div>
           {NAV.map((n) => (
@@ -82,53 +74,35 @@ export default function Shell() {
         </aside>
         <main style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
           {Header}
-          <div style={{ padding: 24, maxWidth: 1100, width: '100%', margin: '0 auto' }}>
-            <Active />
-          </div>
+          <div style={{ padding: 24, maxWidth: 1100, width: '100%', margin: '0 auto' }}><Active /></div>
         </main>
       </div>
     );
   }
 
-  // ── Mobile ──
   return (
     <div style={{ minHeight: '100vh', background: C.surfaceAlt, maxWidth: 480, margin: '0 auto', position: 'relative' }}>
       {Header}
-      <div style={{ padding: '16px 14px 96px' }}>
-        <Active />
-      </div>
+      <div style={{ padding: '16px 14px 96px' }}><Active /></div>
 
       {moreOpen && (
         <div onClick={() => setMoreOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 60 }}>
-          <div onClick={(e) => e.stopPropagation()} style={{
-            position: 'fixed', bottom: 64, insetInline: 0, background: '#fff',
-            borderRadius: '16px 16px 0 0', padding: 12, maxWidth: 480, margin: '0 auto',
-          }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ position: 'fixed', bottom: 64, insetInline: 0, background: '#fff', borderRadius: '16px 16px 0 0', padding: 12, maxWidth: 480, margin: '0 auto' }}>
             {overflowNav.map((n) => (
-              <button key={n.key} onClick={() => go(n.key)} style={moreItem}>
-                <span style={{ fontSize: 18 }}>{n.icon}</span> {t(n.labelKey)}
-              </button>
+              <button key={n.key} onClick={() => go(n.key)} style={moreItem}><span style={{ fontSize: 18 }}>{n.icon}</span> {t(n.labelKey)}</button>
             ))}
             <button onClick={logout} style={{ ...moreItem, color: C.danger }}>↩ {t('logout')}</button>
           </div>
         </div>
       )}
 
-      <nav style={{
-        position: 'fixed', bottom: 0, insetInline: 0, maxWidth: 480, margin: '0 auto',
-        background: '#fff', borderTop: `1px solid ${C.border}`, display: 'flex',
-        justifyContent: 'space-around', zIndex: 70, paddingBottom: 'env(safe-area-inset-bottom)',
-      }}>
+      <nav style={{ position: 'fixed', bottom: 0, insetInline: 0, maxWidth: 480, margin: '0 auto', background: '#fff', borderTop: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-around', zIndex: 70, paddingBottom: 'env(safe-area-inset-bottom)' }}>
         {primaryNav.map((n) => (
           <button key={n.key} onClick={() => go(n.key)} style={tabItem(active === n.key)}>
-            <span style={{ fontSize: 19 }}>{n.icon}</span>
-            <span>{t(n.labelKey)}</span>
+            <span style={{ fontSize: 19 }}>{n.icon}</span><span>{t(n.labelKey)}</span>
           </button>
         ))}
-        <button onClick={() => setMoreOpen((v) => !v)} style={tabItem(moreOpen)}>
-          <span style={{ fontSize: 19 }}>☰</span>
-          <span>{t('more')}</span>
-        </button>
+        <button onClick={() => setMoreOpen((v) => !v)} style={tabItem(moreOpen)}><span style={{ fontSize: 19 }}>☰</span><span>{t('more')}</span></button>
       </nav>
     </div>
   );

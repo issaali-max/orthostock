@@ -3,6 +3,7 @@ import { useApp } from '../../app/AppProvider.jsx';
 import { C, RADIUS, SHADOW, TABLES } from '../../lib/constants.js';
 import { fmtCur, num } from '../../lib/money.js';
 import { Badge, Btn, EmptyState, Modal, PageHeader, SearchBar } from '../../ui/components.jsx';
+import InvoiceCreate from '../sales/InvoiceCreate.jsx';
 import {
   CategoryForm, ProductForm, VariantForm,
   blankCategory, blankProduct, blankVariant,
@@ -23,6 +24,7 @@ export default function Catalogue() {
   const [catId, setCatId] = useState(null);
   const [q, setQ] = useState('');
   const [cartOpen, setCartOpen] = useState(false);
+  const [invoiceOpen, setInvoiceOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [edit, setEdit] = useState(null); // { table, type, rec }
 
@@ -81,7 +83,8 @@ export default function Catalogue() {
           </div>
         )}
         {!editMode && <CartBar count={cartCount} total={cartTotal} {...{ displayCurrency, usdRate, t }} onOpen={() => setCartOpen(true)} />}
-        <CartSheet open={cartOpen} onClose={() => setCartOpen(false)} {...{ cart, variantById, setCartQty, removeCartItem, clearCart, displayCurrency, usdRate, t, cartTotal }} />
+        <CartSheet open={cartOpen} onClose={() => setCartOpen(false)} {...{ cart, variantById, setCartQty, removeCartItem, clearCart, displayCurrency, usdRate, t, cartTotal, onCheckout: () => { setCartOpen(false); setInvoiceOpen(true); } }} />
+      <InvoiceCreate open={invoiceOpen} onClose={() => setInvoiceOpen(false)} />
         <EditModal edit={edit} setEdit={setEdit} app={app} t={t} products={products} categories={categories} onSave={saveEdit} onDelete={deleteEdit} />
       </div>
     );
@@ -154,7 +157,8 @@ export default function Catalogue() {
       )}
 
       {!editMode && <CartBar count={cartCount} total={cartTotal} {...{ displayCurrency, usdRate, t }} onOpen={() => setCartOpen(true)} />}
-      <CartSheet open={cartOpen} onClose={() => setCartOpen(false)} {...{ cart, variantById, setCartQty, removeCartItem, clearCart, displayCurrency, usdRate, t, cartTotal }} />
+      <CartSheet open={cartOpen} onClose={() => setCartOpen(false)} {...{ cart, variantById, setCartQty, removeCartItem, clearCart, displayCurrency, usdRate, t, cartTotal, onCheckout: () => { setCartOpen(false); setInvoiceOpen(true); } }} />
+      <InvoiceCreate open={invoiceOpen} onClose={() => setInvoiceOpen(false)} />
       <EditModal edit={edit} setEdit={setEdit} app={app} t={t} products={products} categories={categories} onSave={saveEdit} onDelete={deleteEdit} />
     </div>
   );
@@ -192,11 +196,11 @@ function CartBar({ count, total, displayCurrency, usdRate, t, onOpen }) {
   );
 }
 
-function CartSheet({ open, onClose, cart, variantById, setCartQty, removeCartItem, clearCart, displayCurrency, usdRate, t, cartTotal }) {
+function CartSheet({ open, onClose, cart, variantById, setCartQty, removeCartItem, clearCart, displayCurrency, usdRate, t, cartTotal, onCheckout }) {
   const ids = Object.keys(cart);
   return (
     <Modal open={open} onClose={onClose} title={`🛒 ${t('cart')}`}
-      footer={<><Btn variant="ghost" onClick={clearCart}>{t('clear')}</Btn><Btn onClick={onClose}>{t('close')}</Btn></>}>
+      footer={<><Btn variant="ghost" onClick={clearCart}>{t('clear')}</Btn><Btn onClick={onCheckout} disabled={Object.keys(cart).length === 0}>{t('createInvoice')}</Btn></>}>
       {ids.length === 0 ? <EmptyState icon="🛒" text="—" /> : (
         <div>
           <div style={{ display: 'grid', gap: 8 }}>
