@@ -9,26 +9,65 @@ import { TABLES } from './constants.js';
 import { num, round2, safeDiv } from './money.js';
 
 // Commit a SALE: invoice + items + stock-out movements.
-export async function commitInvoice(app, invoiceData, lines) {
-  const variants = app.data[TABLES.variants] || [];
+// opts.invoiceDiscount = amount discounted off the items subtotal
+// (distributed proportionally across lines so lineProfit stays honest).
+// Per-line discount is implicit: pass a unitPrice below the variant's
+// default selling price and the discount is recorded for display.
+export async function commitInvoice(app, invoiceData, lines, opts = {}) {
+  const variants = await db.getAll(TABLES.variants); // freshest stock (correct after a reversal too)
   const vById = (id) => variants.find((x) => x.id === id);
+
+  const gross = lines.reduce((s, l) => s + num(l.unitPrice) * num(l.qty), 0);
+  const invDisc = Math.max(0, num(opts.invoiceDiscount));
+  const factor = gross > 0 ? Math.max(0, (gross - invDisc) / gross) : 1;
+
   const inv = await db.insert(TABLES.invoices, invoiceData);
   for (const l of lines) {
     const v = vById(l.variantId);
     const avgCost = num(v?.purchasePriceAvg);
+    const listPrice = num(v?.sellingPriceDefault);
+    const rawUnit = num(l.unitPrice);
+    const qty = num(l.qty);
+    const effUnit = round2(rawUnit * factor);
+    const lineDisc = Math.max(0, round2((listPrice - rawUnit) * qty));
     await db.insert(TABLES.invoiceItems, {
-      invoiceId: inv.id, variantId: l.variantId, qty: num(l.qty),
-      listPrice: num(v?.sellingPriceDefault), unitPrice: num(l.unitPrice), discountAmount: 0, discountPct: 0,
-      avgCostAtSale: avgCost, lineProfit: round2((num(l.unitPrice) - avgCost) * num(l.qty)), total: round2(num(l.unitPrice) * num(l.qty)),
+      invoiceId: inv.id, variantId: l.variantId, qty,
+      listPrice, unitPrice: effUnit,
+      discountAmount: lineDisc, discountPct: listPrice > 0 ? round2((1 - rawUnit / listPrice) * 100) : 0,
+      avgCostAtSale: avgCost, lineProfit: round2((effUnit - avgCost) * qty), total: round2(effUnit * qty),
     });
     if (v) {
-      const after = round2(num(v.stockQty) - num(l.qty));
+      const after = round2(num(v.stockQty) - qty);
       await db.update(TABLES.variants, v.id, { stockQty: after });
-      await db.insert(TABLES.stockMovements, { variantId: v.id, type: 'sale', qtyChange: -num(l.qty), qtyAfter: after, refType: 'invoice', refId: inv.id });
+      await db.insert(TABLES.stockMovements, { variantId: v.id, type: 'sale', qtyChange: -qty, qtyAfter: after, refType: 'invoice', refId: inv.id });
     }
   }
   await Promise.all([app.refresh(TABLES.invoices), app.refresh(TABLES.invoiceItems), app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements)]);
   return inv;
+}
+
+// Reverse a sale: restore stock, delete its items + movements + the invoice.
+// Used before re-committing an edited invoice. Reads from db so it is
+// always accurate regardless of cached app.data.
+export async function reverseInvoice(app, invoiceId) {
+  const [allItems, allMoves, allVars] = await Promise.all([
+    db.getAll(TABLES.invoiceItems), db.getAll(TABLES.stockMovements), db.getAll(TABLES.variants),
+  ]);
+  const vById = new Map(allVars.map((v) => [v.id, v]));
+  for (const it of allItems.filter((x) => x.invoiceId === invoiceId)) {
+    const v = vById.get(it.variantId);
+    if (v) {
+      const after = round2(num(v.stockQty) + num(it.qty));
+      await db.update(TABLES.variants, v.id, { stockQty: after });
+      v.stockQty = after;
+    }
+    await db.remove(TABLES.invoiceItems, it.id);
+  }
+  for (const m of allMoves.filter((x) => x.refType === 'invoice' && x.refId === invoiceId)) {
+    await db.remove(TABLES.stockMovements, m.id);
+  }
+  await db.remove(TABLES.invoices, invoiceId);
+  await Promise.all([app.refresh(TABLES.invoices), app.refresh(TABLES.invoiceItems), app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements)]);
 }
 
 // Commit a PURCHASE: purchase + items + stock-in + moving-average cost.
