@@ -153,11 +153,17 @@ export function VariantForm({ rec, setRec, t, products, categories, onAddOption 
     const p = productOf(productId);
     return p ? categories.find((c) => c.id === p.categoryId) : null;
   };
+  const [catFilter, setCatFilter] = useState(() => categoryOfProduct(rec.productId)?.id || '');
+  const filteredProducts = catFilter ? products.filter((p) => p.categoryId === catFilter) : products;
   return (
     <div>
+      <Field label={t('categories')} required>
+        <Select value={catFilter} onChange={(v) => { setCatFilter(v); set('productId', ''); set('attributes', {}); }} placeholder="—"
+          options={categories.filter((c) => c.isActive !== false).map((c) => ({ value: c.id, label: `${c.icon} ${c.nameEn}` }))} />
+      </Field>
       <Field label={t('products')} required>
-        <Select value={rec.productId} onChange={(v) => set('productId', v)} placeholder={t('pickProductFirst')}
-          options={products.map((p) => ({ value: p.id, label: p.nameEn }))} />
+        <Select value={rec.productId} onChange={(v) => set('productId', v)} placeholder={catFilter ? '—' : t('pickProductFirst')}
+          options={filteredProducts.map((p) => ({ value: p.id, label: p.nameEn }))} />
       </Field>
       <Field label={t('sku')} required>
         <Input value={rec.sku} onChange={(v) => set('sku', v.toUpperCase())} placeholder="BRK-018-MET" />

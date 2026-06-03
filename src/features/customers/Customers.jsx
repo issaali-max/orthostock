@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useApp } from '../../app/AppProvider.jsx';
-import { C, WEEKDAYS, TABLES } from '../../lib/constants.js';
+import { C, WEEKDAYS, EMIRATES, CITIES, TABLES } from '../../lib/constants.js';
 import { fmtCur } from '../../lib/money.js';
 import { fmtDate } from '../../lib/dates.js';
 import { customerStats, clinicRating } from '../../lib/engine.js';
@@ -75,8 +75,8 @@ export default function Customers() {
               <Field label={t('specialty')}><Input value={editing.specialty} onChange={(v) => setEditing((r) => ({ ...r, specialty: v }))} /></Field>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <Field label={t('city')}><Input value={editing.city} onChange={(v) => setEditing((r) => ({ ...r, city: v }))} /></Field>
-              <Field label={t('emirate')}><Input value={editing.emirate} onChange={(v) => setEditing((r) => ({ ...r, emirate: v }))} /></Field>
+              <Field label={t('city')}><Select value={editing.city} onChange={(v) => setEditing((r) => ({ ...r, city: v }))} placeholder="—" options={CITIES} /></Field>
+              <Field label={t('emirate')}><Select value={editing.emirate} onChange={(v) => setEditing((r) => ({ ...r, emirate: v }))} placeholder="—" options={EMIRATES} /></Field>
             </div>
             <Field label={t('workingDays')}>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>

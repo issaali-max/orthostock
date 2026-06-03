@@ -3,11 +3,13 @@ import { useApp } from '../../app/AppProvider.jsx';
 import { C, TABLES } from '../../lib/constants.js';
 import { fmtCur } from '../../lib/money.js';
 import { fmtDate } from '../../lib/dates.js';
-import { Badge, Card, EmptyState, PageHeader, SearchBar } from '../../ui/components.jsx';
+import { Badge, Btn, Card, EmptyState, PageHeader, SearchBar } from '../../ui/components.jsx';
+import InvoiceCreate from './InvoiceCreate.jsx';
 
 export default function Invoices() {
   const { t, lang, data, displayCurrency, usdRate } = useApp();
   const [q, setQ] = useState('');
+  const [open, setOpen] = useState(false);
   const customers = data[TABLES.customers] || [];
   const custName = (id) => customers.find((c) => c.id === id)?.name || '—';
 
@@ -19,9 +21,8 @@ export default function Invoices() {
 
   return (
     <div>
-      <PageHeader title={t('invoices')} />
+      <PageHeader title={t('invoices')} action={<Btn onClick={() => setOpen(true)}>＋ {t('newInvoice')}</Btn>} />
       <SearchBar value={q} onChange={setQ} placeholder={t('search')} />
-      <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 10 }}>{t('cartHint')}</div>
       {list.length === 0 ? <EmptyState icon="🧾" text={t('noInvoices')} /> : (
         <div style={{ display: 'grid', gap: 10 }}>
           {list.map((inv) => (
@@ -38,6 +39,7 @@ export default function Invoices() {
           ))}
         </div>
       )}
+      <InvoiceCreate open={open} onClose={() => setOpen(false)} />
     </div>
   );
 }
