@@ -1,0 +1,205 @@
+// Shared inventory forms + save helpers. Used by the management screens
+// (Categories/Products/Variants) AND by the Catalogue, so editing is identical
+// from both places (single source of truth).
+//
+// NAMING RULE: product & variant (material) names are ENGLISH ONLY — no Arabic
+// name field, even in Arabic UI. Arabic is kept for CATEGORIES only and shown
+// beside the English name.
+import { useState } from 'react';
+import { C, CATEGORY_ICONS, CATEGORY_COLORS, TABLES, UNITS } from '../../lib/constants.js';
+import { AttributePicker, Btn, Field, Input, Select, Textarea } from '../../ui/components.jsx';
+import { ImageUpload } from '../../ui/ImageUpload.jsx';
+import { num } from '../../lib/money.js';
+
+// ── Blank factories ──
+export const blankCategory = () => ({ nameAr: '', nameEn: '', icon: '🦷', color: C.primary, attributes: [], isActive: true });
+export const blankProduct = (categoryId = '') => ({ nameEn: '', categoryId, icon: '📦', image_url: '', description: '', isActive: true });
+export const blankVariant = (productId = '') => ({
+  productId, sku: '', nameEn: '', attributes: {},
+  purchasePriceLatest: 0, purchasePriceAvg: 0, purchasePriceMin: 0, purchasePriceMax: 0,
+  sellingPriceDefault: 0, stockQty: 0, stockMin: 0, unit: 'piece', notes: '', isActive: true,
+});
+
+// ── Save helpers (app = useApp()) ──
+export async function saveCategory(app, rec) {
+  if (!rec.nameEn?.trim() && !rec.nameAr?.trim()) return false;
+  const payload = {
+    nameEn: rec.nameEn || rec.nameAr, nameAr: rec.nameAr || rec.nameEn,
+    icon: rec.icon, color: rec.color, attributes: rec.attributes || [], isActive: true,
+  };
+  if (rec.id) await app.updateRow(TABLES.categories, rec.id, payload);
+  else await app.createRow(TABLES.categories, payload);
+  return true;
+}
+export async function saveProduct(app, rec) {
+  if (!rec.nameEn?.trim()) return false; // English name required, no Arabic field
+  const payload = {
+    nameEn: rec.nameEn.trim(), categoryId: rec.categoryId || null,
+    icon: rec.icon || '📦', image_url: rec.image_url || '', description: rec.description || '', isActive: true,
+  };
+  if (rec.id) await app.updateRow(TABLES.products, rec.id, payload);
+  else await app.createRow(TABLES.products, payload);
+  return true;
+}
+export async function saveVariant(app, rec) {
+  if (!rec.sku?.trim()) return false;
+  const payload = {
+    productId: rec.productId || null, sku: rec.sku.trim(), nameEn: rec.nameEn || '',
+    attributes: rec.attributes || {}, image_url: rec.image_url || '',
+    sellingPriceDefault: num(rec.sellingPriceDefault), stockMin: num(rec.stockMin),
+    unit: rec.unit || 'piece', notes: rec.notes || '', isActive: true,
+    purchasePriceLatest: num(rec.purchasePriceLatest), purchasePriceAvg: num(rec.purchasePriceAvg),
+    purchasePriceMin: num(rec.purchasePriceMin), purchasePriceMax: num(rec.purchasePriceMax),
+    stockQty: num(rec.stockQty),
+  };
+  if (rec.id) await app.updateRow(TABLES.variants, rec.id, payload);
+  else await app.createRow(TABLES.variants, payload);
+  return true;
+}
+
+// Add a new attribute option to a category on the fly.
+export async function addOptionToCategory(app, categories, productId, attrKey, option) {
+  const products = app.data[TABLES.products] || [];
+  const p = products.find((x) => x.id === productId);
+  const cat = p ? categories.find((c) => c.id === p.categoryId) : null;
+  if (!cat) return;
+  const attrs = (cat.attributes || []).map((a) =>
+    a.key === attrKey && !(a.options || []).includes(option) ? { ...a, options: [...(a.options || []), option] } : a);
+  await app.updateRow(TABLES.categories, cat.id, { attributes: attrs });
+}
+
+// ───────────────────────── Forms ─────────────────────────
+export function CategoryForm({ rec, setRec, t }) {
+  const set = (k, v) => setRec((r) => ({ ...r, [k]: v }));
+  const addAttr = () => set('attributes', [...(rec.attributes || []), { key: '', labelAr: '', labelEn: '', options: [] }]);
+  const setAttr = (i, patch) => set('attributes', rec.attributes.map((a, idx) => (idx === i ? { ...a, ...patch } : a)));
+  const delAttr = (i) => set('attributes', rec.attributes.filter((_, idx) => idx !== i));
+
+  return (
+    <div>
+      <Field label={`${t('nameEn')} / ${t('nameAr')}`} required>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <Input value={rec.nameEn} onChange={(v) => set('nameEn', v)} placeholder="English" style={{ flex: 1 }} />
+          <Input value={rec.nameAr} onChange={(v) => set('nameAr', v)} placeholder="العربية" style={{ flex: 1 }} />
+        </div>
+      </Field>
+      <Field label={t('icon')}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {CATEGORY_ICONS.map((ic) => (
+            <button key={ic} onClick={() => set('icon', ic)} style={{ fontSize: 20, width: 38, height: 38, borderRadius: 10, border: `2px solid ${rec.icon === ic ? C.primary : C.border}`, background: '#fff', cursor: 'pointer' }}>{ic}</button>
+          ))}
+        </div>
+      </Field>
+      <Field label={t('color')}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {CATEGORY_COLORS.map((col) => (
+            <button key={col} onClick={() => set('color', col)} style={{ width: 30, height: 30, borderRadius: 999, background: col, border: rec.color === col ? '3px solid #000' : '2px solid #fff', boxShadow: '0 0 0 1px ' + C.border, cursor: 'pointer' }} />
+          ))}
+        </div>
+      </Field>
+      <div style={{ borderTop: `1px solid ${C.border}`, marginTop: 8, paddingTop: 12 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <strong style={{ fontSize: 13, color: C.text }}>{t('attributes')}</strong>
+          <Btn size="sm" variant="light" onClick={addAttr}>＋ {t('addAttribute')}</Btn>
+        </div>
+        {(rec.attributes || []).map((a, i) => (
+          <div key={i} style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: 10, marginBottom: 8, background: C.surfaceAlt }}>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <Input value={a.key} onChange={(v) => setAttr(i, { key: v.replace(/\s+/g, '') })} placeholder={t('attributeKey')} style={{ flex: 1 }} />
+              <Btn size="sm" variant="outline" onClick={() => delAttr(i)} style={{ color: C.danger }}>×</Btn>
+            </div>
+            <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+              <Input value={a.labelAr} onChange={(v) => setAttr(i, { labelAr: v })} placeholder={`${t('attributeLabel')} (ع)`} style={{ flex: 1 }} />
+              <Input value={a.labelEn} onChange={(v) => setAttr(i, { labelEn: v })} placeholder={`${t('attributeLabel')} (EN)`} style={{ flex: 1 }} />
+            </div>
+            <OptionEditor options={a.options || []} onChange={(opts) => setAttr(i, { options: opts })} t={t} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function ProductForm({ rec, setRec, t, cats }) {
+  const set = (k, v) => setRec((r) => ({ ...r, [k]: v }));
+  return (
+    <div>
+      <Field label={t('productImage')}>
+        <ImageUpload value={rec.image_url} onChange={(v) => set('image_url', v)} fallback={rec.icon || '📦'} />
+      </Field>
+      <Field label={t('nameEn')} required hint="English only">
+        <Input value={rec.nameEn} onChange={(v) => set('nameEn', v)} />
+      </Field>
+      <Field label={t('category')}>
+        <Select value={rec.categoryId} onChange={(v) => set('categoryId', v)} placeholder="—"
+          options={cats.map((c) => ({ value: c.id, label: `${c.icon} ${c.nameEn}` }))} />
+      </Field>
+      <Field label={t('icon')}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {CATEGORY_ICONS.map((ic) => (
+            <button key={ic} onClick={() => set('icon', ic)} style={{ fontSize: 20, width: 38, height: 38, borderRadius: 10, border: `2px solid ${rec.icon === ic ? C.primary : C.border}`, background: '#fff', cursor: 'pointer' }}>{ic}</button>
+          ))}
+        </div>
+      </Field>
+      <Field label={t('description')}><Textarea value={rec.description} onChange={(v) => set('description', v)} /></Field>
+    </div>
+  );
+}
+
+export function VariantForm({ rec, setRec, t, products, categories, onAddOption }) {
+  const set = (k, v) => setRec((r) => ({ ...r, [k]: v }));
+  const productOf = (id) => products.find((p) => p.id === id);
+  const categoryOfProduct = (productId) => {
+    const p = productOf(productId);
+    return p ? categories.find((c) => c.id === p.categoryId) : null;
+  };
+  return (
+    <div>
+      <Field label={t('products')} required>
+        <Select value={rec.productId} onChange={(v) => set('productId', v)} placeholder={t('pickProductFirst')}
+          options={products.map((p) => ({ value: p.id, label: p.nameEn }))} />
+      </Field>
+      <Field label={t('sku')} required>
+        <Input value={rec.sku} onChange={(v) => set('sku', v.toUpperCase())} placeholder="BRK-018-MET" />
+      </Field>
+      <Field label={t('nameEn')} hint="English only"><Input value={rec.nameEn} onChange={(v) => set('nameEn', v)} /></Field>
+      {rec.productId && (
+        <AttributePicker
+          attributes={(categoryOfProduct(rec.productId)?.attributes) || []}
+          values={rec.attributes}
+          onChange={(vals) => set('attributes', vals)}
+          onAddOption={(key, opt) => onAddOption?.(rec.productId, key, opt)}
+          lang="en" t={t}
+        />
+      )}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <Field label={t('sellingPrice')}><Input type="number" value={rec.sellingPriceDefault} onChange={(v) => set('sellingPriceDefault', v)} /></Field>
+        <Field label={t('stockMin')}><Input type="number" value={rec.stockMin} onChange={(v) => set('stockMin', v)} /></Field>
+      </div>
+      <Field label={t('unit')}><Select value={rec.unit} onChange={(v) => set('unit', v)} options={UNITS} /></Field>
+      <Field label={t('notes')}><Textarea value={rec.notes} onChange={(v) => set('notes', v)} rows={2} /></Field>
+    </div>
+  );
+}
+
+function OptionEditor({ options, onChange, t }) {
+  const [val, setVal] = useState('');
+  const add = () => { if (val.trim()) { onChange([...options, val.trim()]); setVal(''); } };
+  return (
+    <div style={{ marginTop: 6 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6 }}>
+        {options.map((o, i) => (
+          <span key={i} style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: 999, padding: '3px 8px', fontSize: 12, display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+            {o}
+            <button onClick={() => onChange(options.filter((_, idx) => idx !== i))} style={{ border: 'none', background: 'none', cursor: 'pointer', color: C.textMuted }}>×</button>
+          </span>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <Input value={val} onChange={setVal} placeholder={t('options')} style={{ flex: 1 }}
+          onKeyDown={(e) => { if (e.key === 'Enter') add(); }} />
+        <Btn size="sm" variant="light" onClick={add}>＋</Btn>
+      </div>
+    </div>
+  );
+}
