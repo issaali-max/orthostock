@@ -267,3 +267,78 @@ export function topClinics(data, n = 5) {
     .sort((a, b) => b.revenue - a.revenue)
     .slice(0, n);
 }
+
+// ─────────────────────────────────────────────────────────────
+// Investments (stock portfolio). Lot-based FIFO:
+//   • buy  → a tradeLot (qtyRemaining, costBasis = qty*price + fees)
+//   • sell → consumes oldest lots first, records realizedPnL
+//   • currentPrice entered manually drives unrealized P/L
+// Cash flows (deposit/withdraw/dividend/fee/interest) track capital.
+// ─────────────────────────────────────────────────────────────
+export async function commitBuy(app, { securityId, buyDate, qty, pricePerShare, fees }) {
+  const q = num(qty), price = num(pricePerShare), f = num(fees);
+  await db.insert(TABLES.tradeLots, {
+    securityId, buyDate, qtyBought: q, qtyRemaining: q,
+    buyPricePerShare: price, buyFees: f, costBasis: round2(q * price + f), currency: 'AED', notes: '',
+  });
+  await app.refresh(TABLES.tradeLots);
+}
+
+export async function commitSell(app, { securityId, sellDate, qty, pricePerShare, fees }) {
+  const lots = (await db.getAll(TABLES.tradeLots))
+    .filter((l) => l.securityId === securityId && num(l.qtyRemaining) > 0)
+    .sort((a, b) => (a.buyDate || '').localeCompare(b.buyDate || '')); // FIFO
+  let remaining = num(qty), costMatched = 0;
+  for (const lot of lots) {
+    if (remaining <= 0) break;
+    const take = Math.min(remaining, num(lot.qtyRemaining));
+    costMatched += take * safeDiv(num(lot.costBasis), num(lot.qtyBought), num(lot.buyPricePerShare));
+    await db.update(TABLES.tradeLots, lot.id, { qtyRemaining: round2(num(lot.qtyRemaining) - take) });
+    remaining -= take;
+  }
+  const soldQty = round2(num(qty) - Math.max(0, remaining));
+  const price = num(pricePerShare), f = num(fees);
+  const proceeds = round2(soldQty * price - f);
+  await db.insert(TABLES.tradeSells, {
+    securityId, sellDate, qty: soldQty, sellPricePerShare: price, sellFees: f,
+    proceeds, costBasisMatched: round2(costMatched), realizedPnL: round2(proceeds - costMatched), currency: 'AED', notes: '',
+  });
+  await Promise.all([app.refresh(TABLES.tradeLots), app.refresh(TABLES.tradeSells)]);
+}
+
+export function portfolioStats(data) {
+  const securities = (data[TABLES.securities] || []).filter((s) => s.isActive !== false);
+  const lots = data[TABLES.tradeLots] || [];
+  const sells = data[TABLES.tradeSells] || [];
+  const flows = data[TABLES.cashFlows] || [];
+
+  const positions = securities.map((s) => {
+    const myLots = lots.filter((l) => l.securityId === s.id);
+    const qty = myLots.reduce((a, l) => a + num(l.qtyRemaining), 0);
+    const remainingCost = myLots.reduce((a, l) => a + safeDiv(num(l.costBasis), num(l.qtyBought), num(l.buyPricePerShare)) * num(l.qtyRemaining), 0);
+    const price = num(s.currentPrice);
+    const marketValue = round2(qty * price);
+    const realized = sells.filter((x) => x.securityId === s.id).reduce((a, x) => a + num(x.realizedPnL), 0);
+    return {
+      ...s, qty: round2(qty), avgCost: round2(safeDiv(remainingCost, qty)), price,
+      marketValue, unrealized: round2(marketValue - remainingCost), realized: round2(realized), remainingCost: round2(remainingCost),
+    };
+  });
+
+  const sum = (arr, t) => arr.filter((f) => f.type === t).reduce((a, f) => a + num(f.amount), 0);
+  const holdingsValue = round2(positions.reduce((a, p) => a + p.marketValue, 0));
+  const totalUnrealized = round2(positions.reduce((a, p) => a + p.unrealized, 0));
+  const totalRealized = round2(sells.reduce((a, x) => a + num(x.realizedPnL), 0));
+  const deposits = sum(flows, 'deposit'), withdrawals = sum(flows, 'withdraw');
+  const dividends = sum(flows, 'dividend'), fees = sum(flows, 'fee'), interest = sum(flows, 'interest');
+  const buysCost = lots.reduce((a, l) => a + num(l.costBasis), 0);
+  const sellsProceeds = sells.reduce((a, x) => a + num(x.proceeds), 0);
+  const netCapital = round2(deposits - withdrawals);
+  const cash = round2(netCapital - buysCost + sellsProceeds + dividends + interest - fees);
+  return {
+    positions, holdingsValue, totalUnrealized, totalRealized,
+    netCapital, cash, dividends: round2(dividends),
+    accountValue: round2(cash + holdingsValue),
+    totalPnL: round2(totalRealized + totalUnrealized + dividends),
+  };
+}
