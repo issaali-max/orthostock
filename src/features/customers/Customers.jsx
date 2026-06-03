@@ -14,15 +14,38 @@ export default function Customers() {
   const [q, setQ] = useState('');
   const [editing, setEditing] = useState(null);
   const [viewing, setViewing] = useState(null);
+  const [sortBy, setSortBy] = useState('name');     // name | revenue | profit | margin | debt
+  const [cityFilter, setCityFilter] = useState('');
+  const [typeFilter, setTypeFilter] = useState('');  // '' | doctor | center
 
   const invoices = data[TABLES.invoices] || [];
   const items = data[TABLES.invoiceItems] || [];
 
   const list = useMemo(() => {
-    const rows = (data[TABLES.customers] || []).filter((r) => r.isActive !== false);
+    let rows = (data[TABLES.customers] || []).filter((r) => r.isActive !== false);
     const s = q.trim().toLowerCase();
-    return s ? rows.filter((r) => `${r.name} ${r.phone} ${r.city}`.toLowerCase().includes(s)) : rows;
-  }, [data, q]);
+    if (s) rows = rows.filter((r) => `${r.name} ${r.phone} ${r.city}`.toLowerCase().includes(s));
+    if (cityFilter) rows = rows.filter((r) => r.city === cityFilter);
+    if (typeFilter) rows = rows.filter((r) => r.type === typeFilter);
+    const withStats = rows.map((c) => {
+      const st = customerStats(invoices, items, c.id);
+      const margin = st.revenue > 0 ? (st.profit / st.revenue) * 100 : 0;
+      return { ...c, _st: st, _margin: margin };
+    });
+    const cmp = {
+      name: (a, b) => (a.name || '').localeCompare(b.name || ''),
+      revenue: (a, b) => b._st.revenue - a._st.revenue,
+      profit: (a, b) => b._st.profit - a._st.profit,
+      margin: (a, b) => b._margin - a._margin,
+      debt: (a, b) => b._st.debt - a._st.debt,
+    }[sortBy] || (() => 0);
+    return withStats.sort(cmp);
+  }, [data, q, cityFilter, typeFilter, sortBy, invoices, items]);
+
+  const cityOptions = useMemo(() => {
+    const set = new Set((data[TABLES.customers] || []).filter((r) => r.isActive !== false && r.city).map((r) => r.city));
+    return [...set].sort();
+  }, [data]);
 
   const save = async () => {
     const r = editing;
@@ -42,10 +65,28 @@ export default function Customers() {
     <div>
       <PageHeader title={t('customers')} action={<Btn onClick={() => setEditing(blank())}>＋ {t('add')}</Btn>} />
       <SearchBar value={q} onChange={setQ} placeholder={t('search')} />
+
+      {/* Sort + filters */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '8px 0' }}>
+        {[['name', t('byName')], ['revenue', t('byRevenue')], ['profit', t('byProfit')], ['margin', t('byMargin')], ['debt', t('byDebt')]].map(([k, label]) => (
+          <button key={k} onClick={() => setSortBy(k)} style={{
+            padding: '5px 11px', borderRadius: 999, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+            background: sortBy === k ? C.primary : '#fff', color: sortBy === k ? '#fff' : C.textMid,
+            border: `1px solid ${sortBy === k ? C.primary : C.border}`,
+          }}>{label}</button>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+        <Select value={cityFilter} onChange={setCityFilter} placeholder={t('allCities')}
+          options={[{ value: '', label: t('allCities') }, ...cityOptions.map((c) => ({ value: c, label: c }))]} />
+        <Select value={typeFilter} onChange={setTypeFilter} placeholder={t('allTypes')}
+          options={[{ value: '', label: t('allTypes') }, { value: 'doctor', label: t('doctor') }, { value: 'center', label: t('center') }]} />
+      </div>
+
       {list.length === 0 ? <EmptyState icon="🧑‍⚕️" text={q ? t('searchEmpty') : t('noData')} /> : (
         <div style={{ display: 'grid', gap: 10 }}>
           {list.map((c) => {
-            const st = customerStats(invoices, items, c.id);
+            const st = c._st;
             return (
               <Card key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }} onClick={() => setViewing(c)}>
                 <div style={{ width: 44, height: 44, borderRadius: 999, background: C.primary + '18', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>{c.type === 'center' ? '🏥' : '🧑‍⚕️'}</div>
@@ -53,7 +94,11 @@ export default function Customers() {
                   <div style={{ fontWeight: 700, color: C.text }}>{c.name}</div>
                   <div style={{ fontSize: 11, color: C.textMuted }}>{[c.specialty, c.city].filter(Boolean).join(' · ') || '—'}</div>
                 </div>
-                {st.debt > 0 && <Badge tone="danger">{fmtCur(st.debt, displayCurrency, usdRate)}</Badge>}
+                <div style={{ textAlign: 'end', flexShrink: 0 }}>
+                  {st.revenue > 0 && <div style={{ fontSize: 12, fontWeight: 800, color: C.primary }}>{fmtCur(st.revenue, displayCurrency, usdRate)}</div>}
+                  {st.revenue > 0 && <div style={{ fontSize: 10, color: C.success }}>{t('profitMargin')}: {Math.round(c._margin)}%</div>}
+                  {st.debt > 0 && <div style={{ marginTop: 2 }}><Badge tone="danger">{fmtCur(st.debt, displayCurrency, usdRate)}</Badge></div>}
+                </div>
                 <span style={{ color: C.textMuted }}>›</span>
               </Card>
             );

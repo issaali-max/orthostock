@@ -62,6 +62,9 @@ export const DICT = {
     cogs: 'تكلفة البضاعة المباعة', thisMonth: 'هذا الشهر', thisYear: 'هذه السنة', allTime: 'الكل',
     revenueLabel: 'الإيرادات', trend: 'الاتجاه الشهري', noExpenses: 'لا توجد مصاريف بعد',
     confirmDelete: 'تأكيد الحذف؟', icon: 'الأيقونة', color: 'اللون', total: 'الإجمالي',
+    sortBy: 'ترتيب', byName: 'الاسم', byRevenue: 'الأعلى مبيعاً', byProfit: 'الأعلى ربحاً',
+    byMargin: 'الأعلى هامشاً', byDebt: 'الأعلى ديناً', allCities: 'كل المدن', allTypes: 'كل الأنواع',
+    profitMargin: 'هامش الربح', filterCity: 'المدينة',
   },
   en: {
     appName: 'OrthoStock',
@@ -116,6 +119,9 @@ export const DICT = {
     cogs: 'Cost of goods sold', thisMonth: 'This month', thisYear: 'This year', allTime: 'All time',
     revenueLabel: 'Revenue', trend: 'Monthly trend', noExpenses: 'No expenses yet',
     confirmDelete: 'Delete?', icon: 'Icon', color: 'Color', total: 'Total',
+    sortBy: 'Sort', byName: 'Name', byRevenue: 'Top sales', byProfit: 'Top profit',
+    byMargin: 'Top margin', byDebt: 'Top debt', allCities: 'All cities', allTypes: 'All types',
+    profitMargin: 'Profit margin', filterCity: 'City',
   },
 };
 
