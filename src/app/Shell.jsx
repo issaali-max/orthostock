@@ -4,6 +4,7 @@ import { C, SHADOW } from '../lib/constants.js';
 import { CurrencyToggle } from '../ui/components.jsx';
 
 import Dashboard from '../features/dashboard.jsx';
+import Catalogue from '../features/catalogue/Catalogue.jsx';
 import Categories from '../features/categories/Categories.jsx';
 import Products from '../features/products/Products.jsx';
 import Variants from '../features/variants/Variants.jsx';
@@ -23,10 +24,11 @@ function useIsDesktop() {
 // Nav registry — later phases plug their screens in here.
 const NAV = [
   { key: 'dashboard', labelKey: 'dashboard', icon: '📊', Comp: Dashboard, primary: true },
+  { key: 'catalogue', labelKey: 'catalogue', icon: '🗂️', Comp: Catalogue, primary: true },
   { key: 'products', labelKey: 'products', icon: '📦', Comp: Products, primary: true },
-  { key: 'variants', labelKey: 'variants', icon: '🏷️', Comp: Variants, primary: true },
   { key: 'suppliers', labelKey: 'suppliers', icon: '🚚', Comp: Suppliers, primary: true },
-  { key: 'categories', labelKey: 'categories', icon: '🗂️', Comp: Categories, primary: false },
+  { key: 'variants', labelKey: 'variants', icon: '🏷️', Comp: Variants, primary: false },
+  { key: 'categories', labelKey: 'categories', icon: '🗃️', Comp: Categories, primary: false },
   { key: 'settings', labelKey: 'settings', icon: '⚙️', Comp: Settings, primary: false },
 ];
 

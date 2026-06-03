@@ -44,6 +44,8 @@ create table if not exists products (
   "nameAr" text not null,
   "nameEn" text not null,
   "categoryId" uuid references categories(id),
+  icon text default '',
+  image_url text default '',
   description text default '',
   "isActive" boolean not null default true
 );
@@ -54,6 +56,7 @@ create table if not exists variants (
   "productId" uuid references products(id),
   sku text unique not null,
   "nameEn" text default '',
+  image_url text default '',
   attributes jsonb not null default '{}',
   "purchasePriceLatest" numeric not null default 0,
   "purchasePriceAvg" numeric not null default 0,
@@ -96,6 +99,7 @@ create table if not exists customers (
   "totalPurchased" numeric not null default 0,
   "debtAmount" numeric not null default 0,
   "lastVisit" date,
+  "workingDays" jsonb not null default '[]',
   "isActive" boolean not null default true
 );
 
@@ -250,8 +254,15 @@ create table if not exists "tradeSells" (
 );
 
 -- ── Row Level Security ──
--- Enable RLS on every table and add policies that fit your auth model.
--- Simplest single-admin starting point (authenticated users have full access):
---   alter table <t> enable row level security;
---   create policy "auth full access" on <t> for all to authenticated using (true) with check (true);
--- Tighten per-role (admin vs employee) when you add staff.
+-- Private single-admin internal tool that uses a custom login (the anon key
+-- is the access boundary). Grant the anon role full access on every table.
+-- WHEN you add staff, move to Supabase Auth and tighten per-role.
+do $$
+declare t text;
+begin
+  for t in select tablename from pg_tables where schemaname = 'public' loop
+    execute format('alter table %I enable row level security', t);
+    execute format('drop policy if exists app_all on %I', t);
+    execute format('create policy app_all on %I for all to anon, authenticated using (true) with check (true)', t);
+  end loop;
+end $$;

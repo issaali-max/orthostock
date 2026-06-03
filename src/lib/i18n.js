@@ -37,6 +37,8 @@ export const DICT = {
     duplicateSku: 'رمز الصنف مستخدم مسبقاً', duplicatePhone: 'رقم الهاتف مستخدم مسبقاً',
     pickProductFirst: 'اختر المنتج أولاً', noAttributes: 'لا توجد خصائص لهذه الفئة',
     items: 'عناصر', searchEmpty: 'لا توجد نتائج',
+    catalogue: 'الكتالوج', from: 'من', variations: 'المقاسات', selected: 'محدد', clear: 'مسح',
+    noProducts: 'لا توجد منتجات في هذه الفئة', productImage: 'صورة المنتج',
   },
   en: {
     appName: 'OrthoStock',
@@ -66,6 +68,8 @@ export const DICT = {
     duplicateSku: 'This SKU is already in use', duplicatePhone: 'This phone is already in use',
     pickProductFirst: 'Select a product first', noAttributes: 'This category has no attributes',
     items: 'items', searchEmpty: 'No results',
+    catalogue: 'Catalogue', from: 'from', variations: 'Variations', selected: 'selected', clear: 'Clear',
+    noProducts: 'No products in this category', productImage: 'Product image',
   },
 };
 

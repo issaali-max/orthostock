@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import * as db from '../db/db.js';
+import { startSync } from '../db/sync.js';
 import { TABLES } from '../lib/constants.js';
 import { makeT } from '../lib/i18n.js';
 
@@ -67,6 +68,9 @@ export function AppProvider({ children }) {
   }, [showToast]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
+
+  // Start offline<->cloud sync once; re-pull refreshes the UI caches.
+  useEffect(() => { startSync(() => loadAll()); }, [loadAll]);
 
   // ── Auth (simple gate; Supabase Auth can replace this transparently) ──
   const login = useCallback(async (email, password) => {

@@ -48,7 +48,7 @@ export function Field({ label, required, children, hint }) {
 
 const controlStyle = {
   width: '100%', padding: '9px 12px', borderRadius: 10, border: `1px solid ${C.border}`,
-  fontSize: 13, color: C.text, background: '#fff', outline: 'none',
+  fontSize: 16, color: C.text, background: '#fff', outline: 'none',
 };
 
 export function Input({ value, onChange, type = 'text', placeholder, style, ...rest }) {
@@ -134,23 +134,25 @@ export function SearchBar({ value, onChange, placeholder }) {
 
 // ── Modal ──
 export function Modal({ open, onClose, title, children, footer, width = 460 }) {
+  // Lock the BODY scroll while open so swiping scrolls only the modal content.
   useEffect(() => {
     if (!open) return;
-    const onKey = (e) => { if (e.key === 'Escape') onClose?.(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [open]);
   if (!open) return null;
   return (
     <div
-      onClick={onClose}
+      // Clicking the grey overlay does NOT close the modal (prevents losing
+      // unsaved input). Close only via the X or Cancel/Save buttons.
       style={{
         position: 'fixed', inset: 0, background: 'rgba(14,29,46,0.45)', zIndex: 1000,
         display: 'flex', alignItems: 'flex-end', justifyContent: 'center', padding: 0,
+        overscrollBehavior: 'contain', touchAction: 'none',
       }}
     >
       <div
-        onClick={(e) => e.stopPropagation()}
         style={{
           background: '#fff', borderRadius: '18px 18px 0 0', width: '100%', maxWidth: width,
           maxHeight: '92vh', display: 'flex', flexDirection: 'column', boxShadow: '0 -8px 30px rgba(0,0,0,0.2)',
@@ -163,7 +165,7 @@ export function Modal({ open, onClose, title, children, footer, width = 460 }) {
           <strong style={{ fontSize: 15, color: C.text }}>{title}</strong>
           <button onClick={onClose} style={{ border: 'none', background: 'none', fontSize: 20, cursor: 'pointer', color: C.textMuted }}>×</button>
         </div>
-        <div style={{ padding: 16, overflowY: 'auto' }}>{children}</div>
+        <div style={{ padding: 16, overflowY: 'auto', touchAction: 'pan-y', overscrollBehavior: 'contain', WebkitOverflowScrolling: 'touch' }}>{children}</div>
         {footer && (
           <div style={{ padding: '12px 16px', borderTop: `1px solid ${C.border}`, display: 'flex', gap: 8, justifyContent: 'flex-end', flexShrink: 0 }}>
             {footer}

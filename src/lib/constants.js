@@ -57,7 +57,11 @@ export const TABLES = {
 
 // A small set of icon glyphs offered for categories (kept simple — emoji,
 // no icon-library dependency).
-export const CATEGORY_ICONS = ['🦷', '🪥', '🔩', '🧰', '🧪', '📦', '💉', '🩺', '⚙️', '🧷', '🔧', '📐'];
+export const CATEGORY_ICONS = [
+  '🦷', '🪥', '🔩', '🧰', '🧪', '📦', '💉', '🩺', '⚙️', '🧷', '🔧', '📐',
+  '〰️', '🔗', '🌀', '📎', '🪝', '🔘', '⭕', '💍', '🥢', '🛠️', '😷', '🪖',
+  '😬', '📏', '🛡️', '👄', '🧵', '🧴', '🕯️', '➗', '🟦', '👅', '🦿', '🩹',
+];
 
 // Suggested category colors (align with palette but allow variety).
 export const CATEGORY_COLORS = [
