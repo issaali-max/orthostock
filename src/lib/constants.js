@@ -46,6 +46,7 @@ export const TABLES = {
   invoiceItems: 'invoiceItems',
   stockMovements: 'stockMovements',
   expenses: 'expenses',
+  expenseGroups: 'expenseGroups',
   otherDebts: 'otherDebts',
   securities: 'securities',
   cashFlows: 'cashFlows',
@@ -80,4 +81,24 @@ export const WEEKDAYS = [
   { key: 'thu', ar: 'الخميس', en: 'Thu' },
   { key: 'fri', ar: 'الجمعة', en: 'Fri' },
   { key: 'sat', ar: 'السبت', en: 'Sat' },
+];
+
+// Default expense groups. type: 'business' (deducted to reach operating
+// profit) or 'personal' (home / car / family — deducted after). Users can
+// add/edit their own groups inside the Expenses screen.
+export const EXPENSE_GROUP_SEED = [
+  { nameAr: 'وقود', nameEn: 'Fuel', type: 'business', icon: '⛽', color: '#1E73CC' },
+  { nameAr: 'توصيل وشحن', nameEn: 'Delivery & Shipping', type: 'business', icon: '🚚', color: '#0E8C8C' },
+  { nameAr: 'تسويق وإعلان', nameEn: 'Marketing', type: 'business', icon: '📣', color: '#6E4DBE' },
+  { nameAr: 'ضيافة وهدايا', nameEn: 'Hospitality & Gifts', type: 'business', icon: '🎁', color: '#B0762A' },
+  { nameAr: 'رواتب وأجور', nameEn: 'Salaries', type: 'business', icon: '👥', color: '#3E5C76' },
+  { nameAr: 'إيجار ومرافق العمل', nameEn: 'Office Rent & Utilities', type: 'business', icon: '🏢', color: '#1A8F52' },
+  { nameAr: 'مصاريف البيت', nameEn: 'Household', type: 'personal', icon: '🏠', color: '#D97B20' },
+  { nameAr: 'السيارة', nameEn: 'Car', type: 'personal', icon: '🚗', color: '#C93535' },
+  { nameAr: 'عائلية وشخصية', nameEn: 'Family & Personal', type: 'personal', icon: '👨‍👩‍👧', color: '#8A2D5A' },
+];
+
+export const EXPENSE_ICONS = [
+  '⛽', '🚚', '📣', '🎁', '👥', '🏢', '🏠', '🚗', '👨‍👩‍👧', '🍽️', '💡', '📱',
+  '🧾', '🛒', '✈️', '🏥', '🎓', '🔧', '💳', '☕', '📦', '🪙', '🧴', '🖥️',
 ];

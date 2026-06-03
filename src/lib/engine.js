@@ -91,3 +91,107 @@ export function invoiceTotals(lines, settings) {
   const vat = settings?.taxEnabled ? subtotal * safeDiv(num(settings.taxRate), 100) : 0;
   return { subtotal: round2(subtotal), vat: round2(vat), total: round2(subtotal + vat) };
 }
+
+// ─────────────────────────────────────────────────────────────
+// Smart dashboard alerts — derived purely from existing data.
+// Returns structured records (kind + fields); the UI renders the
+// localized text so logic stays language-agnostic. Sorted by
+// severity (3 = critical, 2 = warning, 1 = info).
+// ─────────────────────────────────────────────────────────────
+function variantLabel(v) {
+  return Object.values(v.attributes || {}).filter(Boolean).join(' · ') || v.nameEn || v.sku;
+}
+
+export function buildAlerts(data, opts = {}) {
+  const overdueDays = num(opts.overdueDays) || 30;
+  const variants = (data[TABLES.variants] || []).filter((v) => v.isActive !== false);
+  const invoices = (data[TABLES.invoices] || []).filter((i) => i.status !== 'returned');
+  const customers = data[TABLES.customers] || [];
+  const a = [];
+
+  for (const v of variants) {
+    const q = num(v.stockQty), m = num(v.stockMin);
+    const sell = num(v.sellingPriceDefault), cost = num(v.purchasePriceAvg);
+    const label = variantLabel(v);
+    if (q <= 0) {
+      a.push({ id: 'oos-' + v.id, sev: 3, tone: 'danger', icon: '⛔', kind: 'outOfStock', sku: v.sku, label });
+    } else if (m > 0 && q <= m) {
+      a.push({ id: 'low-' + v.id, sev: 2, tone: 'warning', icon: '🔻', kind: 'lowStock', sku: v.sku, label, qty: q, min: m });
+    }
+    if (sell > 0 && cost > 0 && sell < cost) {
+      a.push({ id: 'loss-' + v.id, sev: 3, tone: 'danger', icon: '📉', kind: 'sellBelowCost', sku: v.sku, label, sell: round2(sell), cost: round2(cost) });
+    } else if (sell <= 0) {
+      a.push({ id: 'noprice-' + v.id, sev: 1, tone: 'info', icon: '🏷️', kind: 'noSellingPrice', sku: v.sku, label });
+    }
+  }
+
+  const now = Date.now();
+  for (const inv of invoices) {
+    if (inv.paymentStatus === 'paid') continue;
+    const remaining = Math.max(0, num(inv.total) - num(inv.paidAmount));
+    if (remaining <= 0) continue;
+    const days = inv.date ? Math.floor((now - new Date(inv.date).getTime()) / 86400000) : 0;
+    if (days >= overdueDays) {
+      const cust = customers.find((c) => c.id === inv.customerId);
+      a.push({ id: 'overdue-' + inv.id, sev: 2, tone: 'warning', icon: '⏰', kind: 'overdueInvoice', invoiceNumber: inv.invoiceNumber, customer: cust?.name || '—', remaining: round2(remaining), days });
+    }
+  }
+
+  return a.sort((x, y) => y.sev - x.sev);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Profit & Loss. The user's vocabulary:
+//   salesProfit ("net profit")  = price − cost = Σ invoiceItem.lineProfit
+//   operatingProfit             = salesProfit − business expenses
+//   netAfterAll                 = operatingProfit − personal expenses
+// Expense type comes from its group (business | personal).
+// from/to are inclusive ISO dates (YYYY-MM-DD); both optional.
+// ─────────────────────────────────────────────────────────────
+export function pnl(data, opts = {}) {
+  const { from, to } = opts;
+  const inRange = (iso) => (!iso ? true : (!from || iso >= from) && (!to || iso <= to));
+
+  const invoices = (data[TABLES.invoices] || []).filter((i) => i.status !== 'returned' && inRange(i.date));
+  const invIds = new Set(invoices.map((i) => i.id));
+  const items = (data[TABLES.invoiceItems] || []).filter((it) => invIds.has(it.invoiceId));
+  const expenses = (data[TABLES.expenses] || []).filter((e) => inRange(e.date));
+  const groups = data[TABLES.expenseGroups] || [];
+  const typeOf = (gid) => groups.find((g) => g.id === gid)?.type || 'business';
+
+  const revenue = invoices.reduce((s, i) => s + num(i.total), 0);
+  const cogs = items.reduce((s, it) => s + num(it.avgCostAtSale) * num(it.qty), 0);
+  const salesProfit = items.reduce((s, it) => s + num(it.lineProfit), 0);
+  const businessExp = expenses.filter((e) => typeOf(e.groupId) === 'business').reduce((s, e) => s + num(e.amount), 0);
+  const personalExp = expenses.filter((e) => typeOf(e.groupId) === 'personal').reduce((s, e) => s + num(e.amount), 0);
+  const operatingProfit = salesProfit - businessExp;
+  const netAfterAll = operatingProfit - personalExp;
+
+  return {
+    revenue: round2(revenue), cogs: round2(cogs), salesProfit: round2(salesProfit),
+    businessExp: round2(businessExp), personalExp: round2(personalExp),
+    operatingProfit: round2(operatingProfit), netAfterAll: round2(netAfterAll),
+    invoiceCount: invoices.length, expenseCount: expenses.length,
+    margin: revenue > 0 ? round2((salesProfit / revenue) * 100) : 0,
+  };
+}
+
+// Last `n` months of revenue / sales-profit / expenses for the trend chart.
+export function monthlyTrend(data, n = 6) {
+  const invoices = (data[TABLES.invoices] || []).filter((i) => i.status !== 'returned');
+  const items = data[TABLES.invoiceItems] || [];
+  const expenses = data[TABLES.expenses] || [];
+  const invMonth = new Map(invoices.map((i) => [i.id, (i.date || '').slice(0, 7)]));
+
+  const now = new Date();
+  const buckets = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    buckets.push({ key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, revenue: 0, profit: 0, expenses: 0 });
+  }
+  const byKey = Object.fromEntries(buckets.map((b) => [b.key, b]));
+  for (const inv of invoices) { const b = byKey[(inv.date || '').slice(0, 7)]; if (b) b.revenue += num(inv.total); }
+  for (const it of items) { const b = byKey[invMonth.get(it.invoiceId)]; if (b) b.profit += num(it.lineProfit); }
+  for (const e of expenses) { const b = byKey[(e.date || '').slice(0, 7)]; if (b) b.expenses += num(e.amount); }
+  return buckets.map((b) => ({ ...b, revenue: round2(b.revenue), profit: round2(b.profit), expenses: round2(b.expenses) }));
+}

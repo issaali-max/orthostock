@@ -5,7 +5,7 @@
 // Same method names as before (getAll/findBy/insert/update/remove/
 // resetStore) so feature code and layout never change.
 // ─────────────────────────────────────────────────────────────
-import { TABLES } from '../lib/constants.js';
+import { TABLES, EXPENSE_GROUP_SEED } from '../lib/constants.js';
 import { newId } from '../lib/ids.js';
 import { nowISO } from '../lib/dates.js';
 import { CATALOGUE } from './seedData.js';
@@ -23,9 +23,9 @@ const UNIQUE = {
 };
 const SOFT_DELETE = new Set([
   TABLES.categories, TABLES.products, TABLES.variants,
-  TABLES.customers, TABLES.suppliers, TABLES.users,
+  TABLES.customers, TABLES.suppliers, TABLES.users, TABLES.expenseGroups,
 ]);
-const TIMESTAMPED = new Set([TABLES.purchases, TABLES.invoices, TABLES.stockMovements]);
+const TIMESTAMPED = new Set([TABLES.purchases, TABLES.invoices, TABLES.stockMovements, TABLES.expenses]);
 
 function dupError(key, val) { const e = new Error(`Duplicate ${key}: ${val}`); e.code = 'DUPLICATE'; return e; }
 
@@ -115,6 +115,7 @@ async function seedLocal() {
     { id: newId(), name: 'Gulf Ortho Supplies', phone: '+97150000000', whatsapp: '+97150000000', city: 'Dubai', currency: 'AED', notes: '', isActive: true },
     { id: newId(), name: 'Ormco International', phone: '+12340000000', whatsapp: '', city: '', currency: 'USD', notes: '', isActive: true },
   ]);
+  await L.idbBulkPut(TABLES.expenseGroups, EXPENSE_GROUP_SEED.map((g) => ({ id: newId(), ...g, isActive: true })));
 
   const categories = [], products = [], variants = [];
   CATALOGUE.forEach((c) => {

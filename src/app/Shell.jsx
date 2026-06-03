@@ -9,6 +9,7 @@ import Invoices from '../features/sales/Invoices.jsx';
 import Purchases from '../features/purchases/Purchases.jsx';
 import Customers from '../features/customers/Customers.jsx';
 import Suppliers from '../features/suppliers/Suppliers.jsx';
+import Expenses from '../features/expenses/Expenses.jsx';
 import Settings from '../features/settings/Settings.jsx';
 
 function useIsDesktop() {
@@ -28,6 +29,7 @@ const NAV = [
   { key: 'customers', labelKey: 'customers', icon: '🧑‍⚕️', Comp: Customers, primary: true },
   { key: 'purchases', labelKey: 'purchases', icon: '📥', Comp: Purchases, primary: true },
   { key: 'suppliers', labelKey: 'suppliers', icon: '🚚', Comp: Suppliers, primary: false },
+  { key: 'expenses', labelKey: 'expenses', icon: '🧾', Comp: Expenses, primary: false },
   { key: 'dashboard', labelKey: 'dashboard', icon: '📊', Comp: Dashboard, primary: false },
   { key: 'settings', labelKey: 'settings', icon: '⚙️', Comp: Settings, primary: false },
 ];
