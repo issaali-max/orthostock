@@ -86,6 +86,7 @@ create table if not exists suppliers (
 create table if not exists customers (
   id uuid primary key default gen_random_uuid(),
   type text not null default 'doctor' check (type in ('doctor','center')),
+  name text default '',
   "nameAr" text default '',
   "nameEn" text default '',
   phone text unique,

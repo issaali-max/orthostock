@@ -4,12 +4,12 @@ import { C, TABLES } from '../../lib/constants.js';
 import { fmtCur, num, round2 } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
 import { nextDocNumber } from '../../lib/ids.js';
-import { applyPurchaseStock } from '../../lib/engine.js';
+import { commitPurchase } from '../../lib/engine.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, SearchBar, Select } from '../../ui/components.jsx';
 
 export default function Purchases() {
   const app = useApp();
-  const { t, data, displayCurrency, usdRate, createRow, showToast } = app;
+  const { t, data, displayCurrency, usdRate, showToast } = app;
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -38,14 +38,10 @@ export default function Purchases() {
     setBusy(true);
     try {
       const number = nextDocNumber(data[TABLES.purchases] || [], 'PO', 'purchaseNumber');
-      const po = await createRow(TABLES.purchases, {
+      await commitPurchase(app, {
         purchaseNumber: number, supplierId: supplierId || null, date, currency: 'AED', exchangeRate: 1,
         totalOriginal: total, totalAED: total, invoiceRef: '', notes: '',
-      });
-      for (const l of valid) {
-        await createRow(TABLES.purchaseItems, { purchaseId: po.id, variantId: l.variantId, qty: num(l.qty), unitCost: num(l.unitCost), total: round2(num(l.qty) * num(l.unitCost)) });
-      }
-      await applyPurchaseStock(app, valid, po.id);
+      }, valid.map((l) => ({ variantId: l.variantId, qty: num(l.qty), unitCost: num(l.unitCost) })));
       showToast(`${number} ✓`, 'success');
       setOpen(false);
     } finally { setBusy(false); }

@@ -48,7 +48,7 @@ export const DICT = {
     workingDays: 'أيام العمل', unitCost: 'سعر الجملة', unitPrice: 'سعر البيع', addLine: 'إضافة سطر',
     noInvoices: 'لا توجد فواتير', noPurchases: 'لا توجد مشتريات', totalSpent: 'إجمالي المشتريات',
     history: 'السجل', supplier: 'المورد', newPurchase: 'عملية شراء', invoice: 'فاتورة', purchase: 'شراء',
-    emptyCartSale: 'أضف مواد من الكتالوج أولاً', profile: 'الملف',
+    emptyCartSale: 'أضف مواد من الكتالوج أولاً', profile: 'الملف', inventoryValue: 'قيمة المخزون', lowStock: 'مخزون منخفض',
   },
   en: {
     appName: 'OrthoStock',
@@ -89,7 +89,7 @@ export const DICT = {
     workingDays: 'Working days', unitCost: 'Unit cost', unitPrice: 'Unit price', addLine: 'Add line',
     noInvoices: 'No invoices yet', noPurchases: 'No purchases yet', totalSpent: 'Total spent',
     history: 'History', supplier: 'Supplier', newPurchase: 'New purchase', invoice: 'Invoice', purchase: 'Purchase',
-    emptyCartSale: 'Add materials from the Catalogue first', profile: 'Profile',
+    emptyCartSale: 'Add materials from the Catalogue first', profile: 'Profile', inventoryValue: 'Inventory value', lowStock: 'Low stock',
   },
 };
 

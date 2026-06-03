@@ -22,22 +22,10 @@ export function AppProvider({ children }) {
   const [data, setData] = useState(() => Object.fromEntries(CORE_TABLES.map((t) => [t, []])));
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
-  const [cart, setCart] = useState({}); // { variantId: qty } — transient sales selection (becomes an invoice in Batch 3)
   const toastTimer = useRef(null);
 
   const t = useMemo(() => makeT(lang), [lang]);
   const dir = lang === 'ar' ? 'rtl' : 'ltr';
-
-  // ── Sales cart (the green-button selection; consumed by the invoice screen) ──
-  const toggleCart = useCallback((id) => setCart((c) => {
-    const n = { ...c }; if (n[id]) delete n[id]; else n[id] = 1; return n;
-  }), []);
-  const setCartQty = useCallback((id, qty) => setCart((c) => {
-    const n = { ...c }; if (qty <= 0) delete n[id]; else n[id] = qty; return n;
-  }), []);
-  const removeCartItem = useCallback((id) => setCart((c) => { const n = { ...c }; delete n[id]; return n; }), []);
-  const clearCart = useCallback(() => setCart({}), []);
-  const cartCount = Object.values(cart).reduce((a, b) => a + b, 0);
 
 
   const settings = useMemo(() => data[TABLES.settings]?.[0] || {
@@ -145,7 +133,6 @@ export function AppProvider({ children }) {
     data, loading, refresh,
     createRow, updateRow, deleteRow,
     showToast, toast,
-    cart, cartCount, toggleCart, setCartQty, removeCartItem, clearCart,
   };
 
   return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;

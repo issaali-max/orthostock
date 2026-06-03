@@ -4,7 +4,7 @@ import { C, TABLES } from '../../lib/constants.js';
 import { fmtCur, fmtNum, num } from '../../lib/money.js';
 import { todayISO } from '../../lib/dates.js';
 import { nextDocNumber } from '../../lib/ids.js';
-import { applySaleStock, invoiceTotals } from '../../lib/engine.js';
+import { commitInvoice, invoiceTotals } from '../../lib/engine.js';
 import { Btn, Field, Input, Modal, Select } from '../../ui/components.jsx';
 
 const variantLabel = (v) => {
@@ -15,7 +15,7 @@ const variantLabel = (v) => {
 // Sales happen here: choose category -> materials (green buttons) -> build invoice.
 export default function InvoiceCreate({ open, onClose }) {
   const app = useApp();
-  const { t, data, settings, displayCurrency, usdRate, showToast, createRow } = app;
+  const { t, data, settings, displayCurrency, usdRate, showToast } = app;
   const categories = (data[TABLES.categories] || []).filter((c) => c.isActive !== false);
   const products = (data[TABLES.products] || []).filter((p) => p.isActive !== false);
   const variants = (data[TABLES.variants] || []).filter((v) => v.isActive !== false);
@@ -51,20 +51,11 @@ export default function InvoiceCreate({ open, onClose }) {
     try {
       const number = nextDocNumber(data[TABLES.invoices] || [], 'INV', 'invoiceNumber');
       const paid = paymentStatus === 'paid' ? totals.total : paymentStatus === 'partial' ? num(paidAmount) : 0;
-      const inv = await createRow(TABLES.invoices, {
+      await commitInvoice(app, {
         invoiceNumber: number, customerId: customerId || null, date,
         subtotal: totals.subtotal, discountTotal: 0, total: totals.total,
         paidAmount: paid, paymentStatus, paymentMethod: 'cash', status: 'active', currency: 'AED', notes: '',
-      });
-      for (const l of lines) {
-        const v = vById(l.variantId); const avgCost = num(v?.purchasePriceAvg);
-        await createRow(TABLES.invoiceItems, {
-          invoiceId: inv.id, variantId: l.variantId, qty: num(l.qty),
-          listPrice: num(v?.sellingPriceDefault), unitPrice: num(l.unitPrice), discountAmount: 0, discountPct: 0,
-          avgCostAtSale: avgCost, lineProfit: (num(l.unitPrice) - avgCost) * num(l.qty), total: num(l.unitPrice) * num(l.qty),
-        });
-      }
-      await applySaleStock(app, lines.map((l) => ({ variantId: l.variantId, qty: num(l.qty) })), inv.id);
+      }, lines.map((l) => ({ variantId: l.variantId, qty: num(l.qty), unitPrice: num(l.unitPrice) })));
       showToast(`${number} ✓`, 'success');
       onClose();
     } finally { setBusy(false); }
