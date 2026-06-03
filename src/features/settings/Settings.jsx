@@ -1,17 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { useApp } from '../../app/AppProvider.jsx';
-import { C } from '../../lib/constants.js';
+import { C, TABLES } from '../../lib/constants.js';
 import { Badge, Btn, Card, Field, Input, PageHeader, Select } from '../../ui/components.jsx';
 import { resetStore, dbMode } from '../../db/db.js';
 import { subscribeSync } from '../../db/sync.js';
 import { exportBackup, importBackup } from '../../lib/backup.js';
+import { exportExcel, importExcel } from '../../lib/excel.js';
 import { num } from '../../lib/money.js';
 
 export default function Settings() {
-  const { t, settings, updateSettings, setLang, loading, showToast } = useApp();
+  const { t, settings, updateSettings, setLang, loading, showToast, data, refresh } = useApp();
   const [form, setForm] = useState(settings);
   const [sync, setSync] = useState({ configured: false, online: true, pending: 0, syncing: false, lastSyncAt: null });
   const fileRef = useRef(null);
+  const xlsxRef = useRef(null);
 
   useEffect(() => { setForm(settings); }, [settings]);
   useEffect(() => subscribeSync(setSync), []);
@@ -42,6 +44,22 @@ export default function Settings() {
     if (!window.confirm('Reset all local data to the seed catalogue?')) return;
     await resetStore();
     window.location.reload();
+  };
+
+  const doExportExcel = async () => {
+    try { await exportExcel(data, form.lang || 'ar'); showToast(t('saved'), 'success'); }
+    catch (e) { console.error(e); showToast('Export failed', 'error'); }
+  };
+  const doImportExcel = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const s = await importExcel(file, data);
+      const msg = `✓ ${s.materialsUpdated} | +${s.customersAdded} / ↻${s.customersUpdated}`;
+      showToast(msg, 'success');
+      await Promise.all([refresh(TABLES.variants), refresh(TABLES.customers)]);
+    } catch (err) { console.error(err); showToast('Import failed', 'error'); }
+    finally { e.target.value = ''; }
   };
 
   const syncTone = !sync.configured ? 'neutral' : !sync.online ? 'warning' : sync.pending ? 'info' : 'success';
@@ -86,6 +104,16 @@ export default function Settings() {
           </Field>
         )}
         <Btn onClick={save} disabled={loading} size="lg" style={{ marginTop: 6 }}>{t('save')}</Btn>
+      </Card>
+
+      <Card style={{ marginTop: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 4 }}>📊 Excel</div>
+        <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 10 }}>{t('excelHint')}</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <Btn onClick={doExportExcel}>⬇ {t('exportExcel')}</Btn>
+          <Btn variant="outline" onClick={() => xlsxRef.current?.click()}>⬆ {t('importExcel')}</Btn>
+          <input ref={xlsxRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={doImportExcel} style={{ display: 'none' }} />
+        </div>
       </Card>
 
       <Card style={{ marginTop: 16 }}>

@@ -65,6 +65,7 @@ export const DICT = {
     sortBy: 'ترتيب', byName: 'الاسم', byRevenue: 'الأعلى مبيعاً', byProfit: 'الأعلى ربحاً',
     byMargin: 'الأعلى هامشاً', byDebt: 'الأعلى ديناً', allCities: 'كل المدن', allTypes: 'كل الأنواع',
     profitMargin: 'هامش الربح', filterCity: 'المدينة',
+    exportExcel: 'تصدير Excel', importExcel: 'استيراد Excel', excelHint: 'ملف واحد بكل الأقسام — عدّل ثم استورد لتحديث المخزون والعملاء',
   },
   en: {
     appName: 'OrthoStock',
@@ -122,6 +123,7 @@ export const DICT = {
     sortBy: 'Sort', byName: 'Name', byRevenue: 'Top sales', byProfit: 'Top profit',
     byMargin: 'Top margin', byDebt: 'Top debt', allCities: 'All cities', allTypes: 'All types',
     profitMargin: 'Profit margin', filterCity: 'City',
+    exportExcel: 'Export Excel', importExcel: 'Import Excel', excelHint: 'One file, all sections — edit then import to update stock & customers',
   },
 };
 
