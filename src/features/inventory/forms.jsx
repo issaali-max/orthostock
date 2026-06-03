@@ -180,6 +180,10 @@ export function VariantForm({ rec, setRec, t, products, categories, onAddOption 
       )}
       <div style={{ display: 'flex', gap: 8 }}>
         <Field label={t('sellingPrice')}><Input type="number" value={rec.sellingPriceDefault} onChange={(v) => set('sellingPriceDefault', v)} /></Field>
+        <Field label={t('costPrice')}><Input type="number" value={rec.purchasePriceAvg} onChange={(v) => { set('purchasePriceAvg', v); set('purchasePriceLatest', v); }} /></Field>
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <Field label={t('stock')}><Input type="number" value={rec.stockQty} onChange={(v) => set('stockQty', v)} /></Field>
         <Field label={t('stockMin')}><Input type="number" value={rec.stockMin} onChange={(v) => set('stockMin', v)} /></Field>
       </div>
       <Field label={t('unit')}><Select value={rec.unit} onChange={(v) => set('unit', v)} options={UNITS} /></Field>

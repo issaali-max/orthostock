@@ -15,7 +15,7 @@ export function ImageUpload({ value, onChange, size = 84, fallback = '📦' }) {
   };
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
       <div
         onClick={() => ref.current?.click()}
         style={{
@@ -28,7 +28,7 @@ export function ImageUpload({ value, onChange, size = 84, fallback = '📦' }) {
       >
         {!value && fallback}
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0 }}>
         <button onClick={() => ref.current?.click()} style={miniBtn}>📷 Upload</button>
         {value && <button onClick={() => onChange('')} style={{ ...miniBtn, color: C.danger }}>Remove</button>}
       </div>

@@ -34,6 +34,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
 
   useEffect(() => {
     if (!open) return;
+    const firstCat = categories.find((c) => products.some((p) => p.categoryId === c.id))?.id || categories[0]?.id || '';
     if (editing) {
       const its = (data[TABLES.invoiceItems] || []).filter((it) => it.invoiceId === editing.id);
       // reconstruct the pre-distribution unit price from listPrice/discount when possible
@@ -43,9 +44,9 @@ export default function InvoiceCreate({ open, onClose, editing }) {
       setStatus(editing.paymentStatus || 'unpaid');
       setPaid(num(editing.paidAmount));
       setInvDiscount(num(editing.discountTotal));
-      setCatId(categories[0]?.id || '');
+      setCatId(firstCat);
     } else {
-      setLines([]); setCatId(categories[0]?.id || ''); setCustomerId(''); setDate(todayISO()); setStatus('unpaid'); setPaid(0); setInvDiscount(0);
+      setLines([]); setCatId(firstCat); setCustomerId(''); setDate(todayISO()); setStatus('unpaid'); setPaid(0); setInvDiscount(0);
     }
   }, [open, editing]);
 
