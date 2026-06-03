@@ -39,6 +39,7 @@ export const DICT = {
     items: 'عناصر', searchEmpty: 'لا توجد نتائج',
     catalogue: 'الكتالوج', from: 'من', variations: 'المقاسات', selected: 'محدد', clear: 'مسح',
     noProducts: 'لا توجد منتجات في هذه الفئة', productImage: 'صورة المنتج',
+    cart: 'سلة البيع', total: 'الإجمالي', qty: 'الكمية', cartHint: 'تُستخدم لإنشاء الفاتورة (الخطوة التالية)',
   },
   en: {
     appName: 'OrthoStock',
@@ -70,6 +71,7 @@ export const DICT = {
     items: 'items', searchEmpty: 'No results',
     catalogue: 'Catalogue', from: 'from', variations: 'Variations', selected: 'selected', clear: 'Clear',
     noProducts: 'No products in this category', productImage: 'Product image',
+    cart: 'Sales cart', total: 'Total', qty: 'Qty', cartHint: 'Feeds invoice creation (next step)',
   },
 };
 

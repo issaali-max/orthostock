@@ -2,23 +2,22 @@ import { useMemo, useState } from 'react';
 import { useApp } from '../../app/AppProvider.jsx';
 import { C, RADIUS, SHADOW, TABLES } from '../../lib/constants.js';
 import { fmtCur, num } from '../../lib/money.js';
-import { Badge, EmptyState, PageHeader, SearchBar } from '../../ui/components.jsx';
+import { Badge, Btn, EmptyState, Modal, PageHeader, SearchBar } from '../../ui/components.jsx';
 
 // Combined category label: "🦷 Brackets (الحاصرات)"
 export const catLabel = (c) => `${c.icon || ''} ${c.nameEn} (${c.nameAr})`.trim();
 
-// One concise label for a variant green-button, from its distinguishing attributes.
+// Concise label for a variant green-button, from its distinguishing attributes.
 function variantLabel(v) {
   const vals = Object.values(v.attributes || {}).filter(Boolean);
   return vals.length ? vals.join(' · ') : (v.sku || v.nameEn || '—');
 }
 
 export default function Catalogue() {
-  const { t, lang, data, displayCurrency, usdRate } = useApp();
-  const [catId, setCatId] = useState(null);          // null = step 1 (categories)
-  const [expanded, setExpanded] = useState(null);     // product id whose variants are open
-  const [selected, setSelected] = useState({});       // { variantId: true } -> green
+  const { t, lang, data, displayCurrency, usdRate, cart, cartCount, toggleCart, setCartQty, removeCartItem, clearCart } = useApp();
+  const [catId, setCatId] = useState(null);   // null = step 1 (categories)
   const [q, setQ] = useState('');
+  const [cartOpen, setCartOpen] = useState(false);
 
   const categories = (data[TABLES.categories] || []).filter((c) => c.isActive !== false);
   const products = (data[TABLES.products] || []).filter((p) => p.isActive !== false);
@@ -29,15 +28,9 @@ export default function Catalogue() {
     variants.forEach((v) => { (m[v.productId] = m[v.productId] || []).push(v); });
     return m;
   }, [variants]);
+  const variantById = useMemo(() => Object.fromEntries(variants.map((v) => [v.id, v])), [variants]);
 
-  const fromPrice = (productId) => {
-    const vs = variantsByProduct[productId] || [];
-    if (!vs.length) return 0;
-    return Math.min(...vs.map((v) => num(v.purchasePriceAvg)));
-  };
-
-  const selectedCount = Object.values(selected).filter(Boolean).length;
-  const toggle = (id) => setSelected((s) => ({ ...s, [id]: !s[id] }));
+  const cartTotal = Object.entries(cart).reduce((sum, [id, qty]) => sum + num(variantById[id]?.sellingPriceDefault) * qty, 0);
 
   // ── Step 1: category cards ──
   if (!catId) {
@@ -51,7 +44,7 @@ export default function Catalogue() {
             {list.map((c) => {
               const count = products.filter((p) => p.categoryId === c.id).length;
               return (
-                <button key={c.id} onClick={() => { setCatId(c.id); setExpanded(null); setQ(''); }}
+                <button key={c.id} onClick={() => { setCatId(c.id); setQ(''); }}
                   style={{
                     background: '#fff', border: `1px solid ${C.border}`, borderRadius: RADIUS, boxShadow: SHADOW,
                     padding: '18px 12px', cursor: 'pointer', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
@@ -65,11 +58,13 @@ export default function Catalogue() {
             })}
           </div>
         )}
+        <CartBar count={cartCount} total={cartTotal} displayCurrency={displayCurrency} usdRate={usdRate} t={t} onOpen={() => setCartOpen(true)} />
+        <CartSheet open={cartOpen} onClose={() => setCartOpen(false)} {...{ cart, variantById, setCartQty, removeCartItem, clearCart, displayCurrency, usdRate, t, lang, cartTotal }} />
       </div>
     );
   }
 
-  // ── Step 2 + 3: product cards (of the chosen category) + green variant buttons ──
+  // ── Step 2: ALL products of the category, variants fully expanded (no drilldown) ──
   const cat = categories.find((c) => c.id === catId);
   const catProducts = products
     .filter((p) => p.categoryId === catId)
@@ -78,7 +73,7 @@ export default function Catalogue() {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-        <button onClick={() => { setCatId(null); setExpanded(null); setQ(''); }}
+        <button onClick={() => { setCatId(null); setQ(''); }}
           style={{ border: `1px solid ${C.border}`, background: '#fff', borderRadius: 10, padding: '6px 12px', fontWeight: 700, color: C.primary, cursor: 'pointer' }}>
           ← {t('catalogue')}
         </button>
@@ -87,51 +82,46 @@ export default function Catalogue() {
       <SearchBar value={q} onChange={setQ} placeholder={t('search')} />
 
       {catProducts.length === 0 ? <EmptyState icon="📦" text={t('noProducts')} /> : (
-        <div style={{ display: 'grid', gap: 12 }}>
+        <div style={{ display: 'grid', gap: 14, paddingBottom: cartCount ? 70 : 0 }}>
           {catProducts.map((p) => {
             const vs = variantsByProduct[p.id] || [];
-            const open = expanded === p.id;
             return (
-              <div key={p.id} style={{ background: '#fff', border: `1px solid ${open ? C.primaryLight : C.border}`, borderRadius: RADIUS, boxShadow: SHADOW, overflow: 'hidden' }}>
-                <button onClick={() => setExpanded(open ? null : p.id)}
-                  style={{ width: '100%', border: 'none', background: 'none', cursor: 'pointer', padding: 14, display: 'flex', alignItems: 'center', gap: 12, textAlign: 'start' }}>
+              <div key={p.id} style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: RADIUS, boxShadow: SHADOW, padding: 14 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
                   <div style={{
-                    width: 64, height: 64, borderRadius: 14, flexShrink: 0, overflow: 'hidden',
+                    width: 56, height: 56, borderRadius: 14, flexShrink: 0, overflow: 'hidden',
                     background: p.image_url ? `center/cover no-repeat url(${p.image_url})` : (cat?.color || C.primary) + '1f',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 30,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28,
                   }}>{!p.image_url && (p.icon || cat?.icon)}</div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 800, color: C.text }}>{p.nameEn}</div>
-                    <div style={{ fontSize: 12, color: C.textMuted }}>{lang === 'ar' ? p.nameEn : p.nameAr}</div>
-                    <div style={{ fontSize: 12, color: C.primary, fontWeight: 700, marginTop: 4 }}>
-                      {t('from')} {fmtCur(fromPrice(p.id), displayCurrency, usdRate)} · {vs.length} {t('variations')}
-                    </div>
+                    <div style={{ fontSize: 12, color: C.textMuted }}>{lang === 'ar' ? p.nameEn : p.nameAr} · {vs.length} {t('variations')}</div>
                   </div>
-                  <span style={{ fontSize: 18, color: C.textMuted }}>{open ? '▾' : '▸'}</span>
-                </button>
-
-                {open && (
-                  <div style={{ padding: '0 14px 14px', borderTop: `1px solid ${C.surfaceAlt}` }}>
-                    <div style={{ fontSize: 12, color: C.textMuted, margin: '10px 0 8px' }}>{t('variations')}:</div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                      {vs.map((v) => {
-                        const on = !!selected[v.id];
-                        return (
-                          <button key={v.id} onClick={() => toggle(v.id)}
-                            style={{
-                              border: `1.5px solid ${on ? C.success : C.border}`,
-                              background: on ? C.success : '#fff', color: on ? '#fff' : C.textMid,
-                              borderRadius: 10, padding: '8px 12px', fontSize: 13, fontWeight: 700, cursor: 'pointer',
-                              transition: 'all .12s', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, minWidth: 70,
-                            }}>
-                            <span>{variantLabel(v)}</span>
-                            <span style={{ fontSize: 11, fontWeight: 600, opacity: on ? 0.95 : 0.7 }}>
-                              {fmtCur(v.sellingPriceDefault, displayCurrency, usdRate)}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
+                </div>
+                {vs.length === 0 ? (
+                  <div style={{ fontSize: 12, color: C.textMuted }}>—</div>
+                ) : (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {vs.map((v) => {
+                      const qty = cart[v.id] || 0;
+                      const on = qty > 0;
+                      return (
+                        <button key={v.id} onClick={() => toggleCart(v.id)}
+                          style={{
+                            position: 'relative',
+                            border: `1.5px solid ${on ? C.success : C.border}`,
+                            background: on ? C.success : '#fff', color: on ? '#fff' : C.textMid,
+                            borderRadius: 10, padding: '8px 12px', fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                            transition: 'all .12s', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, minWidth: 72,
+                          }}>
+                          {qty > 1 && (
+                            <span style={{ position: 'absolute', top: -7, insetInlineEnd: -7, background: C.primary, color: '#fff', borderRadius: 999, minWidth: 18, height: 18, fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px' }}>{qty}</span>
+                          )}
+                          <span>{variantLabel(v)}</span>
+                          <span style={{ fontSize: 11, fontWeight: 600, opacity: on ? 0.95 : 0.7 }}>{fmtCur(v.sellingPriceDefault, displayCurrency, usdRate)}</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -140,18 +130,69 @@ export default function Catalogue() {
         </div>
       )}
 
-      {selectedCount > 0 && (
-        <div style={{
-          position: 'fixed', bottom: 74, insetInline: 0, maxWidth: 480, margin: '0 auto', padding: '0 14px', zIndex: 60,
-        }}>
-          <div style={{ background: C.primary, color: '#fff', borderRadius: 12, padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: SHADOW }}>
-            <span style={{ fontWeight: 700, fontSize: 13 }}>{selectedCount} {t('selected')}</span>
-            <button onClick={() => setSelected({})} style={{ border: 'none', background: 'rgba(255,255,255,0.18)', color: '#fff', borderRadius: 8, padding: '6px 12px', fontWeight: 700, cursor: 'pointer' }}>
-              {t('clear')}
-            </button>
-          </div>
-        </div>
-      )}
+      <CartBar count={cartCount} total={cartTotal} displayCurrency={displayCurrency} usdRate={usdRate} t={t} onOpen={() => setCartOpen(true)} />
+      <CartSheet open={cartOpen} onClose={() => setCartOpen(false)} {...{ cart, variantById, setCartQty, removeCartItem, clearCart, displayCurrency, usdRate, t, lang, cartTotal }} />
     </div>
   );
+}
+
+function CartBar({ count, total, displayCurrency, usdRate, t, onOpen }) {
+  if (!count) return null;
+  return (
+    <div style={{ position: 'fixed', bottom: 74, insetInline: 0, maxWidth: 480, margin: '0 auto', padding: '0 14px', zIndex: 60 }}>
+      <button onClick={onOpen} style={{
+        width: '100%', border: 'none', background: C.primary, color: '#fff', borderRadius: 12, padding: '12px 16px',
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: SHADOW, cursor: 'pointer', fontWeight: 800,
+      }}>
+        <span>🛒 {count} · {t('cart')}</span>
+        <span>{fmtCur(total, displayCurrency, usdRate)} ›</span>
+      </button>
+    </div>
+  );
+}
+
+function CartSheet({ open, onClose, cart, variantById, setCartQty, removeCartItem, clearCart, displayCurrency, usdRate, t, lang, cartTotal }) {
+  const ids = Object.keys(cart);
+  return (
+    <Modal open={open} onClose={onClose} title={`🛒 ${t('cart')}`}
+      footer={<>
+        <Btn variant="ghost" onClick={clearCart}>{t('clear')}</Btn>
+        <Btn onClick={onClose}>{t('close')}</Btn>
+      </>}>
+      {ids.length === 0 ? <EmptyState icon="🛒" text="—" /> : (
+        <div>
+          <div style={{ display: 'grid', gap: 8 }}>
+            {ids.map((id) => {
+              const v = variantById[id]; if (!v) return null;
+              const qty = cart[id];
+              return (
+                <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 8, border: `1px solid ${C.border}`, borderRadius: 10, padding: '8px 10px' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, color: C.text, fontSize: 13 }}>{v.sku}</div>
+                    <div style={{ fontSize: 11, color: C.textMuted }}>{Object.values(v.attributes || {}).filter(Boolean).join(' · ') || v.nameEn}</div>
+                  </div>
+                  <div style={{ fontSize: 12, color: C.primary, fontWeight: 700, minWidth: 64, textAlign: 'center' }}>{fmtCur(num(v.sellingPriceDefault) * qty, displayCurrency, usdRate)}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <Stepper onClick={() => setCartQty(id, qty - 1)}>−</Stepper>
+                    <span style={{ minWidth: 22, textAlign: 'center', fontWeight: 700 }}>{qty}</span>
+                    <Stepper onClick={() => setCartQty(id, qty + 1)}>＋</Stepper>
+                    <button onClick={() => removeCartItem(id)} style={{ border: 'none', background: 'none', color: C.danger, cursor: 'pointer', fontSize: 18 }}>×</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.border}`, fontWeight: 800, color: C.text }}>
+            <span>{t('total')}</span>
+            <span>{fmtCur(cartTotal, displayCurrency, usdRate)}</span>
+          </div>
+          <div style={{ fontSize: 11, color: C.textMuted, marginTop: 8, textAlign: 'center' }}>{t('cartHint')}</div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+function Stepper({ children, onClick }) {
+  return <button onClick={onClick} style={{ width: 28, height: 28, borderRadius: 8, border: `1px solid ${C.border}`, background: '#fff', color: C.primary, fontWeight: 800, cursor: 'pointer' }}>{children}</button>;
 }
