@@ -195,3 +195,36 @@ export function monthlyTrend(data, n = 6) {
   for (const e of expenses) { const b = byKey[(e.date || '').slice(0, 7)]; if (b) b.expenses += num(e.amount); }
   return buckets.map((b) => ({ ...b, revenue: round2(b.revenue), profit: round2(b.profit), expenses: round2(b.expenses) }));
 }
+
+// Sales & profit grouped by the customer's emirate (7 UAE emirates).
+export function emirateStats(data) {
+  const invoices = (data[TABLES.invoices] || []).filter((i) => i.status !== 'returned');
+  const items = data[TABLES.invoiceItems] || [];
+  const customers = data[TABLES.customers] || [];
+  const emOf = new Map(customers.map((c) => [c.id, c.emirate || '—']));
+  const profitByInv = new Map();
+  for (const it of items) profitByInv.set(it.invoiceId, (profitByInv.get(it.invoiceId) || 0) + num(it.lineProfit));
+  const map = {};
+  for (const inv of invoices) {
+    const em = emOf.get(inv.customerId) || '—';
+    (map[em] ||= { emirate: em, revenue: 0, profit: 0, count: 0 });
+    map[em].revenue += num(inv.total);
+    map[em].profit += profitByInv.get(inv.id) || 0;
+    map[em].count += 1;
+  }
+  return Object.values(map)
+    .map((r) => ({ ...r, revenue: round2(r.revenue), profit: round2(r.profit) }))
+    .sort((a, b) => b.revenue - a.revenue);
+}
+
+// Top clinics/centers by lifetime revenue.
+export function topClinics(data, n = 5) {
+  const invoices = data[TABLES.invoices] || [];
+  const items = data[TABLES.invoiceItems] || [];
+  const customers = (data[TABLES.customers] || []).filter((c) => c.isActive !== false);
+  return customers
+    .map((c) => ({ id: c.id, name: c.name, type: c.type, city: c.city, emirate: c.emirate, ...customerStats(invoices, items, c.id) }))
+    .filter((c) => c.revenue > 0)
+    .sort((a, b) => b.revenue - a.revenue)
+    .slice(0, n);
+}

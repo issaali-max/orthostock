@@ -24,23 +24,23 @@ function useIsDesktop() {
 
 // Catalogue is the single hub for all materials (add/edit/delete inside it).
 const NAV = [
+  { key: 'dashboard', labelKey: 'overview', icon: '📊', Comp: Dashboard, primary: true },
   { key: 'catalogue', labelKey: 'catalogue', icon: '🗂️', Comp: Catalogue, primary: true },
   { key: 'invoices', labelKey: 'invoices', icon: '🧾', Comp: Invoices, primary: true },
   { key: 'customers', labelKey: 'customers', icon: '🧑‍⚕️', Comp: Customers, primary: true },
-  { key: 'purchases', labelKey: 'purchases', icon: '📥', Comp: Purchases, primary: true },
+  { key: 'purchases', labelKey: 'purchases', icon: '📥', Comp: Purchases, primary: false },
   { key: 'suppliers', labelKey: 'suppliers', icon: '🚚', Comp: Suppliers, primary: false },
   { key: 'expenses', labelKey: 'expenses', icon: '🧾', Comp: Expenses, primary: false },
-  { key: 'dashboard', labelKey: 'dashboard', icon: '📊', Comp: Dashboard, primary: false },
   { key: 'settings', labelKey: 'settings', icon: '⚙️', Comp: Settings, primary: false },
 ];
 
 export default function Shell() {
   const { t, lang, setLang, displayCurrency, toggleCurrency, settings, logout, user } = useApp();
   const isDesktop = useIsDesktop();
-  const [active, setActive] = useState('catalogue');
+  const [active, setActive] = useState('dashboard');
   const [moreOpen, setMoreOpen] = useState(false);
 
-  const Active = useMemo(() => NAV.find((n) => n.key === active)?.Comp || Catalogue, [active]);
+  const Active = useMemo(() => NAV.find((n) => n.key === active)?.Comp || Dashboard, [active]);
   const primaryNav = NAV.filter((n) => n.primary);
   const overflowNav = NAV.filter((n) => !n.primary);
   const go = (key) => { setActive(key); setMoreOpen(false); };
