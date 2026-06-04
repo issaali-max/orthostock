@@ -5,7 +5,7 @@ import { C, TABLES, SHADOW } from '../lib/constants.js';
 import { fmtCur, fmtNum, num } from '../lib/money.js';
 import { todayISO } from '../lib/dates.js';
 import { pnl, monthlyTrend, periodTrend, buildAlerts, emirateStats, topClinics } from '../lib/engine.js';
-import { Badge, Card, EmptyState, PageHeader } from '../ui/components.jsx';
+import { Badge, Card, EmptyState, Modal, PageHeader } from '../ui/components.jsx';
 
 const monthStart = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`; };
 const yearStart = () => `${new Date().getFullYear()}-01-01`;
@@ -14,12 +14,31 @@ export default function Dashboard() {
   const { t, data, displayCurrency, usdRate } = useApp();
   const [range, setRange] = useState('month'); // day | month | year
   const [trendMode, setTrendMode] = useState('month'); // month | year
+  const [showSold, setShowSold] = useState(false);
 
   const bounds = range === 'day' ? { from: todayISO(), to: todayISO() }
     : range === 'year' ? { from: yearStart() } : { from: monthStart() };
 
   const pl = useMemo(() => pnl(data, bounds), [data, range]);
   const today = useMemo(() => pnl(data, { from: todayISO(), to: todayISO() }), [data]);
+
+  // Drill-down: materials sold within the active range (active invoices only)
+  const soldList = useMemo(() => {
+    const inRange = (d) => d && d >= bounds.from && (!bounds.to || d <= bounds.to);
+    const invs = (data[TABLES.invoices] || []).filter((inv) => inv.status !== 'returned' && inRange(inv.date));
+    const ids = new Set(invs.map((i) => i.id));
+    const variants = data[TABLES.variants] || [];
+    const m = {};
+    (data[TABLES.invoiceItems] || []).filter((it) => ids.has(it.invoiceId)).forEach((it) => {
+      const e = m[it.variantId] || (m[it.variantId] = { qty: 0, revenue: 0, profit: 0 });
+      e.qty += num(it.qty); e.revenue += num(it.total); e.profit += num(it.lineProfit);
+    });
+    return Object.entries(m).map(([vid, e]) => {
+      const v = variants.find((x) => x.id === vid);
+      const label = v ? (v.nameEn || Object.values(v.attributes || {}).filter(Boolean).join(' · ') || v.sku) : '—';
+      return { ...e, label, sku: v?.sku || '' };
+    }).sort((a, b) => b.revenue - a.revenue);
+  }, [data, range]);
   const trend = useMemo(() => periodTrend(data, trendMode, trendMode === 'year' ? 4 : 6), [data, trendMode]);
   const emirates = useMemo(() => emirateStats(data), [data]);
   const clinics = useMemo(() => topClinics(data, 5), [data]);
@@ -71,7 +90,7 @@ export default function Dashboard() {
           </div>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: range === 'day' ? '1fr 1fr' : '1fr 1fr 1fr', gap: 10, position: 'relative' }}>
-          <HeroFig label={t('salesProfit')} value={cur(pl.salesProfit)} sub={`${t('profitMargin')} ${fmtNum(pl.margin)}%`} />
+          <HeroFig label={t('salesProfit')} value={cur(pl.salesProfit)} sub={`${t('profitMargin')} ${fmtNum(pl.margin)}%`} onClick={() => setShowSold(true)} />
           {range !== 'day' && <HeroFig label={t('operatingProfit')} value={cur(pl.operatingProfit)} />}
           <HeroFig label={t('netAfterAll')} value={cur(pl.netAfterAll)} strong neg={pl.netAfterAll < 0} />
         </div>
@@ -237,10 +256,10 @@ function alertText(al, t, cur) {
   }
 }
 
-function HeroFig({ label, value, sub, strong, neg }) {
+function HeroFig({ label, value, sub, strong, neg, onClick }) {
   return (
-    <div style={{ background: strong ? 'rgba(255,255,255,.16)' : 'transparent', borderRadius: 14, padding: strong ? '10px 12px' : '4px 2px' }}>
-      <div style={{ fontSize: 11, opacity: .85, fontWeight: 600 }}>{label}</div>
+    <div onClick={onClick} style={{ background: strong ? 'rgba(255,255,255,.16)' : 'transparent', borderRadius: 14, padding: strong ? '10px 12px' : '4px 2px', cursor: onClick ? 'pointer' : 'default' }}>
+      <div style={{ fontSize: 11, opacity: .85, fontWeight: 600 }}>{label}{onClick ? ' ›' : ''}</div>
       <div style={{ fontSize: 21, fontWeight: 800, marginTop: 2, color: neg ? '#FFD9D9' : '#fff' }}>{value}</div>
       {sub && <div style={{ fontSize: 10, opacity: .8 }}>{sub}</div>}
     </div>
