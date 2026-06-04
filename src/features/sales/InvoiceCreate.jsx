@@ -63,12 +63,16 @@ export default function InvoiceCreate({ open, onClose, editing }) {
   const invDiscPct = grossSubtotal > 0 ? round2(safeDiv(invDisc, grossSubtotal) * 100) : 0;
   const netSubtotal = round2(grossSubtotal - invDisc);
   const totals = invoiceTotals([{ unitPrice: netSubtotal, qty: 1, discountAmount: 0 }], settings);
+  const costTotal = round2(lines.reduce((s, l) => { const v = vById(l.variantId); return s + num(v?.purchasePriceAvg) * num(l.qty); }, 0));
+  const expectedProfit = round2(netSubtotal - costTotal);
+  const expectedMargin = netSubtotal > 0 ? round2((expectedProfit / netSubtotal) * 100) : 0;
 
   const catProducts = products.filter((p) => p.categoryId === catId);
   const variantsOfProduct = (pid) => variants.filter((v) => v.productId === pid);
 
   const save = async () => {
     if (lines.length === 0) return;
+    if (lines.some((l) => !(num(l.qty) > 0))) { showToast(t('qty') + ' > 0', 'error'); return; }
     setBusy(true);
     try {
       const number = editing ? editing.invoiceNumber : nextDocNumber(data[TABLES.invoices] || [], 'INV', 'invoiceNumber');
@@ -156,7 +160,11 @@ export default function InvoiceCreate({ open, onClose, editing }) {
           {lines.map((l) => {
             const v = vById(l.variantId);
             const list = num(v?.sellingPriceDefault);
+            const cost = num(v?.purchasePriceAvg);
+            const stock = num(v?.stockQty);
             const disc = Math.max(0, (list - num(l.unitPrice)) * num(l.qty));
+            const loss = num(l.unitPrice) < cost && num(l.unitPrice) > 0;
+            const lowStk = num(l.qty) > stock;
             return (
               <div key={l.variantId} style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: '6px 8px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -168,6 +176,12 @@ export default function InvoiceCreate({ open, onClose, editing }) {
                 {disc > 0 && (
                   <div style={{ fontSize: 10, color: C.warning, marginTop: 3, textAlign: 'end' }}>
                     {t('defaultPrice')} {fmtCur(list, displayCurrency, usdRate)} · {t('discount')} {fmtCur(disc, displayCurrency, usdRate)}
+                  </div>
+                )}
+                {(loss || lowStk) && (
+                  <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+                    {loss && <span style={{ fontSize: 10, fontWeight: 700, color: C.danger, background: C.danger + '15', borderRadius: 6, padding: '2px 7px' }}>⚠ {t('belowCost')} ({fmtCur(cost, displayCurrency, usdRate)})</span>}
+                    {lowStk && <span style={{ fontSize: 10, fontWeight: 700, color: C.warning, background: C.warning + '18', borderRadius: 6, padding: '2px 7px' }}>⚠ {t('insufficientStock')} ({fmtNum(stock)})</span>}
                   </div>
                 )}
               </div>
@@ -186,6 +200,11 @@ export default function InvoiceCreate({ open, onClose, editing }) {
         </div>
         {settings?.taxEnabled && <Row label={`${t('vat')} ${settings.taxRate}%`} value={fmtCur(totals.vat, displayCurrency, usdRate)} />}
         <Row label={t('finalTotal')} value={fmtCur(totals.total, displayCurrency, usdRate)} bold />
+        <div style={{ borderTop: `1px dashed ${C.border}`, margin: '6px 0' }} />
+        <Row label={t('totalCost')} value={fmtCur(costTotal, displayCurrency, usdRate)} />
+        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontWeight: 800, color: expectedProfit >= 0 ? C.success : C.danger }}>
+          <span>{t('expectedProfit')} ({fmtNum(expectedMargin)}%)</span><span>{fmtCur(expectedProfit, displayCurrency, usdRate)}</span>
+        </div>
       </div>
 
       <Field label={t('paymentStatus')}>
