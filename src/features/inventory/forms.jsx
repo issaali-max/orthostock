@@ -16,8 +16,8 @@ export const blankCategory = () => ({ nameAr: '', nameEn: '', icon: '🦷', imag
 export const blankProduct = (categoryId = '') => ({ nameEn: '', brand: '', categoryId, icon: '📦', image_url: '', description: '', isActive: true });
 export const blankVariant = (productId = '') => ({
   productId, sku: '', nameEn: '', attributes: {},
-  purchasePriceLatest: 0, purchasePriceAvg: 0, purchasePriceMin: 0, purchasePriceMax: 0,
-  sellingPriceDefault: 0, stockQty: 0, stockMin: 0, unit: 'piece', notes: '', isActive: true,
+  purchasePriceLatest: '', purchasePriceAvg: '', purchasePriceMin: '', purchasePriceMax: '',
+  sellingPriceDefault: '', stockQty: '', stockMin: '', unit: 'piece', notes: '', isActive: true,
 });
 
 // ── Save helpers (app = useApp()) ──

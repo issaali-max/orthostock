@@ -29,8 +29,8 @@ export default function InvoiceCreate({ open, onClose, editing }) {
   const [customerId, setCustomerId] = useState('');
   const [date, setDate] = useState(todayISO());
   const [paymentStatus, setStatus] = useState('unpaid');
-  const [paidAmount, setPaid] = useState(0);
-  const [invDiscount, setInvDiscount] = useState(0); // amount off the subtotal
+  const [paidAmount, setPaid] = useState('');
+  const [invDiscount, setInvDiscount] = useState(''); // amount off the subtotal
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -44,11 +44,11 @@ export default function InvoiceCreate({ open, onClose, editing }) {
       setCustomerId(editing.customerId || '');
       setDate(editing.date || todayISO());
       setStatus(editing.paymentStatus || 'unpaid');
-      setPaid(num(editing.paidAmount));
-      setInvDiscount(num(editing.discountTotal));
+      setPaid(editing.paidAmount ? num(editing.paidAmount) : '');
+      setInvDiscount(editing.discountTotal ? num(editing.discountTotal) : '');
       setCatId(firstCat);
     } else {
-      setLines([]); setCatId(firstCat); setCustomerId(''); setDate(todayISO()); setStatus('unpaid'); setPaid(0); setInvDiscount(0);
+      setLines([]); setCatId(firstCat); setCustomerId(''); setDate(todayISO()); setStatus('unpaid'); setPaid(''); setInvDiscount('');
     }
   }, [open, editing]);
 
@@ -202,7 +202,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
         {lineDiscountTotal > 0 && <Row label={`${t('discount')} (${t('name')})`} value={'− ' + fmtCur(lineDiscountTotal, displayCurrency, usdRate)} warn />}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
           <span style={{ color: C.textMid }}>{t('invoiceDiscount')}{invDiscPct > 0 ? ` (${fmtNum(invDiscPct)}%)` : ''}</span>
-          <Input type="number" value={invDiscount} onChange={(v) => setInvDiscount(Math.min(Math.max(0, num(v)), grossSubtotal))} style={{ width: 90, padding: 6 }} />
+          <Input type="number" value={invDiscount} onChange={(v) => setInvDiscount(v === '' ? '' : Math.min(Math.max(0, num(v)), grossSubtotal))} style={{ width: 90, padding: 6 }} />
         </div>
         {settings?.taxEnabled && <Row label={`${t('vat')} ${settings.taxRate}%`} value={fmtCur(totals.vat, displayCurrency, usdRate)} />}
         <Row label={t('finalTotal')} value={fmtCur(totals.total, displayCurrency, usdRate)} bold />

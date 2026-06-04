@@ -29,7 +29,7 @@ export default function Purchases() {
     return s ? rows.filter((r) => `${r.purchaseNumber} ${supName(r.supplierId)}`.toLowerCase().includes(s)) : rows;
   }, [data, q]);
 
-  const startNew = () => { setSupplierId(''); setDate(todayISO()); setLines([{ variantId: '', qty: 1, unitCost: 0 }]); setPaid(''); setOpen(true); };
+  const startNew = () => { setSupplierId(''); setDate(todayISO()); setLines([{ variantId: '', qty: 1, unitCost: '' }]); setPaid(''); setOpen(true); };
   const setLine = (i, patch) => setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
   const total = round2(lines.reduce((s, l) => s + num(l.qty) * num(l.unitCost), 0));
 
@@ -86,7 +86,7 @@ export default function Purchases() {
             </div>
           ))}
         </div>
-        <Btn size="sm" variant="light" onClick={() => setLines((ls) => [...ls, { variantId: '', qty: 1, unitCost: 0 }])}>＋ {t('addLine')}</Btn>
+        <Btn size="sm" variant="light" onClick={() => setLines((ls) => [...ls, { variantId: '', qty: 1, unitCost: '' }])}>＋ {t('addLine')}</Btn>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12, fontWeight: 800, color: C.text }}>
           <span>{t('total')}</span><span>{fmtCur(total, displayCurrency, usdRate)}</span>
         </div>

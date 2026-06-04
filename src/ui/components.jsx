@@ -149,7 +149,7 @@ export function Modal({ open, onClose, title, children, footer, width = 460 }) {
       style={{
         position: 'fixed', inset: 0, background: 'rgba(14,29,46,0.45)', zIndex: 1000,
         display: 'flex', alignItems: 'flex-end', justifyContent: 'center', padding: 0,
-        overscrollBehavior: 'contain', touchAction: 'none',
+        overscrollBehavior: 'contain',
       }}
     >
       <div
@@ -165,7 +165,7 @@ export function Modal({ open, onClose, title, children, footer, width = 460 }) {
           <strong style={{ fontSize: 15, color: C.text }}>{title}</strong>
           <button onClick={onClose} style={{ border: 'none', background: 'none', fontSize: 20, cursor: 'pointer', color: C.textMuted }}>×</button>
         </div>
-        <div style={{ padding: 16, overflowY: 'auto', touchAction: 'pan-y', overscrollBehavior: 'contain', WebkitOverflowScrolling: 'touch' }}>{children}</div>
+        <div style={{ padding: 16, overflowY: 'auto', flex: 1, minHeight: 0, WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain' }}>{children}</div>
         {footer && (
           <div style={{ padding: '12px 16px', borderTop: `1px solid ${C.border}`, display: 'flex', gap: 8, justifyContent: 'flex-end', flexShrink: 0 }}>
             {footer}
