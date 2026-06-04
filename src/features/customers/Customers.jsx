@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react';
 import { useApp } from '../../app/AppProvider.jsx';
-import { C, WEEKDAYS, EMIRATES, CITIES, TABLES } from '../../lib/constants.js';
+import { C, WEEKDAYS, emirateOptions, emirateLabel, TABLES } from '../../lib/constants.js';
 import { fmtCur } from '../../lib/money.js';
 import { fmtDate } from '../../lib/dates.js';
 import { customerStats, clinicRating } from '../../lib/engine.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, SearchBar, Select, Textarea } from '../../ui/components.jsx';
 
-const blank = () => ({ name: '', type: 'doctor', phone: '', city: '', emirate: '', specialty: '', workingDays: [], notes: '', isActive: true });
+const blank = () => ({ name: '', type: 'doctor', phone: '', emirate: '', specialty: '', workingDays: [], notes: '', isActive: true });
 
 export default function Customers() {
   const app = useApp();
@@ -15,7 +15,7 @@ export default function Customers() {
   const [editing, setEditing] = useState(null);
   const [viewing, setViewing] = useState(null);
   const [sortBy, setSortBy] = useState('name');     // name | revenue | profit | margin | debt
-  const [cityFilter, setCityFilter] = useState('');
+  const [emirateFilter, setEmirateFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('');  // '' | doctor | center
 
   const invoices = data[TABLES.invoices] || [];
@@ -24,8 +24,8 @@ export default function Customers() {
   const list = useMemo(() => {
     let rows = (data[TABLES.customers] || []).filter((r) => r.isActive !== false);
     const s = q.trim().toLowerCase();
-    if (s) rows = rows.filter((r) => `${r.name} ${r.phone} ${r.city}`.toLowerCase().includes(s));
-    if (cityFilter) rows = rows.filter((r) => r.city === cityFilter);
+    if (s) rows = rows.filter((r) => `${r.name} ${r.phone} ${r.emirate}`.toLowerCase().includes(s));
+    if (emirateFilter) rows = rows.filter((r) => r.emirate === emirateFilter);
     if (typeFilter) rows = rows.filter((r) => r.type === typeFilter);
     const withStats = rows.map((c) => {
       const st = customerStats(invoices, items, c.id);
@@ -40,17 +40,12 @@ export default function Customers() {
       debt: (a, b) => b._st.debt - a._st.debt,
     }[sortBy] || (() => 0);
     return withStats.sort(cmp);
-  }, [data, q, cityFilter, typeFilter, sortBy, invoices, items]);
-
-  const cityOptions = useMemo(() => {
-    const set = new Set((data[TABLES.customers] || []).filter((r) => r.isActive !== false && r.city).map((r) => r.city));
-    return [...set].sort();
-  }, [data]);
+  }, [data, q, emirateFilter, typeFilter, sortBy, invoices, items]);
 
   const save = async () => {
     const r = editing;
     if (!r.name?.trim()) return;
-    const payload = { name: r.name.trim(), type: r.type || 'doctor', phone: r.phone || '', city: r.city || '',
+    const payload = { name: r.name.trim(), type: r.type || 'doctor', phone: r.phone || '',
       emirate: r.emirate || '', specialty: r.specialty || '', workingDays: r.workingDays || [], notes: r.notes || '', isActive: true };
     try { if (r.id) await updateRow(TABLES.customers, r.id, payload); else await createRow(TABLES.customers, payload); setEditing(null); }
     catch { /* toast shown (duplicate phone) */ }
@@ -77,8 +72,8 @@ export default function Customers() {
         ))}
       </div>
       <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-        <Select value={cityFilter} onChange={setCityFilter} placeholder={t('allCities')}
-          options={[{ value: '', label: t('allCities') }, ...cityOptions.map((c) => ({ value: c, label: c }))]} />
+        <Select value={emirateFilter} onChange={setEmirateFilter} placeholder={t('allEmirates')}
+          options={[{ value: '', label: t('allEmirates') }, ...emirateOptions(lang)]} />
         <Select value={typeFilter} onChange={setTypeFilter} placeholder={t('allTypes')}
           options={[{ value: '', label: t('allTypes') }, { value: 'doctor', label: t('doctor') }, { value: 'center', label: t('center') }]} />
       </div>
@@ -92,7 +87,7 @@ export default function Customers() {
                 <div style={{ width: 44, height: 44, borderRadius: 999, background: C.primary + '18', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>{c.type === 'center' ? '🏥' : '🧑‍⚕️'}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 700, color: C.text }}>{c.name}</div>
-                  <div style={{ fontSize: 11, color: C.textMuted }}>{[c.specialty, c.city].filter(Boolean).join(' · ') || '—'}</div>
+                  <div style={{ fontSize: 11, color: C.textMuted }}>{[c.specialty, emirateLabel(c.emirate, lang)].filter(Boolean).join(' · ') || '—'}</div>
                 </div>
                 <div style={{ textAlign: 'end', flexShrink: 0 }}>
                   {st.revenue > 0 && <div style={{ fontSize: 12, fontWeight: 800, color: C.primary }}>{fmtCur(st.revenue, displayCurrency, usdRate)}</div>}
@@ -119,10 +114,7 @@ export default function Customers() {
               <Field label={t('phone')}><Input value={editing.phone} onChange={(v) => setEditing((r) => ({ ...r, phone: v }))} /></Field>
               <Field label={t('specialty')}><Input value={editing.specialty} onChange={(v) => setEditing((r) => ({ ...r, specialty: v }))} /></Field>
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <Field label={t('city')}><Select value={editing.city} onChange={(v) => setEditing((r) => ({ ...r, city: v }))} placeholder="—" options={CITIES} /></Field>
-              <Field label={t('emirate')}><Select value={editing.emirate} onChange={(v) => setEditing((r) => ({ ...r, emirate: v }))} placeholder="—" options={EMIRATES} /></Field>
-            </div>
+            <Field label={t('emirate')}><Select value={editing.emirate} onChange={(v) => setEditing((r) => ({ ...r, emirate: v }))} placeholder="—" options={emirateOptions(lang)} /></Field>
             <Field label={t('workingDays')}>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {WEEKDAYS.map((d) => {

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useApp } from '../../app/AppProvider.jsx';
-import { C, CITIES, TABLES } from '../../lib/constants.js';
+import { C, emirateOptions, emirateLabel, TABLES } from '../../lib/constants.js';
 import { fmtCur } from '../../lib/money.js';
 import { fmtDate } from '../../lib/dates.js';
 import { supplierStats } from '../../lib/engine.js';
@@ -47,7 +47,7 @@ export default function Suppliers() {
               <Card key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }} onClick={() => setViewing(s)}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 700, color: C.text, display: 'flex', gap: 8, alignItems: 'center' }}>{s.name} <Badge tone={s.currency === 'USD' ? 'warning' : 'neutral'}>{s.currency}</Badge></div>
-                  <div style={{ fontSize: 11, color: C.textMuted }}>{[s.phone, s.city].filter(Boolean).join(' · ') || '—'}</div>
+                  <div style={{ fontSize: 11, color: C.textMuted }}>{[s.phone, emirateLabel(s.city, lang)].filter(Boolean).join(' · ') || '—'}</div>
                 </div>
                 {st.totalSpent > 0 && <span style={{ fontSize: 12, color: C.primary, fontWeight: 700 }}>{fmtCur(st.totalSpent, displayCurrency, usdRate)}</span>}
                 <span style={{ color: C.textMuted }}>›</span>
@@ -66,7 +66,7 @@ export default function Suppliers() {
               <Field label={t('phone')}><Input value={editing.phone} onChange={(v) => setEditing((r) => ({ ...r, phone: v }))} /></Field>
               <Field label={t('whatsapp')}><Input value={editing.whatsapp} onChange={(v) => setEditing((r) => ({ ...r, whatsapp: v }))} /></Field>
             </div>
-            <Field label={t('city')}><Select value={editing.city} onChange={(v) => setEditing((r) => ({ ...r, city: v }))} placeholder="—" options={CITIES} /></Field>
+            <Field label={t('emirate')}><Select value={editing.city} onChange={(v) => setEditing((r) => ({ ...r, city: v }))} placeholder="—" options={emirateOptions(lang)} /></Field>
             <Field label={t('currency')}><Select value={editing.currency} onChange={(v) => setEditing((r) => ({ ...r, currency: v }))} options={['AED', 'USD']} /></Field>
             <Field label={t('notes')}><Textarea value={editing.notes} onChange={(v) => setEditing((r) => ({ ...r, notes: v }))} rows={2} /></Field>
             {editing.id && <Btn variant="outline" onClick={() => { if (window.confirm(t('deactivate') + '?')) { deleteRow(TABLES.suppliers, editing.id); setEditing(null); } }} style={{ color: C.danger }}>{t('delete')}</Btn>}

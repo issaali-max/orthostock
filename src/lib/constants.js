@@ -24,7 +24,19 @@ export const SHADOW = '0 2px 10px rgba(13,59,110,0.08)';
 export const SHADOW_LG = '0 8px 28px rgba(13,59,110,0.16)';
 
 // Emirates (constant) — Section 5.
-export const EMIRATES = ['Dubai', 'Abu Dhabi', 'Sharjah', 'Ajman', 'RAK', 'Fujairah', 'UAQ'];
+// The 7 UAE emirates — the single source of truth for location everywhere.
+// Stored value is the English name; label switches with language.
+export const EMIRATES = [
+  { en: 'Abu Dhabi', ar: 'أبوظبي' },
+  { en: 'Dubai', ar: 'دبي' },
+  { en: 'Sharjah', ar: 'الشارقة' },
+  { en: 'Ajman', ar: 'عجمان' },
+  { en: 'Umm Al Quwain', ar: 'أم القيوين' },
+  { en: 'Ras Al Khaimah', ar: 'رأس الخيمة' },
+  { en: 'Fujairah', ar: 'الفجيرة' },
+];
+export const emirateOptions = (lang = 'ar') => EMIRATES.map((e) => ({ value: e.en, label: lang === 'ar' ? e.ar : e.en }));
+export const emirateLabel = (value, lang = 'ar') => { const e = EMIRATES.find((x) => x.en === value); return e ? (lang === 'ar' ? e.ar : e.en) : (value || ''); };
 
 // Common UAE cities for customer/supplier location fields.
 export const CITIES = [
