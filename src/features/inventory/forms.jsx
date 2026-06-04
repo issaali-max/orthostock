@@ -13,7 +13,7 @@ import { num } from '../../lib/money.js';
 
 // ── Blank factories ──
 export const blankCategory = () => ({ nameAr: '', nameEn: '', icon: '🦷', image_url: '', color: C.primary, attributes: [], isActive: true });
-export const blankProduct = (categoryId = '') => ({ nameEn: '', categoryId, icon: '📦', image_url: '', description: '', isActive: true });
+export const blankProduct = (categoryId = '') => ({ nameEn: '', brand: '', categoryId, icon: '📦', image_url: '', description: '', isActive: true });
 export const blankVariant = (productId = '') => ({
   productId, sku: '', nameEn: '', attributes: {},
   purchasePriceLatest: 0, purchasePriceAvg: 0, purchasePriceMin: 0, purchasePriceMax: 0,
@@ -34,7 +34,7 @@ export async function saveCategory(app, rec) {
 export async function saveProduct(app, rec) {
   if (!rec.nameEn?.trim()) return false; // English name required, no Arabic field
   const payload = {
-    nameEn: rec.nameEn.trim(), categoryId: rec.categoryId || null,
+    nameEn: rec.nameEn.trim(), brand: rec.brand || '', categoryId: rec.categoryId || null,
     icon: rec.icon || '📦', image_url: rec.image_url || '', description: rec.description || '', isActive: true,
   };
   if (rec.id) await app.updateRow(TABLES.products, rec.id, payload);
@@ -136,6 +136,9 @@ export function ProductForm({ rec, setRec, t, cats }) {
       <Field label={t('category')}>
         <Select value={rec.categoryId} onChange={(v) => set('categoryId', v)} placeholder="—"
           options={cats.map((c) => ({ value: c.id, label: `${c.icon} ${c.nameEn}` }))} />
+      </Field>
+      <Field label={t('brand')} hint={t('brandHint')}>
+        <Input value={rec.brand} onChange={(v) => set('brand', v)} placeholder="e.g. 3M, Ormco, American Orthodontics" />
       </Field>
       <Field label={t('icon')}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>

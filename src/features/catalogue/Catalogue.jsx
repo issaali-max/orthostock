@@ -20,9 +20,11 @@ const variantLabel = (v) => {
 // Catalogue = browse + management only. Sales happen in the Invoice screen.
 export default function Catalogue() {
   const app = useApp();
-  const { t, data, displayCurrency, usdRate, deleteRow } = app;
+  const { t, lang, data, displayCurrency, usdRate, deleteRow } = app;
   const [catId, setCatId] = useState(null);
   const [q, setQ] = useState('');
+  const [brandFilter, setBrandFilter] = useState('');
+  const [archFilter, setArchFilter] = useState('');
   const [editMode, setEditMode] = useState(false);
   const [edit, setEdit] = useState(null);
 
@@ -89,22 +91,51 @@ export default function Catalogue() {
   // ── Step 2: products of the category, materials listed vertically with stock ──
   const cat = categories.find((c) => c.id === catId);
   const catProducts = products.filter((p) => p.categoryId === catId).filter((p) => !q || p.nameEn.toLowerCase().includes(q.toLowerCase()));
+  // ── Multi-level taxonomy helpers: Brand (product) -> Arch (variant attr) -> Size (variant attrs) ──
+  const ARCH_RE = /arch|jaw|الفك|فك/i;
+  const archValueOf = (v) => { const e = Object.entries(v.attributes || {}).find(([k]) => ARCH_RE.test(k)); return e ? e[1] : ''; };
+  const allCatVariants = catProducts.flatMap((p) => variantsByProduct[p.id] || []);
+  const brands = [...new Set(catProducts.map((p) => (p.brand || '').trim()).filter(Boolean))].sort();
+  const arches = [...new Set(allCatVariants.map(archValueOf).filter(Boolean))].sort();
+  const matchVariantArch = (v) => !archFilter || archValueOf(v) === archFilter;
+  const shownProducts = catProducts
+    .filter((p) => !brandFilter || (p.brand || '') === brandFilter)
+    .filter((p) => !archFilter || (variantsByProduct[p.id] || []).some(matchVariantArch));
 
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-        <button onClick={() => { setCatId(null); setQ(''); }} style={{ border: `1px solid ${C.border}`, background: '#fff', borderRadius: 10, padding: '6px 12px', fontWeight: 700, color: C.primary, cursor: 'pointer' }}>← {t('catalogue')}</button>
+        <button onClick={() => { setCatId(null); setQ(''); setBrandFilter(''); setArchFilter(''); }} style={{ border: `1px solid ${C.border}`, background: '#fff', borderRadius: 10, padding: '6px 12px', fontWeight: 700, color: C.primary, cursor: 'pointer' }}>← {t('catalogue')}</button>
         <h2 style={{ fontSize: 16, fontWeight: 800, color: C.text, margin: 0, flex: 1 }}>{cat ? catLabel(cat) : ''}</h2>
         {editMode && cat && <Btn size="sm" variant="light" onClick={() => openEdit(TABLES.categories, 'category', JSON.parse(JSON.stringify(cat)))}>✎</Btn>}
         {EditToggle}
       </div>
       <SearchBar value={q} onChange={setQ} placeholder={t('search')} />
+      {/* Multi-level filters: Brand then Arch (only shown when there's something to filter) */}
+      {(brands.length > 1 || arches.length > 0) && (
+        <div style={{ display: 'grid', gap: 6, margin: '8px 0' }}>
+          {brands.length > 1 && (
+            <div style={{ display: 'flex', gap: 6, overflowX: 'auto', alignItems: 'center', paddingBottom: 2 }}>
+              <span style={{ fontSize: 11, fontWeight: 800, color: C.textMid, flexShrink: 0 }}>{t('brand')}:</span>
+              <FilterChip active={!brandFilter} onClick={() => setBrandFilter('')}>{t('allBrands')}</FilterChip>
+              {brands.map((b) => <FilterChip key={b} active={brandFilter === b} onClick={() => setBrandFilter(b)}>{b}</FilterChip>)}
+            </div>
+          )}
+          {arches.length > 0 && (
+            <div style={{ display: 'flex', gap: 6, overflowX: 'auto', alignItems: 'center', paddingBottom: 2 }}>
+              <span style={{ fontSize: 11, fontWeight: 800, color: C.textMid, flexShrink: 0 }}>{t('arch')}:</span>
+              <FilterChip active={!archFilter} onClick={() => setArchFilter('')}>{t('allArches')}</FilterChip>
+              {arches.map((a) => <FilterChip key={a} active={archFilter === a} onClick={() => setArchFilter(a)}>{a}</FilterChip>)}
+            </div>
+          )}
+        </div>
+      )}
       {editMode && <Btn size="sm" style={{ marginBottom: 10 }} onClick={() => openEdit(TABLES.products, 'product', blankProduct(catId))}>＋ {t('products')}</Btn>}
 
-      {catProducts.length === 0 ? <EmptyState icon="📦" text={t('noProducts')} /> : (
+      {shownProducts.length === 0 ? <EmptyState icon="📦" text={t('noProducts')} /> : (
         <div style={{ display: 'grid', gap: 14 }}>
-          {catProducts.map((p) => {
-            const vs = variantsByProduct[p.id] || [];
+          {shownProducts.map((p) => {
+            const vs = (variantsByProduct[p.id] || []).filter(matchVariantArch);
             return (
               <div key={p.id} style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: RADIUS, boxShadow: SHADOW, overflow: 'hidden' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 14, borderBottom: vs.length ? `1px solid ${C.surfaceAlt}` : 'none' }}>
@@ -113,7 +144,7 @@ export default function Catalogue() {
                     display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26 }}>{!p.image_url && (p.icon || cat?.icon)}</div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 800, color: C.text }}>{p.nameEn}</div>
-                    <div style={{ fontSize: 12, color: C.textMuted }}>{vs.length} {t('variations')}</div>
+                    <div style={{ fontSize: 12, color: C.textMuted }}>{[p.brand, `${vs.length} ${t('variations')}`].filter(Boolean).join(' · ')}</div>
                   </div>
                   {editMode && (
                     <div style={{ display: 'flex', gap: 6 }}>
@@ -208,5 +239,16 @@ function StockHistory({ app, t, variantId }) {
         </div>
       )}
     </div>
+  );
+}
+
+function FilterChip({ active, onClick, children }) {
+  return (
+    <button onClick={onClick} style={{
+      whiteSpace: 'nowrap', flexShrink: 0, cursor: 'pointer',
+      border: `1.5px solid ${active ? C.primary : C.border}`,
+      background: active ? C.primary : '#fff', color: active ? '#fff' : C.textMid,
+      borderRadius: 999, padding: '5px 12px', fontSize: 12, fontWeight: 700,
+    }}>{children}</button>
   );
 }

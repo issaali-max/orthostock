@@ -45,6 +45,7 @@ create table if not exists products (
   "nameAr" text not null,
   "nameEn" text not null,
   "categoryId" uuid references categories(id),
+  brand text default '',
   icon text default '',
   image_url text default '',
   description text default '',

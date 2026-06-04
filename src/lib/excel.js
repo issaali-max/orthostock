@@ -164,7 +164,8 @@ export async function exportExcel(data, lang = 'ar') {
     { header: 'Stock', key: 'stock', width: 10 },
     { header: 'Min', key: 'min', width: 8 },
     { header: 'StockValue', key: 'sv', width: 13, money: true, formula: (r) => `IF($A${r}="","",$D${r}*$F${r})` },
-  ], vars.map((v) => { const p = prods.find((x) => x.id === v.productId); return { sku: v.sku, name: varName(v), cat: p ? catName(p.categoryId) : '', cost: num(v.purchasePriceAvg), sell: num(v.sellingPriceDefault), stock: num(v.stockQty), min: num(v.stockMin) }; }));
+    { header: 'Brand', key: 'brand', width: 18 },
+  ], vars.map((v) => { const p = prods.find((x) => x.id === v.productId); return { sku: v.sku, name: varName(v), cat: p ? catName(p.categoryId) : '', cost: num(v.purchasePriceAvg), sell: num(v.sellingPriceDefault), stock: num(v.stockQty), min: num(v.stockMin), brand: p?.brand || '' }; }));
 
   buildSheet(wb, 'Customers', [
     { header: 'Name', key: 'name', width: 26 }, { header: 'Type', key: 'type', width: 10 },
@@ -178,8 +179,8 @@ export async function exportExcel(data, lang = 'ar') {
   ], sups.map((s) => ({ name: s.name, phone: s.phone, city: s.city, cur: s.currency })));
 
   buildSheet(wb, 'Products', [
-    { header: 'Product', key: 'n', width: 28 }, { header: 'Category', key: 'c', width: 28 },
-  ], prods.map((p) => ({ n: p.nameEn, c: catName(p.categoryId) })));
+    { header: 'Product', key: 'n', width: 28 }, { header: 'Brand', key: 'b', width: 18 }, { header: 'Category', key: 'c', width: 28 },
+  ], prods.map((p) => ({ n: p.nameEn, b: p.brand || '', c: catName(p.categoryId) })));
 
   buildSheet(wb, 'Categories', [
     { header: 'NameAR', key: 'a', width: 22 }, { header: 'NameEN', key: 'e', width: 22 }, { header: 'Icon', key: 'i', width: 8 },
