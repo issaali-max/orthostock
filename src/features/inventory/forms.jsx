@@ -12,7 +12,7 @@ import { ImageUpload } from '../../ui/ImageUpload.jsx';
 import { num } from '../../lib/money.js';
 
 // ── Blank factories ──
-export const blankCategory = () => ({ nameAr: '', nameEn: '', icon: '🦷', color: C.primary, attributes: [], isActive: true });
+export const blankCategory = () => ({ nameAr: '', nameEn: '', icon: '🦷', image_url: '', color: C.primary, attributes: [], isActive: true });
 export const blankProduct = (categoryId = '') => ({ nameEn: '', categoryId, icon: '📦', image_url: '', description: '', isActive: true });
 export const blankVariant = (productId = '') => ({
   productId, sku: '', nameEn: '', attributes: {},
@@ -25,7 +25,7 @@ export async function saveCategory(app, rec) {
   if (!rec.nameEn?.trim() && !rec.nameAr?.trim()) return false;
   const payload = {
     nameEn: rec.nameEn || rec.nameAr, nameAr: rec.nameAr || rec.nameEn,
-    icon: rec.icon, color: rec.color, attributes: rec.attributes || [], isActive: true,
+    icon: rec.icon, image_url: rec.image_url || '', color: rec.color, attributes: rec.attributes || [], isActive: true,
   };
   if (rec.id) await app.updateRow(TABLES.categories, rec.id, payload);
   else await app.createRow(TABLES.categories, payload);
@@ -82,6 +82,9 @@ export function CategoryForm({ rec, setRec, t }) {
           <Input value={rec.nameEn} onChange={(v) => set('nameEn', v)} placeholder="English" style={{ flex: 1 }} />
           <Input value={rec.nameAr} onChange={(v) => set('nameAr', v)} placeholder="العربية" style={{ flex: 1 }} />
         </div>
+      </Field>
+      <Field label={t('image')} hint={t('imageOrIcon')}>
+        <ImageUpload value={rec.image_url} onChange={(v) => set('image_url', v)} fallback={rec.icon || '🦷'} />
       </Field>
       <Field label={t('icon')}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>

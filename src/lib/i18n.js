@@ -21,7 +21,7 @@ export const DICT = {
     required: 'هذا الحقل مطلوب', saved: 'تم الحفظ', deleted: 'تم الحذف',
     // fields
     name: 'الاسم', nameAr: 'الاسم بالعربية', nameEn: 'الاسم بالإنجليزية',
-    description: 'الوصف', icon: 'الأيقونة', color: 'اللون', active: 'مفعّل', inactive: 'غير مفعّل',
+    description: 'الوصف', image: 'الصورة', imageOrIcon: 'اختر صورة أو أيقونة', icon: 'الأيقونة', color: 'اللون', active: 'مفعّل', inactive: 'غير مفعّل',
     phone: 'الهاتف', whatsapp: 'واتساب', city: 'المدينة', currency: 'العملة',
     notes: 'ملاحظات', category: 'الفئة', unit: 'الوحدة', sku: 'رمز الصنف (SKU)',
     sellingPrice: 'سعر البيع الافتراضي', avgCost: 'متوسط التكلفة', costPrice: 'سعر التكلفة',
@@ -98,7 +98,7 @@ export const DICT = {
     confirm: 'Confirm', none: 'None', noData: 'No data', loading: 'Loading...',
     required: 'This field is required', saved: 'Saved', deleted: 'Deleted',
     name: 'Name', nameAr: 'Name (Arabic)', nameEn: 'Name (English)',
-    description: 'Description', icon: 'Icon', color: 'Color', active: 'Active', inactive: 'Inactive',
+    description: 'Description', image: 'Image', imageOrIcon: 'Pick an image or an icon', icon: 'Icon', color: 'Color', active: 'Active', inactive: 'Inactive',
     phone: 'Phone', whatsapp: 'WhatsApp', city: 'City', currency: 'Currency',
     notes: 'Notes', category: 'Category', unit: 'Unit', sku: 'SKU',
     sellingPrice: 'Default selling price', avgCost: 'Average cost', costPrice: 'Cost price',

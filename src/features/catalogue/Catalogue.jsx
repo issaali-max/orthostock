@@ -64,7 +64,7 @@ export default function Catalogue() {
               <div key={c.id} onClick={() => { setCatId(c.id); setQ(''); }}
                 style={{ position: 'relative', background: '#fff', border: `1px solid ${C.border}`, borderRadius: RADIUS, boxShadow: SHADOW, padding: '18px 12px', cursor: 'pointer', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
                 {editMode && <button onClick={(e) => { e.stopPropagation(); openEdit(TABLES.categories, 'category', JSON.parse(JSON.stringify(c))); }} style={pencilBtn}>✎</button>}
-                <div style={{ width: 58, height: 58, borderRadius: 16, background: (c.color || C.primary) + '1f', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 30 }}>{c.icon}</div>
+                <div style={{ width: 58, height: 58, borderRadius: 16, overflow: 'hidden', background: c.image_url ? `center/cover no-repeat url(${c.image_url})` : (c.color || C.primary) + '1f', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 30 }}>{!c.image_url && c.icon}</div>
                 <div style={{ fontWeight: 800, color: C.text, fontSize: 14 }}>{c.nameEn}</div>
                 <div style={{ fontSize: 12, color: C.textMuted }}>{c.nameAr}</div>
                 <Badge tone="info">{products.filter((p) => p.categoryId === c.id).length} {t('products')}</Badge>
@@ -113,25 +113,33 @@ export default function Catalogue() {
                     </div>
                   )}
                 </div>
-                {/* Materials listed vertically under the product */}
+                {/* Materials listed vertically: attributes as chips, stock emphasised */}
                 <div>
                   {vs.map((v, i) => {
                     const stock = num(v.stockQty);
                     const low = stock <= num(v.stockMin) && num(v.stockMin) > 0;
                     const neg = stock <= 0;
-                    const stockColor = neg ? C.danger : low ? C.warning : C.textMid;
+                    const stockColor = neg ? C.danger : low ? C.warning : C.success;
+                    const attrs = Object.entries(v.attributes || {}).filter(([, val]) => val);
                     return (
                       <div key={v.id} onClick={editMode ? () => openEdit(TABLES.variants, 'variant', { ...v, attributes: { ...(v.attributes || {}) } }) : undefined}
                         style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderTop: i ? `1px solid ${C.surfaceAlt}` : 'none', cursor: editMode ? 'pointer' : 'default' }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontWeight: 700, color: C.text, fontSize: 13 }}>{editMode && '✎ '}{variantLabel(v)}</div>
-                          <div style={{ fontSize: 11, color: C.textMuted }}>{v.sku}</div>
+                          <div style={{ fontWeight: 700, color: C.text, fontSize: 13 }}>{editMode && '✎ '}{v.nameEn || variantLabel(v)}</div>
+                          {attrs.length > 0 && (
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, margin: '4px 0 2px' }}>
+                              {attrs.map(([k, val]) => (
+                                <span key={k} style={{ fontSize: 10, fontWeight: 700, color: C.primaryMid, background: C.primary + '12', borderRadius: 6, padding: '2px 7px' }}>{val}</span>
+                              ))}
+                            </div>
+                          )}
+                          <div style={{ fontSize: 10, color: C.textMuted }}>{v.sku}</div>
                         </div>
-                        <div style={{ textAlign: 'center', minWidth: 72 }}>
-                          <div style={{ fontSize: 13, fontWeight: 800, color: stockColor }}>{fmtNum(stock)}</div>
-                          <div style={{ fontSize: 10, color: C.textMuted }}>{t('stock')}{neg ? ' ⚠' : low ? ' !' : ''}</div>
+                        <div style={{ textAlign: 'center', minWidth: 64 }}>
+                          <div style={{ fontSize: 17, fontWeight: 800, color: stockColor }}>{fmtNum(stock)}</div>
+                          <div style={{ fontSize: 9, color: C.textMuted }}>{t('stock')}{neg ? ' ⚠' : low ? ' !' : ''}</div>
                         </div>
-                        <div style={{ minWidth: 76, textAlign: 'end', fontWeight: 700, color: C.primary, fontSize: 13 }}>
+                        <div style={{ minWidth: 72, textAlign: 'end', fontWeight: 700, color: C.primary, fontSize: 13 }}>
                           {fmtCur(v.sellingPriceDefault, displayCurrency, usdRate)}
                         </div>
                       </div>
