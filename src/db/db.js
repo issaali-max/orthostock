@@ -5,10 +5,9 @@
 // Same method names as before (getAll/findBy/insert/update/remove/
 // resetStore) so feature code and layout never change.
 // ─────────────────────────────────────────────────────────────
-import { TABLES, EXPENSE_GROUP_SEED } from '../lib/constants.js';
+import { TABLES } from '../lib/constants.js';
 import { newId } from '../lib/ids.js';
 import { nowISO } from '../lib/dates.js';
-import { CATALOGUE } from './seedData.js';
 import * as L from './local.js';
 import { cloudConfigured, flush, refreshPending } from './sync.js';
 
@@ -102,6 +101,8 @@ export async function resetStore() {
 }
 
 // Build the local store from settings + admin + suppliers + the real catalogue.
+// First-run bootstrap ONLY: the settings singleton + a default admin login.
+// No demo business data — the app starts empty and reflects Supabase.
 async function seedLocal() {
   await L.idbBulkPut(TABLES.settings, [{
     id: 'singleton', baseCurrency: 'AED', usdRate: 3.6725, taxEnabled: true, taxRate: 5,
@@ -111,31 +112,4 @@ async function seedLocal() {
   await L.idbBulkPut(TABLES.users, [{
     id: newId(), name: 'Admin', email: 'admin@orthostock.ae', password: 'admin123', role: 'admin', isActive: true,
   }]);
-  await L.idbBulkPut(TABLES.suppliers, [
-    { id: newId(), name: 'Gulf Ortho Supplies', phone: '+97150000000', whatsapp: '+97150000000', city: 'Dubai', currency: 'AED', notes: '', isActive: true },
-    { id: newId(), name: 'Ormco International', phone: '+12340000000', whatsapp: '', city: '', currency: 'USD', notes: '', isActive: true },
-  ]);
-  await L.idbBulkPut(TABLES.expenseGroups, EXPENSE_GROUP_SEED.map((g) => ({ id: newId(), ...g, isActive: true })));
-
-  const categories = [], products = [], variants = [];
-  CATALOGUE.forEach((c) => {
-    const catId = newId();
-    categories.push({ id: catId, nameAr: c.nameAr, nameEn: c.nameEn, icon: c.icon, color: c.color, attributes: c.attributes || [], isActive: true });
-    (c.products || []).forEach((p) => {
-      const prodId = newId();
-      products.push({ id: prodId, nameAr: p.nameAr, nameEn: p.nameEn, icon: p.icon || c.icon, image_url: p.image_url || '', categoryId: catId, description: '', isActive: true });
-      (p.variants || []).forEach((v) => {
-        const cost = Number(v.cost) || 0;
-        variants.push({
-          id: newId(), productId: prodId, sku: v.sku, nameEn: v.nameEn, attributes: v.attributes || {},
-          image_url: v.image_url || '',
-          purchasePriceLatest: cost, purchasePriceAvg: cost, purchasePriceMin: cost, purchasePriceMax: cost,
-          sellingPriceDefault: Number(v.selling) || 0, stockQty: 0, stockMin: 0, unit: 'piece', notes: '', isActive: true,
-        });
-      });
-    });
-  });
-  await L.idbBulkPut(TABLES.categories, categories);
-  await L.idbBulkPut(TABLES.products, products);
-  await L.idbBulkPut(TABLES.variants, variants);
 }
