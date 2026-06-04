@@ -92,10 +92,12 @@ export default function InvoiceCreate({ open, onClose, editing }) {
   return (
     <Modal open={open} onClose={onClose} title={editing ? `${t('editInvoice')} · ${editing.invoiceNumber}` : t('newInvoice')} width={520}
       footer={<><Btn variant="ghost" onClick={onClose}>{t('cancel')}</Btn><Btn onClick={save} disabled={busy || lines.length === 0}>{t('save')}</Btn></>}>
-      <Field label={t('customer')}>
-        <Select value={customerId} onChange={setCustomerId} placeholder={t('selectCustomer')} options={customers.map((c) => ({ value: c.id, label: c.name }))} />
-      </Field>
-      <Field label={t('date')}><Input type="date" value={date} onChange={setDate} /></Field>
+      <div style={{ position: 'sticky', top: -1, zIndex: 5, background: '#fff', paddingBottom: 8, marginBottom: 4, borderBottom: `1px solid ${C.surfaceAlt}` }}>
+        <Field label={t('customer')} required>
+          <Select value={customerId} onChange={setCustomerId} placeholder={t('selectCustomer')} options={customers.map((c) => ({ value: c.id, label: c.name }))} />
+        </Field>
+        <Field label={t('date')}><Input type="date" value={date} onChange={setDate} /></Field>
+      </div>
 
       <div style={{ fontSize: 12, fontWeight: 700, color: C.textMid, margin: '4px 0 6px' }}>{t('categories')}</div>
       <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4, marginBottom: 8 }}>
@@ -196,15 +198,16 @@ export default function InvoiceCreate({ open, onClose, editing }) {
         {lineDiscountTotal > 0 && <Row label={`${t('discount')} (${t('name')})`} value={'− ' + fmtCur(lineDiscountTotal, displayCurrency, usdRate)} warn />}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
           <span style={{ color: C.textMid }}>{t('invoiceDiscount')}{invDiscPct > 0 ? ` (${fmtNum(invDiscPct)}%)` : ''}</span>
-          <Input type="number" value={invDiscount} onChange={(v) => setInvDiscount(num(v))} style={{ width: 90, padding: 6 }} />
+          <Input type="number" value={invDiscount} onChange={(v) => setInvDiscount(Math.min(Math.max(0, num(v)), grossSubtotal))} style={{ width: 90, padding: 6 }} />
         </div>
         {settings?.taxEnabled && <Row label={`${t('vat')} ${settings.taxRate}%`} value={fmtCur(totals.vat, displayCurrency, usdRate)} />}
         <Row label={t('finalTotal')} value={fmtCur(totals.total, displayCurrency, usdRate)} bold />
         <div style={{ borderTop: `1px dashed ${C.border}`, margin: '6px 0' }} />
         <Row label={t('totalCost')} value={fmtCur(costTotal, displayCurrency, usdRate)} />
         <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontWeight: 800, color: expectedProfit >= 0 ? C.success : C.danger }}>
-          <span>{t('expectedProfit')} ({fmtNum(expectedMargin)}%)</span><span>{fmtCur(expectedProfit, displayCurrency, usdRate)}</span>
+          <span>{t('expectedProfit')}{netSubtotal > 0 ? ` (${fmtNum(expectedMargin)}%)` : ''}</span><span>{fmtCur(expectedProfit, displayCurrency, usdRate)}</span>
         </div>
+        {expectedProfit < 0 && <div style={{ marginTop: 6, fontSize: 11, fontWeight: 700, color: C.danger, background: C.danger + '12', borderRadius: 8, padding: '6px 9px' }}>⚠ {t('belowCost')} — {t('expectedProfit')} {fmtCur(expectedProfit, displayCurrency, usdRate)}</div>}
       </div>
 
       <Field label={t('paymentStatus')}>
