@@ -342,3 +342,33 @@ export function portfolioStats(data) {
     totalPnL: round2(totalRealized + totalUnrealized + dividends),
   };
 }
+
+// Unified trend for the dashboard chart. mode: 'month' | 'year'.
+// Each bucket carries the four series the user compares:
+// salesProfit, businessExp, personalExp, net (= salesProfit − both expenses).
+function periodKey(iso, mode) { return mode === 'year' ? (iso || '').slice(0, 4) : (iso || '').slice(0, 7); }
+
+export function periodTrend(data, mode = 'month', n = 6) {
+  const invoices = (data[TABLES.invoices] || []).filter((i) => i.status !== 'returned');
+  const items = data[TABLES.invoiceItems] || [];
+  const expenses = data[TABLES.expenses] || [];
+  const groups = data[TABLES.expenseGroups] || [];
+  const typeOf = (gid) => groups.find((g) => g.id === gid)?.type || 'business';
+  const invKey = new Map(invoices.map((i) => [i.id, periodKey(i.date, mode)]));
+
+  const now = new Date();
+  const buckets = [];
+  for (let i = n - 1; i >= 0; i--) {
+    if (mode === 'year') buckets.push({ key: String(now.getFullYear() - i), revenue: 0, salesProfit: 0, businessExp: 0, personalExp: 0, net: 0 });
+    else { const d = new Date(now.getFullYear(), now.getMonth() - i, 1); buckets.push({ key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, revenue: 0, salesProfit: 0, businessExp: 0, personalExp: 0, net: 0 }); }
+  }
+  const byKey = Object.fromEntries(buckets.map((b) => [b.key, b]));
+  for (const inv of invoices) { const b = byKey[periodKey(inv.date, mode)]; if (b) b.revenue += num(inv.total); }
+  for (const it of items) { const b = byKey[invKey.get(it.invoiceId)]; if (b) b.salesProfit += num(it.lineProfit); }
+  for (const e of expenses) { const b = byKey[periodKey(e.date, mode)]; if (b) { if (typeOf(e.groupId) === 'personal') b.personalExp += num(e.amount); else b.businessExp += num(e.amount); } }
+  return buckets.map((b) => ({
+    key: b.key, revenue: round2(b.revenue), salesProfit: round2(b.salesProfit),
+    businessExp: round2(b.businessExp), personalExp: round2(b.personalExp),
+    net: round2(b.salesProfit - b.businessExp - b.personalExp),
+  }));
+}

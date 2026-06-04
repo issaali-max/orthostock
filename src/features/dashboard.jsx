@@ -4,7 +4,7 @@ import { useApp } from '../app/AppProvider.jsx';
 import { C, TABLES, SHADOW } from '../lib/constants.js';
 import { fmtCur, fmtNum, num } from '../lib/money.js';
 import { todayISO } from '../lib/dates.js';
-import { pnl, monthlyTrend, buildAlerts, emirateStats, topClinics } from '../lib/engine.js';
+import { pnl, monthlyTrend, periodTrend, buildAlerts, emirateStats, topClinics } from '../lib/engine.js';
 import { Badge, Card, EmptyState, PageHeader } from '../ui/components.jsx';
 
 const monthStart = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`; };
@@ -13,13 +13,14 @@ const yearStart = () => `${new Date().getFullYear()}-01-01`;
 export default function Dashboard() {
   const { t, data, displayCurrency, usdRate } = useApp();
   const [range, setRange] = useState('month'); // day | month | year
+  const [trendMode, setTrendMode] = useState('month'); // month | year
 
   const bounds = range === 'day' ? { from: todayISO(), to: todayISO() }
     : range === 'year' ? { from: yearStart() } : { from: monthStart() };
 
   const pl = useMemo(() => pnl(data, bounds), [data, range]);
   const today = useMemo(() => pnl(data, { from: todayISO(), to: todayISO() }), [data]);
-  const trend = useMemo(() => monthlyTrend(data, 6), [data]);
+  const trend = useMemo(() => periodTrend(data, trendMode, trendMode === 'year' ? 4 : 6), [data, trendMode]);
   const emirates = useMemo(() => emirateStats(data), [data]);
   const clinics = useMemo(() => topClinics(data, 5), [data]);
   const alerts = useMemo(() => buildAlerts(data), [data]);
@@ -114,20 +115,31 @@ export default function Dashboard() {
         </div>
       </Card>
 
-      {/* ── Monthly trend ── */}
+      {/* ── Comparison trend (4 series, monthly/yearly) ── */}
       <Card className="rise" style={{ marginBottom: 14 }}>
-        <SectionTitle>📈 {t('trend')}</SectionTitle>
-        <div style={{ width: '100%', height: 210, marginTop: 8 }} dir="ltr">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+          <SectionTitle>📊 {t('comparison')}</SectionTitle>
+          <div style={{ display: 'flex', gap: 4, background: C.surfaceAlt, padding: 3, borderRadius: 9 }}>
+            {[['month', t('monthly')], ['year', t('yearly')]].map(([k, label]) => (
+              <button key={k} onClick={() => setTrendMode(k)} style={{
+                padding: '5px 12px', borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: 'pointer', border: 'none',
+                background: trendMode === k ? C.primary : 'transparent', color: trendMode === k ? '#fff' : C.textMid,
+              }}>{label}</button>
+            ))}
+          </div>
+        </div>
+        <div style={{ width: '100%', height: 230, marginTop: 8 }} dir="ltr">
           <ResponsiveContainer>
-            <BarChart data={trend} margin={{ top: 4, right: 4, left: -18, bottom: 0 }} barGap={2}>
+            <BarChart data={trend} margin={{ top: 4, right: 4, left: -18, bottom: 0 }} barCategoryGap="18%" barGap={1}>
               <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
-              <XAxis dataKey="key" tickFormatter={(k) => (k || '').slice(5)} fontSize={10} stroke={C.textMuted} tickLine={false} axisLine={false} />
+              <XAxis dataKey="key" tickFormatter={(k) => (trendMode === 'year' ? k : (k || '').slice(5))} fontSize={10} stroke={C.textMuted} tickLine={false} axisLine={false} />
               <YAxis fontSize={10} stroke={C.textMuted} tickLine={false} axisLine={false} width={42} />
               <Tooltip contentStyle={{ borderRadius: 10, border: `1px solid ${C.border}`, fontSize: 12 }} />
-              <Legend wrapperStyle={{ fontSize: 11 }} />
-              <Bar dataKey="revenue" name={t('revenueLabel')} fill={C.primaryLight} radius={[4, 4, 0, 0]} />
-              <Bar dataKey="profit" name={t('salesProfit')} fill={C.success} radius={[4, 4, 0, 0]} />
-              <Bar dataKey="expenses" name={t('expenses')} fill={C.warning} radius={[4, 4, 0, 0]} />
+              <Legend wrapperStyle={{ fontSize: 10 }} />
+              <Bar dataKey="salesProfit" name={t('salesProfit')} fill={C.success} radius={[3, 3, 0, 0]} />
+              <Bar dataKey="businessExp" name={t('businessExpenses')} fill={C.primaryLight} radius={[3, 3, 0, 0]} />
+              <Bar dataKey="personalExp" name={t('personalExpenses')} fill={C.warning} radius={[3, 3, 0, 0]} />
+              <Bar dataKey="net" name={t('netProfit')} fill={C.primary} radius={[3, 3, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
