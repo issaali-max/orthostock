@@ -92,6 +92,51 @@ export async function remove(table, id) {
   return true;
 }
 
+// Prepare a set of writes (ids, timestamps, uniqueness checks, current-row
+// reads) and apply them in ONE IndexedDB transaction. Use for multi-record
+// business operations that must not be half-written.
+//   specs: [{op:'insert', table, row} | {op:'update', table, id, patch} | {op:'remove', table, id}]
+// NOTE: build final values in the caller (e.g. net stock per variant) — do not
+// issue two updates for the same row, since each reads the original row.
+export async function atomicMutations(specs) {
+  await ensureSeed();
+  const ops = []; const outbox = []; const result = [];
+  for (const s of specs) {
+    if (s.op === 'insert') {
+      const rec = { id: s.row.id || newId(), ...s.row };
+      if (TIMESTAMPED.has(s.table)) rec.createdAt = rec.createdAt || nowISO();
+      await assertUnique(s.table, rec, rec.id);
+      ops.push({ store: s.table, type: 'put', value: rec });
+      outbox.push({ type: 'insert', table: s.table, id: rec.id, row: rec });
+      result.push(rec);
+    } else if (s.op === 'update') {
+      const cur = await L.idbGet(s.table, s.id);
+      if (!cur) { const e = new Error('NOT_FOUND'); e.code = 'NOT_FOUND'; throw e; }
+      const rec = { ...cur, ...s.patch, id: s.id };
+      await assertUnique(s.table, rec, s.id);
+      ops.push({ store: s.table, type: 'put', value: rec });
+      outbox.push({ type: 'update', table: s.table, id: s.id, row: rec });
+      result.push(rec);
+    } else if (s.op === 'remove') {
+      const cur = await L.idbGet(s.table, s.id);
+      if (cur) {
+        if (SOFT_DELETE.has(s.table)) {
+          const rec = { ...cur, isActive: false };
+          ops.push({ store: s.table, type: 'put', value: rec });
+          outbox.push({ type: 'update', table: s.table, id: s.id, row: rec });
+        } else {
+          ops.push({ store: s.table, type: 'delete', key: s.id });
+          outbox.push({ type: 'remove', table: s.table, id: s.id });
+        }
+      }
+      result.push(cur);
+    }
+  }
+  await L.idbAtomicMutations(ops, outbox);
+  refreshPending(); flush();
+  return result;
+}
+
 export async function resetStore() {
   for (const t of Object.values(TABLES)) await L.idbClear(t);
   await L.idbClear('outbox');

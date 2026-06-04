@@ -7,6 +7,7 @@
 import * as db from '../db/db.js';
 import { TABLES } from './constants.js';
 import { num, round2, safeDiv } from './money.js';
+import { newId } from './ids.js';
 
 // Record a manual stock change as an audit movement (the variant's stockQty
 // is written by the caller; this only logs the movement so the ledger stays
@@ -16,6 +17,62 @@ export async function logStockMovement(app, variantId, before, after, type = 'ad
   if (a === b) return;
   await db.insert(TABLES.stockMovements, { variantId, type, qtyChange: round2(a - b), qtyAfter: round2(a), refType: 'manual', refId: null });
   await app.refresh(TABLES.stockMovements);
+}
+
+// Atomic create/replace of a sale. Everything (invoice row, item rows, stock
+// movements, variant stock) is written in ONE transaction, so an edit can
+// never delete the old invoice without writing the replacement. For an edit
+// the invoice row is UPDATED in place (same id/number) and its old items and
+// movements are removed inside the same transaction.
+export async function saveInvoiceAtomic(app, { editingId, invoiceData, lines, invoiceDiscount = 0 }) {
+  const [variants, allItems, allMoves] = await Promise.all([
+    db.getAll(TABLES.variants), db.getAll(TABLES.invoiceItems), db.getAll(TABLES.stockMovements),
+  ]);
+  const vById = new Map(variants.map((v) => [v.id, v]));
+  const stock = new Map(); // variantId -> running final stock
+  const ensure = (id) => { if (!stock.has(id)) stock.set(id, num(vById.get(id)?.stockQty)); return stock.get(id); };
+
+  const invId = editingId || newId();
+  const specs = [];
+  let oldItems = [], oldMoves = [];
+  if (editingId) {
+    oldItems = allItems.filter((x) => x.invoiceId === editingId);
+    oldMoves = allMoves.filter((x) => x.refType === 'invoice' && x.refId === editingId);
+    for (const it of oldItems) if (vById.has(it.variantId)) stock.set(it.variantId, round2(ensure(it.variantId) + num(it.qty)));
+  }
+
+  const gross = lines.reduce((s, l) => s + num(l.unitPrice) * num(l.qty), 0);
+  const invDisc = Math.max(0, num(invoiceDiscount));
+  const factor = gross > 0 ? Math.max(0, (gross - invDisc) / gross) : 1;
+
+  if (editingId) specs.push({ op: 'update', table: TABLES.invoices, id: invId, patch: { ...invoiceData } });
+  else specs.push({ op: 'insert', table: TABLES.invoices, row: { id: invId, ...invoiceData } });
+  for (const it of oldItems) specs.push({ op: 'remove', table: TABLES.invoiceItems, id: it.id });
+  for (const m of oldMoves) specs.push({ op: 'remove', table: TABLES.stockMovements, id: m.id });
+
+  for (const l of lines) {
+    const v = vById.get(l.variantId);
+    const avgCost = num(v?.purchasePriceAvg);
+    const listPrice = num(v?.sellingPriceDefault);
+    const rawUnit = num(l.unitPrice); const qty = num(l.qty);
+    const effUnit = round2(rawUnit * factor);
+    const lineDisc = Math.max(0, round2((listPrice - rawUnit) * qty));
+    specs.push({ op: 'insert', table: TABLES.invoiceItems, row: {
+      invoiceId: invId, variantId: l.variantId, qty, listPrice, unitPrice: effUnit,
+      discountAmount: lineDisc, discountPct: listPrice > 0 ? round2((1 - rawUnit / listPrice) * 100) : 0,
+      avgCostAtSale: avgCost, lineProfit: round2((effUnit - avgCost) * qty), total: round2(effUnit * qty),
+    } });
+    if (v) {
+      const after = round2(ensure(l.variantId) - qty);
+      stock.set(l.variantId, after);
+      specs.push({ op: 'insert', table: TABLES.stockMovements, row: { variantId: v.id, type: 'sale', qtyChange: -qty, qtyAfter: after, refType: 'invoice', refId: invId } });
+    }
+  }
+  for (const [vid, finalQty] of stock) specs.push({ op: 'update', table: TABLES.variants, id: vid, patch: { stockQty: round2(finalQty) } });
+
+  await db.atomicMutations(specs);
+  await Promise.all([app.refresh(TABLES.invoices), app.refresh(TABLES.invoiceItems), app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements)]);
+  return invId;
 }
 
 // Commit a SALE: invoice + items + stock-out movements.

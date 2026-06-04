@@ -12,6 +12,7 @@ import { num } from '../../lib/money.js';
 export default function Settings() {
   const { t, settings, updateSettings, setLang, loading, showToast, data, refresh, createRow, updateRow, deleteRow, user } = useApp();
   const [userEdit, setUserEdit] = useState(null);
+  const [showAudit, setShowAudit] = useState(false);
   const saveUser = async () => {
     const u = userEdit;
     if (!u.email?.trim() || !u.name?.trim()) return;
@@ -187,6 +188,15 @@ export default function Settings() {
         </div>
       </Card>
 
+      {/* Stock audit: variant.stockQty vs the sum of its movements */}
+      <Card style={{ marginTop: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div><div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>🧮 {t('stockAudit')}</div>
+          <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>{t('stockAuditNote')}</div></div>
+          <Btn size="sm" variant="light" onClick={() => setShowAudit(true)}>{t('runCheck')}</Btn>
+        </div>
+      </Card>
+
       <Card style={{ marginTop: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>👥 {t('users')}</div>
@@ -209,6 +219,35 @@ export default function Settings() {
         <div style={{ fontSize: 12, fontWeight: 700, color: C.textMid, marginBottom: 8 }}>Developer</div>
         <Btn variant="outline" onClick={doReset} style={{ color: C.danger }}>Reset to seed catalogue</Btn>
       </Card>
+
+      <Modal open={showAudit} onClose={() => setShowAudit(false)} title={`🧮 ${t('stockAudit')}`}>
+        {(() => {
+          const variants = (data[TABLES.variants] || []).filter((v) => v.isActive !== false);
+          const moves = data[TABLES.stockMovements] || [];
+          const sumByVar = {};
+          moves.forEach((m) => { sumByVar[m.variantId] = (sumByVar[m.variantId] || 0) + num(m.qtyChange); });
+          const rows = variants.map((v) => {
+            const expected = Math.round((sumByVar[v.id] || 0) * 100) / 100;
+            const actual = num(v.stockQty);
+            return { v, expected, actual, diff: Math.round((actual - expected) * 100) / 100 };
+          }).filter((r) => r.diff !== 0).sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
+          if (rows.length === 0) return <div style={{ padding: 14, textAlign: 'center', color: C.success, fontWeight: 700 }}>✓ {t('stockAllConsistent')}</div>;
+          return (
+            <div style={{ display: 'grid', gap: 6 }}>
+              <div style={{ fontSize: 12, color: C.textMid }}>{rows.length} {t('stockMismatch')}</div>
+              {rows.map((r) => (
+                <div key={r.v.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: C.surfaceAlt, borderRadius: 10, padding: '8px 10px' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, color: C.text, fontSize: 13 }}>{r.v.nameEn || r.v.sku}</div>
+                    <div style={{ fontSize: 11, color: C.textMuted }}>{t('stock')}: {r.actual} · {t('ledger')}: {r.expected}</div>
+                  </div>
+                  <Badge tone="warning">{r.diff > 0 ? '+' : ''}{r.diff}</Badge>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
+      </Modal>
 
       <Modal open={!!userEdit} onClose={() => setUserEdit(null)} title={userEdit?.id ? t('edit') : t('addUser')}
         footer={<><Btn variant="ghost" onClick={() => setUserEdit(null)}>{t('cancel')}</Btn><Btn onClick={saveUser}>{t('save')}</Btn></>}>

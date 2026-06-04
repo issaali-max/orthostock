@@ -71,6 +71,32 @@ export function idbBulkPut(store, arr) {
 export function enqueueMutation(m) {
   return run('outbox', 'readwrite', (os) => os.add({ ...m, ts: Date.now() }));
 }
+
+// Apply many writes across several stores in ONE transaction so a multi-record
+// business operation (e.g. an invoice + its items + stock movements + variant
+// updates) is all-or-nothing — never half written. Sync mutations are queued
+// in the SAME transaction so local data and the outbox can't disagree.
+//   ops:    [{ store, type:'put'|'delete', value?, key? }]
+//   outbox: [{ type, table, id, row? }]
+export function idbAtomicMutations(ops, outbox = []) {
+  return openDB().then((db) => new Promise((resolve, reject) => {
+    const stores = [...new Set(ops.map((o) => o.store).concat(outbox.length ? ['outbox'] : []))];
+    let tx;
+    try { tx = db.transaction(stores, 'readwrite'); }
+    catch (e) { return reject(e); }
+    try {
+      for (const op of ops) {
+        const os = tx.objectStore(op.store);
+        if (op.type === 'delete') os.delete(op.key);
+        else os.put(op.value);
+      }
+      if (outbox.length) { const ob = tx.objectStore('outbox'); outbox.forEach((m) => ob.add({ ...m, ts: Date.now() })); }
+    } catch (e) { try { tx.abort(); } catch (_) { /* noop */ } return reject(e); }
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  }));
+}
 export const outboxAll = () => idbGetAll('outbox');
 export const outboxDelete = (seq) => idbDelete('outbox', seq);
 

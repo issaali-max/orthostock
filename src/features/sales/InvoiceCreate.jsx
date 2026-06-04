@@ -4,7 +4,7 @@ import { C, TABLES } from '../../lib/constants.js';
 import { fmtCur, fmtNum, num, round2, safeDiv } from '../../lib/money.js';
 import { todayISO } from '../../lib/dates.js';
 import { nextDocNumber } from '../../lib/ids.js';
-import { commitInvoice, reverseInvoice, invoiceTotals } from '../../lib/engine.js';
+import { saveInvoiceAtomic, invoiceTotals } from '../../lib/engine.js';
 import { Btn, Field, Input, Modal, Select } from '../../ui/components.jsx';
 
 const variantLabel = (v) => {
@@ -77,12 +77,16 @@ export default function InvoiceCreate({ open, onClose, editing }) {
     try {
       const number = editing ? editing.invoiceNumber : nextDocNumber(data[TABLES.invoices] || [], 'INV', 'invoiceNumber');
       const paid = paymentStatus === 'paid' ? totals.total : paymentStatus === 'partial' ? num(paidAmount) : 0;
-      if (editing) await reverseInvoice(app, editing.id);
-      await commitInvoice(app, {
-        invoiceNumber: number, customerId: customerId || null, date,
-        subtotal: netSubtotal, discountTotal: round2(invDisc), total: totals.total,
-        paidAmount: paid, paymentStatus, paymentMethod: 'cash', status: 'active', currency: 'AED', notes: '',
-      }, lines.map((l) => ({ variantId: l.variantId, qty: num(l.qty), unitPrice: num(l.unitPrice) })), { invoiceDiscount: invDisc });
+      await saveInvoiceAtomic(app, {
+        editingId: editing ? editing.id : null,
+        invoiceData: {
+          invoiceNumber: number, customerId: customerId || null, date,
+          subtotal: netSubtotal, discountTotal: round2(invDisc), total: totals.total,
+          paidAmount: paid, paymentStatus, paymentMethod: 'cash', status: 'active', currency: 'AED', notes: '',
+        },
+        lines: lines.map((l) => ({ variantId: l.variantId, qty: num(l.qty), unitPrice: num(l.unitPrice) })),
+        invoiceDiscount: invDisc,
+      });
       showToast(`${number} ✓`, 'success');
       onClose();
     } catch (e) { console.error(e); showToast('Error', 'error'); }
