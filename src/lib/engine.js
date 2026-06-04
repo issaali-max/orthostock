@@ -316,22 +316,31 @@ export async function commitSell(app, { securityId, sellDate, qty, pricePerShare
   await Promise.all([app.refresh(TABLES.tradeLots), app.refresh(TABLES.tradeSells)]);
 }
 
-export function portfolioStats(data) {
+export function portfolioStats(data, priceOf) {
   const securities = (data[TABLES.securities] || []).filter((s) => s.isActive !== false);
   const lots = data[TABLES.tradeLots] || [];
   const sells = data[TABLES.tradeSells] || [];
   const flows = data[TABLES.cashFlows] || [];
+  const priceFor = (s) => { const p = priceOf ? priceOf(s.id) : undefined; return p != null ? num(p) : num(s.currentPrice); };
 
   const positions = securities.map((s) => {
     const myLots = lots.filter((l) => l.securityId === s.id);
+    const mySells = sells.filter((x) => x.securityId === s.id);
     const qty = myLots.reduce((a, l) => a + num(l.qtyRemaining), 0);
     const remainingCost = myLots.reduce((a, l) => a + safeDiv(num(l.costBasis), num(l.qtyBought), num(l.buyPricePerShare)) * num(l.qtyRemaining), 0);
-    const price = num(s.currentPrice);
+    const price = priceFor(s);
     const marketValue = round2(qty * price);
-    const realized = sells.filter((x) => x.securityId === s.id).reduce((a, x) => a + num(x.realizedPnL), 0);
+    const realized = mySells.reduce((a, x) => a + num(x.realizedPnL), 0);
+    const cashIn = round2(myLots.reduce((a, l) => a + num(l.costBasis), 0));   // lifetime invested
+    const cashOut = round2(mySells.reduce((a, x) => a + num(x.proceeds), 0));  // lifetime liquidated
+    const divs = round2(flows.filter((f) => f.securityId === s.id && f.type === 'dividend').reduce((a, f) => a + num(f.amount), 0));
+    const unrealized = round2(marketValue - remainingCost);
     return {
       ...s, qty: round2(qty), avgCost: round2(safeDiv(remainingCost, qty)), price,
-      marketValue, unrealized: round2(marketValue - remainingCost), realized: round2(realized), remainingCost: round2(remainingCost),
+      marketValue, unrealized, realized: round2(realized), remainingCost: round2(remainingCost),
+      cashIn, cashOut, dividends: divs, totalPnL: round2(realized + unrealized + divs),
+      everTraded: myLots.length > 0 || mySells.length > 0,
+      fullySold: round2(qty) <= 0 && (myLots.length > 0 || mySells.length > 0),
     };
   });
 
@@ -351,6 +360,23 @@ export function portfolioStats(data) {
     accountValue: round2(cash + holdingsValue),
     totalPnL: round2(totalRealized + totalUnrealized + dividends),
   };
+}
+
+// Unified, chronological transaction ledger for one security.
+export function stockLedger(data, securityId) {
+  const buys = (data[TABLES.tradeLots] || []).filter((l) => l.securityId === securityId)
+    .map((l) => ({ kind: 'buy', date: l.buyDate, qty: num(l.qtyBought), price: num(l.buyPricePerShare), fees: num(l.buyFees), amount: round2(num(l.costBasis)), id: l.id }));
+  const sells = (data[TABLES.tradeSells] || []).filter((x) => x.securityId === securityId)
+    .map((x) => ({ kind: 'sell', date: x.sellDate, qty: num(x.qty), price: num(x.sellPricePerShare), fees: num(x.sellFees), amount: round2(num(x.proceeds)), realizedPnL: num(x.realizedPnL), id: x.id }));
+  const cash = (data[TABLES.cashFlows] || []).filter((f) => f.securityId === securityId)
+    .map((f) => ({ kind: f.type, date: f.date, qty: 0, price: 0, amount: round2(num(f.amount)), id: f.id }));
+  return [...buys, ...sells, ...cash].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+}
+
+// Record a per-stock cash event (dividend/fee/interest tied to a security).
+export async function commitDividend(app, { securityId, date, amount, type = 'dividend' }) {
+  await db.insert(TABLES.cashFlows, { type, date, amount: num(amount), securityId, currency: 'AED', notes: '' });
+  await app.refresh(TABLES.cashFlows);
 }
 
 // Unified trend for the dashboard chart. mode: 'month' | 'year'.

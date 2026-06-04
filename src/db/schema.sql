@@ -236,6 +236,7 @@ create table if not exists "cashFlows" (
   date date not null,
   amount numeric not null default 0,
   currency text not null default 'AED',
+  "securityId" uuid references securities(id),
   notes text default '',
   "createdAt" timestamptz not null default now()
 );
