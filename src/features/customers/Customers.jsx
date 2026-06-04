@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react';
 import { useApp } from '../../app/AppProvider.jsx';
 import { C, WEEKDAYS, emirateOptions, emirateLabel, TABLES } from '../../lib/constants.js';
-import { fmtCur } from '../../lib/money.js';
+import { fmtCur, num, round2 } from '../../lib/money.js';
 import { fmtDate } from '../../lib/dates.js';
-import { customerStats, clinicRating } from '../../lib/engine.js';
-import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, SearchBar, Select, Textarea } from '../../ui/components.jsx';
+import { customerStats, clinicRating, recordInvoicePayment } from '../../lib/engine.js';
+import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, PaymentModal, SearchBar, Select, Textarea } from '../../ui/components.jsx';
 
 const blank = () => ({ name: '', type: 'doctor', phone: '', emirate: '', specialty: '', workingDays: [], notes: '', isActive: true });
 
@@ -146,6 +146,7 @@ function CustomerProfile({ customer, onBack, onEdit, t, lang, displayCurrency, u
   const rating = clinicRating(allCustomers, invoices, items, customer.id);
   const variants = app.data[TABLES.variants] || [];
   const skuOf = (id) => variants.find((v) => v.id === id)?.sku || '—';
+  const [payFor, setPayFor] = useState(null);
 
   return (
     <div>
@@ -177,6 +178,7 @@ function CustomerProfile({ customer, onBack, onEdit, t, lang, displayCurrency, u
         <div style={{ display: 'grid', gap: 8 }}>
           {st.invoices.slice().reverse().map((inv) => {
             const lines = items.filter((it) => it.invoiceId === inv.id);
+            const remaining = round2(num(inv.total) - num(inv.paidAmount));
             return (
               <Card key={inv.id}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -184,12 +186,29 @@ function CustomerProfile({ customer, onBack, onEdit, t, lang, displayCurrency, u
                   <Badge tone={inv.paymentStatus === 'paid' ? 'success' : inv.paymentStatus === 'partial' ? 'warning' : 'danger'}>{t(inv.paymentStatus)}</Badge>
                 </div>
                 <div style={{ fontSize: 11, color: C.textMuted, margin: '2px 0 6px' }}>{fmtDate(inv.date, lang)} · {fmtCur(inv.total, displayCurrency, usdRate)}</div>
-                <div style={{ fontSize: 12, color: C.textMid }}>{lines.map((l) => `${skuOf(l.variantId)}×${l.qty}`).join(' · ')}</div>
+                <div style={{ display: 'grid', gap: 2, marginBottom: 6 }}>
+                  {lines.map((l) => (
+                    <div key={l.id} style={{ fontSize: 12, color: C.textMid, display: 'flex', justifyContent: 'space-between' }}>
+                      <span>{skuOf(l.variantId)} × {l.qty}</span>
+                      <span>{fmtCur(l.total, displayCurrency, usdRate)}</span>
+                    </div>
+                  ))}
+                </div>
+                {remaining > 0 && (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: `1px solid ${C.surfaceAlt}`, paddingTop: 8 }}>
+                    <span style={{ fontSize: 12, color: C.danger, fontWeight: 700 }}>{t('remaining')}: {fmtCur(remaining, displayCurrency, usdRate)}</span>
+                    <Btn size="sm" variant="light" onClick={() => setPayFor(inv)}>💵 {t('recordPayment')}</Btn>
+                  </div>
+                )}
               </Card>
             );
           })}
         </div>
       )}
+
+      <PaymentModal open={!!payFor} invoice={payFor} t={t} cur={(v) => fmtCur(v, displayCurrency, usdRate)}
+        onClose={() => setPayFor(null)}
+        onRecord={(amount) => recordInvoicePayment(app, payFor.id, amount)} />
     </div>
   );
 }

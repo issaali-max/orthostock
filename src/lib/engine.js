@@ -8,6 +8,25 @@ import * as db from '../db/db.js';
 import { TABLES } from './constants.js';
 import { num, round2, safeDiv } from './money.js';
 import { newId } from './ids.js';
+import { todayISO } from './dates.js';
+
+// Record a payment against an invoice: appends to its payment history,
+// updates paidAmount (capped at total) and recomputes paymentStatus.
+export async function recordInvoicePayment(app, invoiceId, amount, date) {
+  const all = await db.getAll(TABLES.invoices);
+  const inv = all.find((x) => x.id === invoiceId);
+  if (!inv) return null;
+  const total = num(inv.total);
+  const prev = num(inv.paidAmount);
+  const add = Math.max(0, Math.min(num(amount), round2(total - prev))); // can't overpay
+  if (add <= 0) return inv;
+  const newPaid = round2(prev + add);
+  const payments = [...(inv.payments || []), { date: date || todayISO(), amount: add }];
+  const paymentStatus = newPaid >= total ? 'paid' : newPaid > 0 ? 'partial' : 'unpaid';
+  const saved = await db.update(TABLES.invoices, invoiceId, { paidAmount: newPaid, paymentStatus, payments });
+  await app.refresh(TABLES.invoices);
+  return saved;
+}
 
 // Record a manual stock change as an audit movement (the variant's stockQty
 // is written by the caller; this only logs the movement so the ledger stays

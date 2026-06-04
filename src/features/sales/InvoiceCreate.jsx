@@ -77,12 +77,13 @@ export default function InvoiceCreate({ open, onClose, editing }) {
     try {
       const number = editing ? editing.invoiceNumber : nextDocNumber(data[TABLES.invoices] || [], 'INV', 'invoiceNumber');
       const paid = paymentStatus === 'paid' ? totals.total : paymentStatus === 'partial' ? num(paidAmount) : 0;
+      const payments = editing?.payments?.length ? editing.payments : (paid > 0 ? [{ date, amount: round2(paid) }] : []);
       await saveInvoiceAtomic(app, {
         editingId: editing ? editing.id : null,
         invoiceData: {
           invoiceNumber: number, customerId: customerId || null, date,
           subtotal: netSubtotal, discountTotal: round2(invDisc), total: totals.total,
-          paidAmount: paid, paymentStatus, paymentMethod: 'cash', status: 'active', currency: 'AED', notes: '',
+          paidAmount: paid, paymentStatus, paymentMethod: 'cash', status: 'active', currency: 'AED', notes: '', payments,
         },
         lines: lines.map((l) => ({ variantId: l.variantId, qty: num(l.qty), unitPrice: num(l.unitPrice) })),
         invoiceDiscount: invDisc,
@@ -217,7 +218,14 @@ export default function InvoiceCreate({ open, onClose, editing }) {
       <Field label={t('paymentStatus')}>
         <Select value={paymentStatus} onChange={setStatus} options={[{ value: 'unpaid', label: t('unpaid') }, { value: 'partial', label: t('partial') }, { value: 'paid', label: t('paid') }]} />
       </Field>
-      {paymentStatus === 'partial' && <Field label={t('paidAmount')}><Input type="number" value={paidAmount} onChange={setPaid} /></Field>}
+      {paymentStatus === 'partial' && (
+        <>
+          <Field label={t('paymentAmount')}><Input type="number" value={paidAmount} placeholder={String(totals.total)} onChange={(v) => setPaid(v === '' ? '' : Math.min(Math.max(0, num(v)), totals.total))} /></Field>
+          <div style={{ display: 'flex', justifyContent: 'space-between', background: C.surfaceAlt, borderRadius: 10, padding: '8px 12px', fontWeight: 800, color: (totals.total - num(paidAmount)) > 0 ? C.danger : C.success }}>
+            <span>{t('debt')}</span><span>{fmtCur(round2(totals.total - num(paidAmount)), displayCurrency, usdRate)}</span>
+          </div>
+        </>
+      )}
     </Modal>
   );
 }

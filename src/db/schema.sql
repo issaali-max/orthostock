@@ -154,6 +154,7 @@ create table if not exists invoices (
   status text not null default 'active' check (status in ('active','returned')),
   currency text not null default 'AED',
   notes text default '',
+  payments jsonb not null default '[]',
   "createdAt" timestamptz not null default now()
 );
 

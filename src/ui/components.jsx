@@ -269,3 +269,52 @@ export function PageHeader({ title, action }) {
     </div>
   );
 }
+
+// ── Payment recorder (shared by Invoices + Customer profile) ──
+// Presentational: calls onRecord(amount). `cur` formats currency, `t` translates.
+export function PaymentModal({ open, onClose, invoice, t, cur, onRecord }) {
+  const [amount, setAmount] = useState('');
+  useEffect(() => { if (open) setAmount(''); }, [open, invoice?.id]);
+  if (!invoice) return null;
+  const total = Number(invoice.total) || 0;
+  const paid = Number(invoice.paidAmount) || 0;
+  const remaining = Math.round((total - paid) * 100) / 100;
+  const history = invoice.payments || [];
+  const submit = () => { const a = Number(amount) || 0; if (a > 0) { onRecord(a); onClose(); } };
+  return (
+    <Modal open={open} onClose={onClose} title={`${t('recordPayment')} · ${invoice.invoiceNumber || ''}`}
+      footer={<><Btn variant="ghost" onClick={onClose}>{t('cancel')}</Btn><Btn onClick={submit} disabled={!(Number(amount) > 0)}>{t('save')}</Btn></>}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 12 }}>
+        <div style={{ background: C.surfaceAlt, borderRadius: 10, padding: 10, textAlign: 'center' }}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: C.text }}>{cur(total)}</div>
+          <div style={{ fontSize: 10, color: C.textMuted }}>{t('finalTotal')}</div>
+        </div>
+        <div style={{ background: '#E9F6EF', borderRadius: 10, padding: 10, textAlign: 'center' }}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: C.success }}>{cur(paid)}</div>
+          <div style={{ fontSize: 10, color: C.textMuted }}>{t('paidAmount')}</div>
+        </div>
+        <div style={{ background: remaining > 0 ? '#FBECEC' : '#E9F6EF', borderRadius: 10, padding: 10, textAlign: 'center' }}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: remaining > 0 ? C.danger : C.success }}>{cur(remaining)}</div>
+          <div style={{ fontSize: 10, color: C.textMuted }}>{t('remaining')}</div>
+        </div>
+      </div>
+      {remaining > 0 ? (
+        <Field label={t('paymentAmount')}>
+          <Input type="number" value={amount} placeholder={String(remaining)} onChange={(v) => setAmount(v === '' ? '' : Math.min(Math.max(0, Number(v) || 0), remaining))} />
+        </Field>
+      ) : <div style={{ color: C.success, fontWeight: 700, textAlign: 'center', padding: 8 }}>✓ {t('paid')}</div>}
+      {history.length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 12, fontWeight: 800, color: C.textMid, marginBottom: 6 }}>{t('paymentsHistory')}</div>
+          <div style={{ display: 'grid', gap: 4 }}>
+            {history.map((p, i) => (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: C.textMid, background: C.surfaceAlt, borderRadius: 8, padding: '5px 9px' }}>
+                <span>{p.date}</span><span style={{ fontWeight: 700, color: C.success }}>+{cur(p.amount)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
