@@ -77,6 +77,18 @@ export function AppProvider({ children }) {
   // Start offline<->cloud sync once; re-pull refreshes the UI caches.
   useEffect(() => { startSync(() => loadAll()); }, [loadAll]);
 
+  // Daily OneDrive auto-backup (silent; only if enabled, connected, and due).
+  useEffect(() => {
+    const od = settings?.oneDrive;
+    if (!od?.auto || !od.clientId) return;
+    let cancelled = false;
+    import('../lib/onedrive.js')
+      .then(({ autoBackupIfDue }) => { if (!cancelled) return autoBackupIfDue(settings, (at) => updateSettings({ oneDrive: { ...od, lastBackupAt: at } })); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings?.oneDrive?.auto, settings?.oneDrive?.clientId]);
+
   // ── Auth (simple gate; Supabase Auth can replace this transparently) ──
   const login = useCallback(async (email, password) => {
     const u = await db.findBy(TABLES.users, 'email', String(email).trim().toLowerCase());

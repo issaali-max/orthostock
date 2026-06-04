@@ -79,6 +79,9 @@ export const DICT = {
     byMargin: 'الأعلى هامشاً', byDebt: 'الأعلى ديناً', allCities: 'كل المدن', allTypes: 'كل الأنواع',
     profitMargin: 'هامش الربح', filterCity: 'المدينة',
     exportExcel: 'تصدير Excel', importExcel: 'استيراد Excel', excelHint: 'ملف واحد بكل الأقسام — عدّل ثم استورد لتحديث المخزون والعملاء',
+    oneDrive: 'النسخ على OneDrive', oneDriveClientId: 'Client ID (من Azure)', connect: 'ربط الحساب', disconnect: 'فصل',
+    connected: 'متصل', backupNow: 'نسخ احتياطي الآن', autoBackup: 'نسخ تلقائي يومي', lastBackup: 'آخر نسخة',
+    oneDriveHint: 'سجّل تطبيقاً مجانياً في Azure، الصق Client ID، ثم اربط حسابك — يُحفظ ملف JSON في مجلد Apps/OrthoStock',
   },
   en: {
     appName: 'OrthoStock',
@@ -150,6 +153,9 @@ export const DICT = {
     byMargin: 'Top margin', byDebt: 'Top debt', allCities: 'All cities', allTypes: 'All types',
     profitMargin: 'Profit margin', filterCity: 'City',
     exportExcel: 'Export Excel', importExcel: 'Import Excel', excelHint: 'One file, all sections — edit then import to update stock & customers',
+    oneDrive: 'OneDrive backup', oneDriveClientId: 'Client ID (from Azure)', connect: 'Connect account', disconnect: 'Disconnect',
+    connected: 'Connected', backupNow: 'Back up now', autoBackup: 'Daily auto-backup', lastBackup: 'Last backup',
+    oneDriveHint: 'Register a free Azure app, paste the Client ID, then connect — a JSON file is saved to Apps/OrthoStock',
   },
 };
 

@@ -6,6 +6,7 @@ import { resetStore, dbMode } from '../../db/db.js';
 import { subscribeSync } from '../../db/sync.js';
 import { exportBackup, importBackup } from '../../lib/backup.js';
 import { exportExcel, importExcel } from '../../lib/excel.js';
+import { connectOneDrive, disconnectOneDrive, getOneDriveAccount, backupToOneDrive } from '../../lib/onedrive.js';
 import { num } from '../../lib/money.js';
 
 export default function Settings() {
@@ -62,6 +63,37 @@ export default function Settings() {
     finally { e.target.value = ''; }
   };
 
+  const od = settings.oneDrive || {};
+  const [odClientId, setOdClientId] = useState(od.clientId || '');
+  const [odBusy, setOdBusy] = useState(false);
+  useEffect(() => { setOdClientId(settings.oneDrive?.clientId || ''); }, [settings.oneDrive?.clientId]);
+
+  const odConnect = async () => {
+    if (!odClientId.trim()) { showToast(t('oneDriveClientId'), 'error'); return; }
+    setOdBusy(true);
+    try {
+      const account = await connectOneDrive(odClientId.trim());
+      await updateSettings({ oneDrive: { ...od, clientId: odClientId.trim(), connected: true, account } });
+      showToast(`✓ ${account}`, 'success');
+    } catch (e) { console.error(e); showToast('Connect failed', 'error'); }
+    finally { setOdBusy(false); }
+  };
+  const odDisconnect = async () => {
+    await disconnectOneDrive(od.clientId);
+    await updateSettings({ oneDrive: { ...od, connected: false, account: '' } });
+  };
+  const odBackupNow = async () => {
+    setOdBusy(true);
+    try {
+      await backupToOneDrive(od.clientId || odClientId.trim());
+      const at = new Date().toISOString();
+      await updateSettings({ oneDrive: { ...od, clientId: od.clientId || odClientId.trim(), lastBackupAt: at } });
+      showToast('✓ OneDrive', 'success');
+    } catch (e) { console.error(e); showToast('Backup failed', 'error'); }
+    finally { setOdBusy(false); }
+  };
+  const odToggleAuto = async (on) => { await updateSettings({ oneDrive: { ...od, clientId: od.clientId || odClientId.trim(), auto: on } }); };
+
   const syncTone = !sync.configured ? 'neutral' : !sync.online ? 'warning' : sync.pending ? 'info' : 'success';
   const syncLabel = !sync.configured ? 'Offline only (no cloud)'
     : !sync.online ? `Offline — ${sync.pending} queued`
@@ -104,6 +136,28 @@ export default function Settings() {
           </Field>
         )}
         <Btn onClick={save} disabled={loading} size="lg" style={{ marginTop: 6 }}>{t('save')}</Btn>
+      </Card>
+
+      <Card style={{ marginTop: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 4 }}>☁️ {t('oneDrive')}
+          {od.connected && <Badge tone="success" >{t('connected')}</Badge>}
+        </div>
+        <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 10 }}>{t('oneDriveHint')}</div>
+        <Field label={t('oneDriveClientId')}>
+          <Input value={odClientId} onChange={setOdClientId} placeholder="00000000-0000-0000-0000-000000000000" />
+        </Field>
+        {od.connected && od.account && <div style={{ fontSize: 12, color: C.textMid, marginBottom: 8 }}>👤 {od.account}</div>}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+          {!od.connected
+            ? <Btn onClick={odConnect} disabled={odBusy}>🔗 {t('connect')}</Btn>
+            : <><Btn onClick={odBackupNow} disabled={odBusy}>⬆ {t('backupNow')}</Btn>
+              <Btn variant="outline" onClick={odDisconnect} style={{ color: C.danger }}>{t('disconnect')}</Btn></>}
+        </div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: C.textMid }}>
+          <input type="checkbox" checked={!!od.auto} onChange={(e) => odToggleAuto(e.target.checked)} disabled={!od.connected} />
+          {t('autoBackup')}
+        </label>
+        {od.lastBackupAt && <div style={{ fontSize: 11, color: C.textMuted, marginTop: 6 }}>{t('lastBackup')}: {new Date(od.lastBackupAt).toLocaleString()}</div>}
       </Card>
 
       <Card style={{ marginTop: 16 }}>

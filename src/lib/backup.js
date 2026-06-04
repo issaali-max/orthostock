@@ -6,9 +6,14 @@
 import { TABLES } from './constants.js';
 import * as L from '../db/local.js';
 
-export async function exportBackup() {
+export async function collectBackup() {
   const out = { _meta: { app: 'OrthoStock', version: '2.6', exportedAt: new Date().toISOString() } };
   for (const t of Object.values(TABLES)) out[t] = await L.idbGetAll(t);
+  return out;
+}
+
+export async function exportBackup() {
+  const out = await collectBackup();
   const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
