@@ -60,9 +60,9 @@ export function AppProvider({ children }) {
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const results = await Promise.all(CORE_TABLES.map((tbl) => db.getAll(tbl)));
+      const results = await Promise.allSettled(CORE_TABLES.map((tbl) => db.getAll(tbl)));
       const next = {};
-      CORE_TABLES.forEach((tbl, i) => { next[tbl] = results[i]; });
+      CORE_TABLES.forEach((tbl, i) => { next[tbl] = results[i].status === 'fulfilled' ? results[i].value : []; });
       setData((d) => ({ ...d, ...next }));
     } catch (e) {
       console.error(e);

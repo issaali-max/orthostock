@@ -9,7 +9,7 @@
 import { TABLES } from '../lib/constants.js';
 
 const DB_NAME = 'orthostock';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // bump whenever TABLES gains a store, so onupgradeneeded recreates missing stores
 const STORES = [...Object.values(TABLES), 'outbox', 'meta'];
 
 let _open;
@@ -35,7 +35,9 @@ function openDB() {
 
 function run(store, mode, fn) {
   return openDB().then((db) => new Promise((resolve, reject) => {
-    const tx = db.transaction(store, mode);
+    let tx;
+    try { tx = db.transaction(store, mode); }
+    catch (e) { return reject(e); } // e.g. store missing on an old DB
     const os = tx.objectStore(store);
     let result;
     const r = fn(os);
@@ -46,7 +48,10 @@ function run(store, mode, fn) {
   }));
 }
 
-export const idbGetAll = (store) => run(store, 'readonly', (os) => os.getAll());
+// Reads tolerate a missing store (returns []) so one new table can never
+// break the whole initial load.
+export const idbGetAll = (store) => run(store, 'readonly', (os) => os.getAll())
+  .catch((e) => { if (/NotFound/i.test(e?.name || '')) return []; throw e; });
 export const idbGet = (store, id) => run(store, 'readonly', (os) => os.get(id));
 export const idbPut = (store, obj) => run(store, 'readwrite', (os) => os.put(obj)).then(() => obj);
 export const idbDelete = (store, id) => run(store, 'readwrite', (os) => os.delete(id));
