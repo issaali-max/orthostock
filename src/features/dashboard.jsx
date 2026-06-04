@@ -241,6 +241,27 @@ export default function Dashboard() {
           </div>
         )}
       </Card>
+
+      {/* Interactive drill-down: materials sold in the active period */}
+      <Modal open={showSold} onClose={() => setShowSold(false)}
+        title={`${t('soldMaterials')} — ${range === 'day' ? t('today') : range === 'year' ? t('thisYear') : t('thisMonth')}`}>
+        {soldList.length === 0 ? <EmptyState icon="🧾" text={t('noData')} /> : (
+          <div style={{ display: 'grid', gap: 6 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, fontWeight: 800, color: C.textMuted, padding: '0 4px' }}>
+              <span>{t('name')}</span><span>{t('profit')}</span>
+            </div>
+            {soldList.map((r, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, background: C.surfaceAlt, borderRadius: 10, padding: '8px 10px' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, color: C.text, fontSize: 13 }}>{r.label}</div>
+                  <div style={{ fontSize: 11, color: C.textMuted }}>{fmtNum(r.qty)} × · {t('revenueLabel')} {cur(r.revenue)}</div>
+                </div>
+                <div style={{ fontWeight: 800, color: r.profit >= 0 ? C.success : C.danger }}>{cur(r.profit)}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

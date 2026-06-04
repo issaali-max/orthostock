@@ -95,6 +95,15 @@ export function AppProvider({ children }) {
     if (u && u.isActive !== false && u.password === password) { setUser(u); return true; }
     return false;
   }, []);
+
+  // Local password reset (no email server — see note in the UI). Returns true if the email exists.
+  const resetPassword = useCallback(async (email, newPassword) => {
+    const u = await db.findBy(TABLES.users, 'email', String(email).trim().toLowerCase());
+    if (!u) return false;
+    await db.update(TABLES.users, u.id, { password: newPassword });
+    await refresh(TABLES.users);
+    return true;
+  }, [refresh]);
   const logout = useCallback(() => setUser(null), []);
 
   // ── Generic CRUD helpers (refresh cache + toast + friendly errors) ──
@@ -140,7 +149,7 @@ export function AppProvider({ children }) {
   }, [data, updateRow, createRow]);
 
   const value = {
-    user, login, logout,
+    user, login, logout, resetPassword,
     lang, setLang, dir, t,
     displayCurrency, toggleCurrency: () => setDisplayCurrency((c) => (c === 'AED' ? 'USD' : 'AED')),
     usdRate, settings, updateSettings,

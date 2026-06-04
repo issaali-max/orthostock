@@ -9,6 +9,7 @@ export const DICT = {
     login: 'تسجيل الدخول', logout: 'تسجيل الخروج', signIn: 'دخول',
     email: 'البريد الإلكتروني', password: 'كلمة المرور',
     wrongCreds: 'بيانات الدخول غير صحيحة',
+    forgotPassword: 'نسيت كلمة المرور؟', newPassword: 'كلمة مرور جديدة', resetPassword: 'إعادة تعيين', passwordReset: 'تم تغيير كلمة المرور — سجّل الدخول', emailNotFound: 'البريد غير مسجّل', forgotNote: 'إعادة تعيين محلية (بدون بريد تحقّق)', users: 'المستخدمون', addUser: 'إضافة مستخدم', role: 'الدور', admin: 'مدير', employee: 'موظف', userName: 'الاسم',
     // nav
     dashboard: 'لوحة التحكم', categories: 'الفئات', products: 'المنتجات',
     variants: 'الأصناف', suppliers: 'الموردون', settings: 'الإعدادات', more: 'المزيد',
@@ -94,6 +95,7 @@ export const DICT = {
     login: 'Login', logout: 'Logout', signIn: 'Sign in',
     email: 'Email', password: 'Password',
     wrongCreds: 'Invalid login details',
+    forgotPassword: 'Forgot password?', newPassword: 'New password', resetPassword: 'Reset', passwordReset: 'Password changed — sign in', emailNotFound: 'Email not registered', forgotNote: 'Local reset (no verification email)', users: 'Users', addUser: 'Add user', role: 'Role', admin: 'Admin', employee: 'Employee', userName: 'Name',
     dashboard: 'Dashboard', categories: 'Categories', products: 'Products',
     variants: 'Variants', suppliers: 'Suppliers', settings: 'Settings', more: 'More',
     customers: 'Customers', purchases: 'Purchases', sales: 'Sales',
