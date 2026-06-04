@@ -8,6 +8,16 @@ import * as db from '../db/db.js';
 import { TABLES } from './constants.js';
 import { num, round2, safeDiv } from './money.js';
 
+// Record a manual stock change as an audit movement (the variant's stockQty
+// is written by the caller; this only logs the movement so the ledger stays
+// the source of truth). type: 'adjustment' | 'opening'.
+export async function logStockMovement(app, variantId, before, after, type = 'adjustment') {
+  const b = num(before), a = num(after);
+  if (a === b) return;
+  await db.insert(TABLES.stockMovements, { variantId, type, qtyChange: round2(a - b), qtyAfter: round2(a), refType: 'manual', refId: null });
+  await app.refresh(TABLES.stockMovements);
+}
+
 // Commit a SALE: invoice + items + stock-out movements.
 // opts.invoiceDiscount = amount discounted off the items subtotal
 // (distributed proportionally across lines so lineProfit stays honest).

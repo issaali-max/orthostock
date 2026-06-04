@@ -3,6 +3,8 @@ import { useApp } from '../../app/AppProvider.jsx';
 import { C, RADIUS, SHADOW, TABLES } from '../../lib/constants.js';
 import { fmtCur, fmtNum, num } from '../../lib/money.js';
 import { Badge, Btn, EmptyState, Modal, PageHeader, SearchBar } from '../../ui/components.jsx';
+import { logStockMovement } from '../../lib/engine.js';
+import { fmtDate } from '../../lib/dates.js';
 import {
   CategoryForm, ProductForm, VariantForm,
   blankCategory, blankProduct, blankVariant,
@@ -34,7 +36,14 @@ export default function Catalogue() {
   const openEdit = (table, type, rec) => setEdit({ table, type, rec });
   const saveEdit = async () => {
     const fn = edit.table === TABLES.categories ? saveCategory : edit.table === TABLES.products ? saveProduct : saveVariant;
-    try { if (await fn(app, edit.rec)) setEdit(null); } catch { /* toast shown */ }
+    const isVariant = edit.table === TABLES.variants && edit.rec.id;
+    const before = isVariant ? num((variants.find((v) => v.id === edit.rec.id) || {}).stockQty) : null;
+    try {
+      if (await fn(app, edit.rec)) {
+        if (isVariant) { const after = num(edit.rec.stockQty); if (after !== before) await logStockMovement(app, edit.rec.id, before, after, 'adjustment'); }
+        setEdit(null);
+      }
+    } catch { /* toast shown */ }
   };
   const deleteEdit = async () => {
     if (!edit.rec.id || !window.confirm(t('deactivate') + '?')) return;
@@ -172,6 +181,32 @@ function EditModal({ edit, setEdit, app, t, products, categories, onSave, onDele
       {edit.type === 'product' && <ProductForm rec={edit.rec} setRec={setRec} t={t} cats={categories} />}
       {edit.type === 'variant' && <VariantForm rec={edit.rec} setRec={setRec} t={t} products={products} categories={categories}
         onAddOption={(pid, key, opt) => addOptionToCategory(app, categories, pid, key, opt)} />}
+      {edit.type === 'variant' && edit.rec.id && <StockHistory app={app} t={t} variantId={edit.rec.id} />}
     </Modal>
+  );
+}
+
+function StockHistory({ app, t, variantId }) {
+  const moves = (app.data[TABLES.stockMovements] || [])
+    .filter((m) => m.variantId === variantId)
+    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+    .slice(0, 12);
+  const label = { sale: t('invoices'), purchase: t('purchases'), adjustment: t('adjustment'), opening: t('opening'), return: t('returned') };
+  return (
+    <div style={{ borderTop: `1px solid ${C.border}`, marginTop: 12, paddingTop: 10 }}>
+      <div style={{ fontSize: 13, fontWeight: 800, color: C.text, marginBottom: 8 }}>📜 {t('stockHistory')}</div>
+      {moves.length === 0 ? <div style={{ fontSize: 12, color: C.textMuted }}>{t('noMovements')}</div> : (
+        <div style={{ display: 'grid', gap: 2, maxHeight: 200, overflowY: 'auto' }}>
+          {moves.map((m) => (
+            <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '5px 0', borderBottom: `1px solid ${C.surfaceAlt}` }}>
+              <span style={{ flex: 1, color: C.textMid }}>{label[m.type] || m.type}</span>
+              <span style={{ fontWeight: 800, minWidth: 44, textAlign: 'end', color: num(m.qtyChange) >= 0 ? C.success : C.danger }}>{num(m.qtyChange) >= 0 ? '+' : ''}{fmtNum(m.qtyChange)}</span>
+              <span style={{ color: C.textMuted, minWidth: 64, textAlign: 'end' }}>{t('balance')} {fmtNum(m.qtyAfter)}</span>
+              <span style={{ color: C.textMuted, fontSize: 10, minWidth: 64, textAlign: 'end' }}>{m.createdAt ? fmtDate(m.createdAt.slice(0, 10), app.lang) : ''}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

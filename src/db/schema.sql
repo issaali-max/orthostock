@@ -33,6 +33,7 @@ create table if not exists categories (
   "nameAr" text not null,
   "nameEn" text not null,
   icon text default '',
+  image_url text default '',
   color text default '#0D3B6E',
   attributes jsonb not null default '[]',
   "isActive" boolean not null default true
@@ -172,7 +173,7 @@ create table if not exists "invoiceItems" (
 create table if not exists "stockMovements" (
   id uuid primary key default gen_random_uuid(),
   "variantId" uuid references variants(id),
-  type text not null check (type in ('purchase','sale','return','adjustment','transfer')),
+  type text not null check (type in ('purchase','sale','return','adjustment','transfer','opening')),
   "qtyChange" numeric not null default 0,
   "qtyAfter" numeric not null default 0,
   "refType" text default '',
@@ -181,15 +182,25 @@ create table if not exists "stockMovements" (
   "createdAt" timestamptz not null default now()
 );
 
--- ── Expenses ──
+-- ── Expense groups (typed business | personal) ──
+create table if not exists "expenseGroups" (
+  id uuid primary key default gen_random_uuid(),
+  "nameAr" text not null,
+  "nameEn" text not null,
+  type text not null default 'business' check (type in ('business','personal')),
+  icon text default '',
+  color text default '#0D3B6E',
+  "isActive" boolean not null default true
+);
+
+-- ── Expenses (each belongs to a group; type is inherited from the group) ──
 create table if not exists expenses (
   id uuid primary key default gen_random_uuid(),
-  scope text not null default 'operating' check (scope in ('operating','personal')),
-  category text default '',
+  "groupId" uuid references "expenseGroups"(id),
   amount numeric not null default 0,
-  currency text not null default 'AED',
   date date not null,
-  description text default ''
+  note text default '',
+  "createdAt" timestamptz not null default now()
 );
 
 -- ── Other debts ──
@@ -224,7 +235,8 @@ create table if not exists "cashFlows" (
   date date not null,
   amount numeric not null default 0,
   currency text not null default 'AED',
-  notes text default ''
+  notes text default '',
+  "createdAt" timestamptz not null default now()
 );
 
 create table if not exists "tradeLots" (
@@ -237,7 +249,8 @@ create table if not exists "tradeLots" (
   "buyFees" numeric not null default 0,
   "costBasis" numeric not null default 0,
   currency text not null default 'AED',
-  notes text default ''
+  notes text default '',
+  "createdAt" timestamptz not null default now()
 );
 
 create table if not exists "tradeSells" (
@@ -251,7 +264,8 @@ create table if not exists "tradeSells" (
   "costBasisMatched" numeric not null default 0,
   "realizedPnL" numeric not null default 0,
   currency text not null default 'AED',
-  notes text default ''
+  notes text default '',
+  "createdAt" timestamptz not null default now()
 );
 
 -- ── Row Level Security ──
