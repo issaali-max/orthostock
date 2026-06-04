@@ -25,6 +25,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
 
   const [lines, setLines] = useState([]); // [{variantId, qty, unitPrice}]
   const [catId, setCatId] = useState('');
+  const [prodId, setProdId] = useState('');
   const [customerId, setCustomerId] = useState('');
   const [date, setDate] = useState(todayISO());
   const [paymentStatus, setStatus] = useState('unpaid');
@@ -35,6 +36,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
   useEffect(() => {
     if (!open) return;
     const firstCat = categories.find((c) => products.some((p) => p.categoryId === c.id))?.id || categories[0]?.id || '';
+    setProdId('');
     if (editing) {
       const its = (data[TABLES.invoiceItems] || []).filter((it) => it.invoiceId === editing.id);
       // reconstruct the pre-distribution unit price from listPrice/discount when possible
@@ -94,7 +96,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
       <div style={{ fontSize: 12, fontWeight: 700, color: C.textMid, margin: '4px 0 6px' }}>{t('categories')}</div>
       <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4, marginBottom: 8 }}>
         {categories.map((c) => (
-          <button key={c.id} onClick={() => setCatId(c.id)} style={{
+          <button key={c.id} onClick={() => { setCatId(c.id); setProdId(''); }} style={{
             whiteSpace: 'nowrap', border: `1.5px solid ${catId === c.id ? C.primary : C.border}`,
             background: catId === c.id ? C.primary : '#fff', color: catId === c.id ? '#fff' : C.textMid,
             borderRadius: 999, padding: '6px 12px', fontSize: 13, fontWeight: 700, cursor: 'pointer',
@@ -102,28 +104,48 @@ export default function InvoiceCreate({ open, onClose, editing }) {
         ))}
       </div>
 
-      {/* Materials grouped by product; names + default price shown clearly */}
-      <div style={{ maxHeight: 240, overflowY: 'auto', border: `1px solid ${C.border}`, borderRadius: 10, padding: 8, marginBottom: 10 }}>
-        {catProducts.length === 0 ? <div style={{ fontSize: 12, color: C.textMuted, textAlign: 'center', padding: 12 }}>{t('noProducts')}</div> : catProducts.map((p) => (
-          <div key={p.id} style={{ marginBottom: 10 }}>
-            <div style={{ fontSize: 12, fontWeight: 800, color: C.text, margin: '4px 0', paddingBottom: 3, borderBottom: `1px solid ${C.surfaceAlt}` }}>{p.icon} {p.nameEn}</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {variantsOfProduct(p.id).map((v) => {
-                const on = inCart(v.id);
-                return (
-                  <button key={v.id} onClick={() => toggle(v)} style={{
-                    border: `1.5px solid ${on ? C.success : C.border}`, background: on ? C.success : '#fff', color: on ? '#fff' : C.text,
-                    borderRadius: 10, padding: '7px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2, minWidth: 92,
-                  }}>
-                    <span>{variantLabel(v)}</span>
-                    <span style={{ fontSize: 10, opacity: 0.85 }}>{fmtCur(v.sellingPriceDefault, displayCurrency, usdRate)} · {t('stock')} {fmtNum(v.stockQty)}</span>
-                  </button>
-                );
-              })}
-            </div>
+      {/* Step 2: product (type) buttons within the chosen category */}
+      {catProducts.length === 0 ? (
+        <div style={{ fontSize: 12, color: C.textMuted, textAlign: 'center', padding: 12, border: `1px solid ${C.border}`, borderRadius: 10, marginBottom: 10 }}>{t('noProducts')}</div>
+      ) : (
+        <>
+          <div style={{ fontSize: 12, fontWeight: 700, color: C.textMid, margin: '4px 0 6px' }}>{t('products')}</div>
+          <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4, marginBottom: 8 }}>
+            {catProducts.map((p) => (
+              <button key={p.id} onClick={() => setProdId(p.id)} style={{
+                whiteSpace: 'nowrap', border: `1.5px solid ${prodId === p.id ? C.primaryMid : C.border}`,
+                background: prodId === p.id ? C.primaryMid : '#fff', color: prodId === p.id ? '#fff' : C.textMid,
+                borderRadius: 999, padding: '6px 12px', fontSize: 13, fontWeight: 700, cursor: 'pointer',
+              }}>{p.icon} {p.nameEn}</button>
+            ))}
           </div>
-        ))}
-      </div>
+
+          {/* Step 3: variants (size / arch) of the chosen product as green buttons */}
+          {prodId ? (
+            <div style={{ maxHeight: 220, overflowY: 'auto', border: `1px solid ${C.border}`, borderRadius: 10, padding: 8, marginBottom: 10 }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {variantsOfProduct(prodId).map((v) => {
+                  const on = inCart(v.id);
+                  const attrs = Object.values(v.attributes || {}).filter(Boolean);
+                  const stock = num(v.stockQty);
+                  return (
+                    <button key={v.id} onClick={() => toggle(v)} style={{
+                      border: `1.5px solid ${on ? C.success : C.border}`, background: on ? C.success : '#fff', color: on ? '#fff' : C.text,
+                      borderRadius: 10, padding: '8px 11px', fontSize: 12, fontWeight: 700, cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2, minWidth: 96,
+                    }}>
+                      <span>{on ? '✓ ' : ''}{attrs.length ? attrs.join(' · ') : (v.nameEn || v.sku)}</span>
+                      <span style={{ fontSize: 10, opacity: 0.85 }}>{fmtCur(v.sellingPriceDefault, displayCurrency, usdRate)} · {t('stock')} {fmtNum(stock)}{stock <= 0 ? ' ⚠' : ''}</span>
+                    </button>
+                  );
+                })}
+                {variantsOfProduct(prodId).length === 0 && <div style={{ fontSize: 12, color: C.textMuted, padding: 8 }}>{t('noData')}</div>}
+              </div>
+            </div>
+          ) : (
+            <div style={{ fontSize: 12, color: C.textMuted, textAlign: 'center', padding: 12, border: `1px dashed ${C.border}`, borderRadius: 10, marginBottom: 10 }}>{t('products')} ↑</div>
+          )}
+        </>
+      )}
 
       {/* Selected lines with per-line discount display */}
       {lines.length > 0 && (
