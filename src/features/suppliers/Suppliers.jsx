@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useApp } from '../../app/AppProvider.jsx';
 import { C, emirateOptions, emirateLabel, TABLES } from '../../lib/constants.js';
-import { fmtCur } from '../../lib/money.js';
+import { fmtCur, num, round2 } from '../../lib/money.js';
 import { fmtDate } from '../../lib/dates.js';
 import { supplierStats } from '../../lib/engine.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, SearchBar, Select, Textarea } from '../../ui/components.jsx';
@@ -91,10 +91,20 @@ function SupplierProfile({ supplier, onBack, onEdit, data, t, displayCurrency, u
         <Btn size="sm" variant="light" onClick={onEdit}>{t('edit')}</Btn>
       </div>
 
-      <Card style={{ background: '#EAF1FB', border: 'none', marginBottom: 12 }}>
-        <div style={{ fontSize: 12, color: C.textMid, fontWeight: 700 }}>{t('totalSpent')}</div>
-        <div style={{ fontSize: 26, fontWeight: 800, color: C.primary }}>{fmtCur(st.totalSpent, displayCurrency, usdRate)}</div>
-      </Card>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 12 }}>
+        <div style={{ background: '#EAF1FB', borderRadius: 12, padding: 10, textAlign: 'center' }}>
+          <div style={{ fontSize: 15, fontWeight: 800, color: C.primary }}>{fmtCur(st.totalSpent, displayCurrency, usdRate)}</div>
+          <div style={{ fontSize: 10, color: C.textMuted, marginTop: 2 }}>{t('totalSpent')}</div>
+        </div>
+        <div style={{ background: '#E9F6EF', borderRadius: 12, padding: 10, textAlign: 'center' }}>
+          <div style={{ fontSize: 15, fontWeight: 800, color: C.success }}>{fmtCur(st.totalPaid, displayCurrency, usdRate)}</div>
+          <div style={{ fontSize: 10, color: C.textMuted, marginTop: 2 }}>{t('totalPaid')}</div>
+        </div>
+        <div style={{ background: st.balance > 0 ? '#FBECEC' : '#E9F6EF', borderRadius: 12, padding: 10, textAlign: 'center' }}>
+          <div style={{ fontSize: 15, fontWeight: 800, color: st.balance > 0 ? C.danger : C.success }}>{fmtCur(st.balance, displayCurrency, usdRate)}</div>
+          <div style={{ fontSize: 10, color: C.textMuted, marginTop: 2 }}>{t('balanceOwed')}</div>
+        </div>
+      </div>
 
       <div style={{ fontSize: 13, fontWeight: 800, color: C.text, marginBottom: 8 }}>{t('history')}</div>
       {st.purchases.length === 0 ? <EmptyState icon="📥" text={t('noPurchases')} /> : (
@@ -107,7 +117,12 @@ function SupplierProfile({ supplier, onBack, onEdit, data, t, displayCurrency, u
                   <strong style={{ color: C.text }}>{po.purchaseNumber}</strong>
                   <span style={{ fontWeight: 700, color: C.primary }}>{fmtCur(po.totalAED, displayCurrency, usdRate)}</span>
                 </div>
-                <div style={{ fontSize: 11, color: C.textMuted, margin: '2px 0 6px' }}>{fmtDate(po.date)}</div>
+                {(() => { const bal = round2(num(po.totalAED) - (po.paidAmount == null ? num(po.totalAED) : num(po.paidAmount))); return (
+                  <div style={{ fontSize: 11, color: C.textMuted, margin: '2px 0 6px', display: 'flex', justifyContent: 'space-between' }}>
+                    <span>{fmtDate(po.date)}</span>
+                    {bal > 0 ? <Badge tone="danger">{t('balanceDue')}: {fmtCur(bal, displayCurrency, usdRate)}</Badge> : <Badge tone="success">{t('paid')}</Badge>}
+                  </div>
+                ); })()}
                 <div style={{ display: 'grid', gap: 2 }}>
                   {lines.map((l) => (
                     <div key={l.id} style={{ fontSize: 12, color: C.textMid, display: 'flex', justifyContent: 'space-between' }}>

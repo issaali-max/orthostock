@@ -38,6 +38,7 @@ export default function Customers() {
       profit: (a, b) => b._st.profit - a._st.profit,
       margin: (a, b) => b._margin - a._margin,
       debt: (a, b) => b._st.debt - a._st.debt,
+      city: (a, b) => (a.emirate || '').localeCompare(b.emirate || '') || (a.name || '').localeCompare(b.name || ''),
     }[sortBy] || (() => 0);
     return withStats.sort(cmp);
   }, [data, q, emirateFilter, typeFilter, sortBy, invoices, items]);
@@ -63,7 +64,7 @@ export default function Customers() {
 
       {/* Sort + filters */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '8px 0' }}>
-        {[['name', t('byName')], ['revenue', t('byRevenue')], ['profit', t('byProfit')], ['margin', t('byMargin')], ['debt', t('byDebt')]].map(([k, label]) => (
+        {[['name', t('byName')], ['revenue', t('byRevenue')], ['profit', t('byProfit')], ['margin', t('byMargin')], ['debt', t('byDebt')], ['city', t('byCity')]].map(([k, label]) => (
           <button key={k} onClick={() => setSortBy(k)} style={{
             padding: '5px 11px', borderRadius: 999, fontSize: 12, fontWeight: 700, cursor: 'pointer',
             background: sortBy === k ? C.primary : '#fff', color: sortBy === k ? '#fff' : C.textMid,

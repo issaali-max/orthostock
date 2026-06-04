@@ -16,6 +16,7 @@ export default function Purchases() {
   const [supplierId, setSupplierId] = useState('');
   const [date, setDate] = useState(todayISO());
   const [lines, setLines] = useState([]);
+  const [paid, setPaid] = useState('');
 
   const suppliers = (data[TABLES.suppliers] || []).filter((s) => s.isActive !== false);
   const variants = (data[TABLES.variants] || []).filter((v) => v.isActive !== false);
@@ -28,7 +29,7 @@ export default function Purchases() {
     return s ? rows.filter((r) => `${r.purchaseNumber} ${supName(r.supplierId)}`.toLowerCase().includes(s)) : rows;
   }, [data, q]);
 
-  const startNew = () => { setSupplierId(''); setDate(todayISO()); setLines([{ variantId: '', qty: 1, unitCost: 0 }]); setOpen(true); };
+  const startNew = () => { setSupplierId(''); setDate(todayISO()); setLines([{ variantId: '', qty: 1, unitCost: 0 }]); setPaid(''); setOpen(true); };
   const setLine = (i, patch) => setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
   const total = round2(lines.reduce((s, l) => s + num(l.qty) * num(l.unitCost), 0));
 
@@ -40,7 +41,7 @@ export default function Purchases() {
       const number = nextDocNumber(data[TABLES.purchases] || [], 'PO', 'purchaseNumber');
       await commitPurchase(app, {
         purchaseNumber: number, supplierId: supplierId || null, date, currency: 'AED', exchangeRate: 1,
-        totalOriginal: total, totalAED: total, invoiceRef: '', notes: '',
+        totalOriginal: total, totalAED: total, paidAmount: paid === '' ? total : num(paid), invoiceRef: '', notes: '',
       }, valid.map((l) => ({ variantId: l.variantId, qty: num(l.qty), unitCost: num(l.unitCost) })));
       showToast(`${number} ✓`, 'success');
       setOpen(false);
@@ -88,6 +89,13 @@ export default function Purchases() {
         <Btn size="sm" variant="light" onClick={() => setLines((ls) => [...ls, { variantId: '', qty: 1, unitCost: 0 }])}>＋ {t('addLine')}</Btn>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12, fontWeight: 800, color: C.text }}>
           <span>{t('total')}</span><span>{fmtCur(total, displayCurrency, usdRate)}</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+          <span style={{ color: C.textMid, fontSize: 13 }}>{t('paidToSupplier')}</span>
+          <Input type="number" value={paid} onChange={(v) => setPaid(v)} placeholder={String(total)} style={{ width: 110, padding: 6 }} />
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, fontSize: 13, fontWeight: 700, color: (total - (paid === '' ? total : num(paid))) > 0 ? C.danger : C.success }}>
+          <span>{t('balanceDue')}</span><span>{fmtCur(total - (paid === '' ? total : num(paid)), displayCurrency, usdRate)}</span>
         </div>
       </Modal>
     </div>

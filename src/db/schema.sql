@@ -124,6 +124,7 @@ create table if not exists purchases (
   "exchangeRate" numeric not null default 1,
   "totalOriginal" numeric not null default 0,
   "totalAED" numeric not null default 0,
+  "paidAmount" numeric not null default 0,
   "invoiceRef" text default '',
   notes text default '',
   "createdAt" timestamptz not null default now()

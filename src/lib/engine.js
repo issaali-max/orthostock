@@ -131,7 +131,10 @@ export function clinicRating(allCustomers, invoices, items, customerId) {
 // ── Supplier lifetime stats ──
 export function supplierStats(purchases, supplierId) {
   const mine = purchases.filter((p) => p.supplierId === supplierId);
-  return { totalSpent: round2(mine.reduce((s, p) => s + num(p.totalAED), 0)), count: mine.length, purchases: mine };
+  const totalSpent = round2(mine.reduce((s, p) => s + num(p.totalAED), 0));
+  // paidAmount defaults to the full total for older records that predate the field
+  const totalPaid = round2(mine.reduce((s, p) => s + (p.paidAmount == null ? num(p.totalAED) : num(p.paidAmount)), 0));
+  return { totalSpent, totalPaid, balance: round2(totalSpent - totalPaid), count: mine.length, purchases: mine };
 }
 
 // Invoice totals (VAT on subtotal).
