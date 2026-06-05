@@ -387,5 +387,31 @@ export async function importExcel(file, data) {
     }
   }
 
+  // ── Suppliers sheet: dedupe by phone OR normalized name ──
+  const wsS = wb.getWorksheet('Suppliers');
+  if (wsS) {
+    const idx = headerIndex(wsS);
+    const existing = (data[TABLES.suppliers] || []);
+    const byPhone = new Map(existing.filter((s2) => s2.phone).map((s2) => [String(s2.phone).trim(), s2]));
+    const byName = new Map(existing.map((s2) => [norm(s2.name).toLowerCase(), s2]));
+    const seen = new Set();
+    const rows = [];
+    wsS.eachRow((row, n) => { if (n === 1) return; rows.push(row); });
+    for (const row of rows) {
+      const name = norm(cellVal(row, idx, 'Name')); if (!name) continue;
+      const phone = String(cellVal(row, idx, 'Phone') || '').trim();
+      // suppliers use `city` as their location/emirate; accept either column
+      const city = normEmirate(cellVal(row, idx, 'Emirate')) || norm(cellVal(row, idx, 'City'));
+      const currency = (String(cellVal(row, idx, 'Currency') || 'AED').trim().toUpperCase() === 'USD') ? 'USD' : 'AED';
+      const rec = { name, phone, city, currency, isActive: true };
+      const key = name.toLowerCase();
+      if (seen.has(key) && !phone) { summary.skipped++; continue; }
+      seen.add(key);
+      const found = (phone && byPhone.get(phone)) || byName.get(key);
+      if (found) { await db.update(TABLES.suppliers, found.id, rec).catch(() => { summary.skipped++; }); }
+      else { const saved = await db.insert(TABLES.suppliers, rec).catch(() => null); if (saved) byName.set(key, saved); }
+    }
+  }
+
   return summary;
 }
