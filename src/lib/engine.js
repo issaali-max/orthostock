@@ -357,6 +357,43 @@ export function topClinics(data, n = 5) {
     .slice(0, n);
 }
 
+const invInRange = (inv, b) => !b ? true : (inv.date && inv.date >= b.from && (!b.to || inv.date <= b.to));
+
+// Most profitable products in a period (aggregated from invoice items).
+export function topProducts(data, n = 10, bounds) {
+  const ids = new Set((data[TABLES.invoices] || []).filter((i) => i.status !== 'returned' && invInRange(i, bounds)).map((i) => i.id));
+  const variants = data[TABLES.variants] || [];
+  const map = {};
+  (data[TABLES.invoiceItems] || []).filter((it) => ids.has(it.invoiceId)).forEach((it) => {
+    const m = map[it.variantId] || (map[it.variantId] = { qty: 0, revenue: 0, profit: 0 });
+    m.qty += num(it.qty); m.revenue += num(it.total); m.profit += num(it.lineProfit);
+  });
+  return Object.entries(map).map(([vid, m]) => {
+    const v = variants.find((x) => x.id === vid);
+    return { id: vid, label: v ? (v.nameEn || v.sku) : '—', qty: round2(m.qty), revenue: round2(m.revenue), profit: round2(m.profit) };
+  }).sort((a, b) => b.profit - a.profit).slice(0, n);
+}
+
+// Top customers/doctors by profit in a period; debt is all-time outstanding.
+// opts: { type:'doctor'|'center', emirate, bounds, sortBy:'profit'|'revenue'|'debt' }
+export function topCustomers(data, n = 10, { type, emirate, bounds, sortBy = 'profit' } = {}) {
+  const allInvoices = data[TABLES.invoices] || [];
+  const periodInvoices = allInvoices.filter((i) => i.status !== 'returned' && invInRange(i, bounds));
+  const items = data[TABLES.invoiceItems] || [];
+  let customers = (data[TABLES.customers] || []).filter((c) => c.isActive !== false);
+  if (type) customers = customers.filter((c) => c.type === type);
+  if (emirate) customers = customers.filter((c) => c.emirate === emirate);
+  return customers
+    .map((c) => {
+      const st = customerStats(periodInvoices, items, c.id);
+      const debt = customerStats(allInvoices, items, c.id).debt;
+      return { id: c.id, name: c.name, type: c.type, emirate: c.emirate, revenue: st.revenue, profit: st.profit, count: st.count, debt };
+    })
+    .filter((c) => c.revenue > 0 || c.debt > 0)
+    .sort((a, b) => (b[sortBy] || 0) - (a[sortBy] || 0))
+    .slice(0, n);
+}
+
 // ─────────────────────────────────────────────────────────────
 // Investments (stock portfolio). Lot-based FIFO:
 //   • buy  → a tradeLot (qtyRemaining, costBasis = qty*price + fees)

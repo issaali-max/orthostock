@@ -4,7 +4,7 @@ import { useApp } from '../app/AppProvider.jsx';
 import { C, TABLES, SHADOW } from '../lib/constants.js';
 import { fmtCur, fmtNum, num } from '../lib/money.js';
 import { todayISO } from '../lib/dates.js';
-import { pnl, monthlyTrend, periodTrend, buildAlerts, emirateStats, topClinics } from '../lib/engine.js';
+import { pnl, monthlyTrend, periodTrend, buildAlerts, emirateStats, topClinics, topProducts, topCustomers } from '../lib/engine.js';
 import { Badge, Card, EmptyState, Modal, PageHeader } from '../ui/components.jsx';
 
 const monthStart = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`; };
@@ -42,6 +42,9 @@ export default function Dashboard() {
   const trend = useMemo(() => periodTrend(data, trendMode, trendMode === 'year' ? 4 : 6), [data, trendMode]);
   const emirates = useMemo(() => emirateStats(data), [data]);
   const clinics = useMemo(() => topClinics(data, 5), [data]);
+  const topProd = useMemo(() => topProducts(data, 10, bounds), [data, range]); // eslint-disable-line react-hooks/exhaustive-deps
+  const topCust = useMemo(() => topCustomers(data, 10, { bounds }), [data, range]); // eslint-disable-line react-hooks/exhaustive-deps
+  const topDocs = useMemo(() => topCustomers(data, 10, { type: 'doctor', bounds }), [data, range]); // eslint-disable-line react-hooks/exhaustive-deps
   const alerts = useMemo(() => buildAlerts(data), [data]);
   const cur = (v) => fmtCur(v, displayCurrency, usdRate);
 
@@ -216,7 +219,18 @@ export default function Dashboard() {
         )}
       </Card>
 
-      {/* ── Alerts ── */}
+      {/* ── Top products / customers / doctors (by profit, for the selected period) ── */}
+      <RankCard title={`💎 ${t('topProducts')}`} rows={topProd} cur={cur}
+        emptyIcon="💎" emptyText={t('noData')}
+        primary={(r) => cur(r.profit)} secondary={(r) => `${fmtNum(r.qty)} × · ${cur(r.revenue)}`} label={(r) => r.label} />
+
+      <RankCard title={`🏆 ${t('topCustomers')}`} rows={topCust} cur={cur}
+        emptyIcon="🏆" emptyText={t('noData')}
+        primary={(r) => cur(r.profit)} secondary={(r) => `${r.emirate || '—'}${r.debt > 0 ? ` · ${t('debt')} ${cur(r.debt)}` : ''}`} label={(r) => `${r.type === 'center' ? '🏥' : '🧑‍⚕️'} ${r.name}`} />
+
+      <RankCard title={`🧑‍⚕️ ${t('topDoctors')}`} rows={topDocs} cur={cur}
+        emptyIcon="🧑‍⚕️" emptyText={t('noData')}
+        primary={(r) => cur(r.profit)} secondary={(r) => `${r.emirate || '—'}${r.debt > 0 ? ` · ${t('debt')} ${cur(r.debt)}` : ''}`} label={(r) => r.name} />
       <Card className="rise" style={{ marginBottom: 14 }}>
         <SectionTitle>
           🔔 {t('alerts')}
@@ -263,6 +277,30 @@ export default function Dashboard() {
         )}
       </Modal>
     </div>
+  );
+}
+
+
+function RankCard({ title, rows, label, primary, secondary, emptyIcon, emptyText }) {
+  return (
+    <Card className="rise" style={{ marginBottom: 14 }}>
+      <SectionTitle>{title}</SectionTitle>
+      {(!rows || rows.length === 0) ? <EmptyState icon={emptyIcon} text={emptyText} /> : (
+        <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
+          {rows.map((r, i) => (
+            <div key={r.id || i} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 26, height: 26, borderRadius: 999, flexShrink: 0, fontWeight: 800, fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: i === 0 ? C.primary : C.primary + '18', color: i === 0 ? '#fff' : C.primary }}>{i + 1}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, color: C.text, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label(r)}</div>
+                <div style={{ fontSize: 11, color: C.textMuted }}>{secondary(r)}</div>
+              </div>
+              <div style={{ fontWeight: 800, color: C.success, fontSize: 13, textAlign: 'end' }}>{primary(r)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
   );
 }
 
