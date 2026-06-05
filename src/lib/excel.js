@@ -10,7 +10,7 @@
 // Import stays SAFE: update-by-key (SKU / phone) or add; never deletes.
 // ExcelJS is lazy-loaded so it never bloats the initial bundle.
 // ─────────────────────────────────────────────────────────────
-import { TABLES } from './constants.js';
+import { TABLES, EMIRATES } from './constants.js';
 import { num, round2 } from './money.js';
 import * as db from '../db/db.js';
 
@@ -245,13 +245,49 @@ export async function exportExcel(data, lang = 'ar') {
 }
 
 // ── Import helpers ──
+// Header matching is tolerant: a header cell may be bilingual / multi-line
+// (e.g. "Name\nالاسم"). We normalize to [a-z0-9] only, so the Arabic part and
+// line breaks are ignored and "Name\nالاسم" still matches the key 'Name'.
+const normHdr = (x) => String(x == null ? '' : x).toLowerCase().replace(/[^a-z0-9]/g, '');
+// Accept Arabic or English values for Type / Emirate so a non-English client
+// can fill the template in Arabic and still import correctly.
+const normType = (x) => {
+  const s = String(x == null ? '' : x).trim().toLowerCase();
+  if (/مرك|عياد|center|centre|clinic/.test(s)) return 'center';
+  return 'doctor';
+};
+const normEmirate = (x) => {
+  const s = String(x == null ? '' : x).replace(/\u00a0/g, ' ').trim();
+  if (!s) return '';
+  const hit = EMIRATES.find((e) => e.en.toLowerCase() === s.toLowerCase() || e.ar === s || s.includes(e.ar));
+  if (hit) return hit.en;
+  if (/العين|al ?ain/i.test(s)) return 'Abu Dhabi'; // Al Ain is in Abu Dhabi emirate
+  return s;
+};
 function headerIndex(ws) {
   const map = {};
-  ws.getRow(1).eachCell((cell, col) => { map[String(cell.value).trim()] = col; });
+  const norm = {};
+  ws.getRow(1).eachCell((cell, col) => {
+    const raw = String(cell.value == null ? '' : cell.value).trim();
+    map[raw] = col;
+    const n = normHdr(raw);
+    if (n && !(n in norm)) norm[n] = col;
+  });
+  Object.defineProperty(map, '__norm', { value: norm, enumerable: false });
   return map;
 }
 function cellVal(row, idx, header) {
-  const col = idx[header]; if (!col) return undefined;
+  let col = idx[header];
+  if (!col) {
+    const norm = idx.__norm || {};
+    const target = normHdr(header);
+    if (target) {
+      const keys = Object.keys(norm);
+      const hit = (target in norm) ? target : (keys.find((k) => k.startsWith(target)) || keys.find((k) => k.includes(target)));
+      if (hit) col = norm[hit];
+    }
+  }
+  if (!col) return undefined;
   let v = row.getCell(col).value;
   if (v && typeof v === 'object') v = v.result ?? v.text ?? v.hyperlink ?? '';
   return v;
@@ -338,8 +374,8 @@ export async function importExcel(file, data) {
       const wdRaw = norm(cellVal(row, idx, 'WorkingDays'));
       const workingDays = wdRaw ? wdRaw.split(/[,،]/).map((x) => x.trim()).filter(Boolean) : [];
       const rec = {
-        name, type: String(cellVal(row, idx, 'Type') || 'doctor').trim() || 'doctor',
-        phone, city: norm(cellVal(row, idx, 'City')), emirate: norm(cellVal(row, idx, 'Emirate')),
+        name, type: normType(cellVal(row, idx, 'Type')),
+        phone, city: norm(cellVal(row, idx, 'City')), emirate: normEmirate(cellVal(row, idx, 'Emirate')),
         specialty: norm(cellVal(row, idx, 'Specialty')), isActive: true,
       };
       const nameKey = name.toLowerCase();
