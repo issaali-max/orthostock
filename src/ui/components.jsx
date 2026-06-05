@@ -153,9 +153,10 @@ export function Modal({ open, onClose, title, children, footer, width = 460 }) {
       }}
     >
       <div
+        className="modal-sheet"
         style={{
           background: '#fff', borderRadius: '18px 18px 0 0', width: '100%', maxWidth: width,
-          maxHeight: '92vh', display: 'flex', flexDirection: 'column', boxShadow: '0 -8px 30px rgba(0,0,0,0.2)',
+          display: 'flex', flexDirection: 'column', boxShadow: '0 -8px 30px rgba(0,0,0,0.2)',
         }}
       >
         <div style={{
@@ -165,9 +166,9 @@ export function Modal({ open, onClose, title, children, footer, width = 460 }) {
           <strong style={{ fontSize: 15, color: C.text }}>{title}</strong>
           <button onClick={onClose} style={{ border: 'none', background: 'none', fontSize: 20, cursor: 'pointer', color: C.textMuted }}>×</button>
         </div>
-        <div style={{ padding: 16, overflowY: 'auto', flex: 1, minHeight: 0, WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain' }}>{children}</div>
+        <div className="modal-body" style={{ paddingTop: 16, paddingInline: 16, overflowY: 'auto', flex: 1, minHeight: 0, WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain' }}>{children}</div>
         {footer && (
-          <div style={{ padding: '12px 16px', borderTop: `1px solid ${C.border}`, display: 'flex', gap: 8, justifyContent: 'flex-end', flexShrink: 0 }}>
+          <div style={{ padding: '12px 16px', paddingBottom: 'calc(12px + env(safe-area-inset-bottom))', borderTop: `1px solid ${C.border}`, display: 'flex', gap: 8, justifyContent: 'flex-end', flexShrink: 0 }}>
             {footer}
           </div>
         )}

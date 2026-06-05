@@ -32,6 +32,11 @@
       input, button, select, textarea { font-family: inherit; }
       /* 16px minimum stops iOS Safari from auto-zooming when a field is focused. */
       input, select, textarea { font-size: 16px; }
+      /* Mobile-safe bottom-sheet modal: use the dynamic viewport height (dvh) so
+         nothing is hidden behind the browser toolbars, and pad for the notch /
+         home indicator. The vh line is the fallback for browsers without dvh. */
+      .modal-sheet { max-height: 92vh; max-height: 92dvh; }
+      .modal-body { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
     </style>
   </head>
   <body>
