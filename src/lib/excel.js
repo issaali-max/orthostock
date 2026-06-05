@@ -171,7 +171,8 @@ export async function exportExcel(data, lang = 'ar') {
     { header: 'Name', key: 'name', width: 26 }, { header: 'Type', key: 'type', width: 10 },
     { header: 'Phone', key: 'phone', width: 16 }, { header: 'City', key: 'city', width: 14 },
     { header: 'Emirate', key: 'emirate', width: 14 }, { header: 'Specialty', key: 'spec', width: 16 },
-  ], custs.map((c) => ({ name: c.name, type: c.type, phone: c.phone, city: c.city, emirate: c.emirate, spec: c.specialty })));
+    { header: 'WorkingDays', key: 'wd', width: 22 },
+  ], custs.map((c) => ({ name: c.name, type: c.type, phone: c.phone, city: c.city, emirate: c.emirate, spec: c.specialty, wd: (c.workingDays || []).join(',') })));
 
   buildSheet(wb, 'Suppliers', [
     { header: 'Name', key: 'name', width: 26 }, { header: 'Phone', key: 'phone', width: 16 },
@@ -261,54 +262,93 @@ export async function importExcel(file, data) {
   const ExcelJS = await getExcelJS();
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(await file.arrayBuffer());
-  const summary = { materialsUpdated: 0, customersAdded: 0, customersUpdated: 0, skipped: 0 };
+  const summary = { materialsUpdated: 0, materialsAdded: 0, customersAdded: 0, customersUpdated: 0, categoriesAdded: 0, skipped: 0 };
+  const norm = (x) => String(x == null ? '' : x).replace(/\u00a0/g, ' ').trim().replace(/\s+/g, ' ');
 
+  // ── Categories sheet (create any that don't already exist) ──
+  const cats = [...(data[TABLES.categories] || [])];
+  const findCat = (name) => { const n = norm(name).toLowerCase(); return cats.find((c) => norm(c.nameAr).toLowerCase() === n || norm(c.nameEn).toLowerCase() === n); };
+  const wsCat = wb.getWorksheet('Categories');
+  if (wsCat) {
+    const idx = headerIndex(wsCat);
+    const rows = [];
+    wsCat.eachRow((row, n) => {
+      if (n === 1) return;
+      const ar = norm(cellVal(row, idx, 'NameAR')); const en = norm(cellVal(row, idx, 'NameEN')) || ar;
+      if (!ar && !en) return;
+      if (findCat(ar) || findCat(en)) return;
+      rows.push({ nameAr: ar || en, nameEn: en || ar, icon: String(cellVal(row, idx, 'Icon') || '📦'), color: '#0D3B6E', attributes: [], isActive: true });
+    });
+    for (const r of rows) { const saved = await db.insert(TABLES.categories, r); cats.push(saved); summary.categoriesAdded++; }
+  }
+
+  // ── Materials sheet: update existing by SKU, else CREATE product + variant ──
   const wsM = wb.getWorksheet('Materials');
   if (wsM) {
     const idx = headerIndex(wsM);
     const bySku = new Map((data[TABLES.variants] || []).map((v) => [String(v.sku), v]));
-    const ops = [];
-    wsM.eachRow((row, n) => {
-      if (n === 1) return;
-      const sku = cellVal(row, idx, 'SKU'); if (!sku) return;
-      const v = bySku.get(String(sku).trim());
-      if (!v) { summary.skipped++; return; }
-      const patch = {};
+    const products = [...(data[TABLES.products] || [])];
+    const rows = [];
+    wsM.eachRow((row, n) => { if (n === 1) return; rows.push(row); });
+    for (const row of rows) {
+      const sku = cellVal(row, idx, 'SKU'); if (!sku) continue;
       const cost = cellVal(row, idx, 'Cost') ?? cellVal(row, idx, 'Purchase (avg)');
       const sell = cellVal(row, idx, 'Selling');
       const stock = cellVal(row, idx, 'Stock');
       const min = cellVal(row, idx, 'Min');
-      if (cost !== undefined && cost !== '') { patch.purchasePriceAvg = round2(cost); patch.purchasePriceLatest = round2(cost); }
-      if (sell !== undefined && sell !== '') patch.sellingPriceDefault = round2(sell);
-      if (stock !== undefined && stock !== '') patch.stockQty = round2(stock);
-      if (min !== undefined && min !== '') patch.stockMin = num(min);
-      if (Object.keys(patch).length) ops.push(db.update(TABLES.variants, v.id, patch).then(() => { summary.materialsUpdated++; }));
-    });
-    await Promise.all(ops);
+      const v = bySku.get(String(sku).trim());
+      if (v) {
+        const patch = {};
+        if (cost !== undefined && cost !== '') { patch.purchasePriceAvg = round2(cost); patch.purchasePriceLatest = round2(cost); }
+        if (sell !== undefined && sell !== '') patch.sellingPriceDefault = round2(sell);
+        if (stock !== undefined && stock !== '') patch.stockQty = round2(stock);
+        if (min !== undefined && min !== '') patch.stockMin = num(min);
+        if (Object.keys(patch).length) { await db.update(TABLES.variants, v.id, patch); summary.materialsUpdated++; }
+        continue;
+      }
+      // create new material (and its product/category if needed)
+      const name = norm(cellVal(row, idx, 'Name')); if (!name) { summary.skipped++; continue; }
+      const catName = norm(cellVal(row, idx, 'Category'));
+      let cat = findCat(catName);
+      if (!cat && catName) { cat = await db.insert(TABLES.categories, { nameAr: catName, nameEn: catName, icon: '📦', color: '#0D3B6E', attributes: [], isActive: true }); cats.push(cat); summary.categoriesAdded++; }
+      let prod = products.find((pp) => norm(pp.nameEn).toLowerCase() === name.toLowerCase() && pp.categoryId === (cat ? cat.id : null));
+      if (!prod) { prod = await db.insert(TABLES.products, { nameAr: name, nameEn: name, categoryId: cat ? cat.id : null, brand: norm(cellVal(row, idx, 'Brand')), icon: '📦', image_url: '', description: '', isActive: true }); products.push(prod); }
+      await db.insert(TABLES.variants, {
+        productId: prod.id, sku: String(sku).trim(), nameEn: name, attributes: {}, image_url: '',
+        purchasePriceLatest: round2(cost || 0), purchasePriceAvg: round2(cost || 0), purchasePriceMin: round2(cost || 0), purchasePriceMax: round2(cost || 0),
+        sellingPriceDefault: round2(sell || 0), stockQty: round2(stock || 0), stockMin: num(min || 0), unit: 'piece', notes: '', isActive: true,
+      });
+      summary.materialsAdded++;
+    }
   }
 
+  // ── Customers sheet: dedupe by phone OR normalized name; read WorkingDays ──
   const wsC = wb.getWorksheet('Customers');
   if (wsC) {
     const idx = headerIndex(wsC);
-    const byPhone = new Map((data[TABLES.customers] || []).filter((c) => c.phone).map((c) => [String(c.phone), c]));
-    const ops = [];
-    wsC.eachRow((row, n) => {
-      if (n === 1) return;
-      const name = cellVal(row, idx, 'Name'); if (!name) return;
+    const existing = (data[TABLES.customers] || []);
+    const byPhone = new Map(existing.filter((c) => c.phone).map((c) => [String(c.phone).trim(), c]));
+    const byName = new Map(existing.map((c) => [norm(c.name).toLowerCase(), c]));
+    const seenNames = new Set();
+    const rows = [];
+    wsC.eachRow((row, n) => { if (n === 1) return; rows.push(row); });
+    for (const row of rows) {
+      const name = norm(cellVal(row, idx, 'Name')); if (!name) continue;
       const phone = String(cellVal(row, idx, 'Phone') || '').trim();
+      const wdRaw = norm(cellVal(row, idx, 'WorkingDays'));
+      const workingDays = wdRaw ? wdRaw.split(/[,،]/).map((x) => x.trim()).filter(Boolean) : [];
       const rec = {
-        name: String(name).trim(),
-        type: String(cellVal(row, idx, 'Type') || 'doctor').trim() || 'doctor',
-        phone, city: String(cellVal(row, idx, 'City') || '').trim(),
-        emirate: String(cellVal(row, idx, 'Emirate') || '').trim(),
-        specialty: String(cellVal(row, idx, 'Specialty') || '').trim(),
-        isActive: true,
+        name, type: String(cellVal(row, idx, 'Type') || 'doctor').trim() || 'doctor',
+        phone, city: norm(cellVal(row, idx, 'City')), emirate: norm(cellVal(row, idx, 'Emirate')),
+        specialty: norm(cellVal(row, idx, 'Specialty')), isActive: true,
       };
-      const existing = phone && byPhone.get(phone);
-      if (existing) ops.push(db.update(TABLES.customers, existing.id, rec).then(() => { summary.customersUpdated++; }).catch(() => { summary.skipped++; }));
-      else ops.push(db.insert(TABLES.customers, { ...rec, workingDays: [], notes: '' }).then(() => { summary.customersAdded++; }).catch(() => { summary.skipped++; }));
-    });
-    await Promise.all(ops);
+      const nameKey = name.toLowerCase();
+      if (seenNames.has(nameKey) && !phone) { summary.skipped++; continue; } // de-dup within the file
+      seenNames.add(nameKey);
+      const existingRow = (phone && byPhone.get(phone)) || byName.get(nameKey);
+      if (existingRow) { await db.update(TABLES.customers, existingRow.id, rec).then(() => { summary.customersUpdated++; }).catch(() => { summary.skipped++; }); }
+      else { const saved = await db.insert(TABLES.customers, { ...rec, workingDays, notes: '' }).catch(() => null); if (saved) { byName.set(nameKey, saved); summary.customersAdded++; } else summary.skipped++; }
+    }
   }
 
   return summary;
