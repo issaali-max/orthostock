@@ -27,6 +27,8 @@ export default function Catalogue() {
   const [archFilter, setArchFilter] = useState('');
   const [editMode, setEditMode] = useState(false);
   const [edit, setEdit] = useState(null);
+  const [flat, setFlat] = useState(false);
+  const [flatCat, setFlatCat] = useState(null);
 
   const categories = (data[TABLES.categories] || []).filter((c) => c.isActive !== false);
   const products = (data[TABLES.products] || []).filter((p) => p.isActive !== false);
@@ -59,12 +61,67 @@ export default function Catalogue() {
   );
   const Edit = <EditModal edit={edit} setEdit={setEdit} app={app} t={t} products={products} categories={categories} onSave={saveEdit} onDelete={deleteEdit} />;
 
+  const catIdByProduct = useMemo(() => { const m = {}; products.forEach((p) => { m[p.id] = p.categoryId; }); return m; }, [products]);
+
+  // ── Flat inventory: ALL materials with a per-category filter ──
+  if (flat) {
+    const countFor = (cid) => variants.filter((v) => catIdByProduct[v.productId] === cid).length;
+    let vlist = variants;
+    if (flatCat) vlist = vlist.filter((v) => catIdByProduct[v.productId] === flatCat);
+    if (q) { const s = q.toLowerCase(); vlist = vlist.filter((v) => (v.nameEn || '').toLowerCase().includes(s) || (v.sku || '').toLowerCase().includes(s)); }
+    vlist = vlist.slice().sort((a, b) => (a.nameEn || a.sku || '').localeCompare(b.nameEn || b.sku || ''));
+    return (
+      <div>
+        <PageHeader title={t('inventory')} action={<Btn size="sm" variant="light" onClick={() => { setFlat(false); setFlatCat(null); setQ(''); }}>🗂️ {t('byCategory')}</Btn>} />
+        <SearchBar value={q} onChange={setQ} placeholder={t('search')} />
+        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 8, marginBottom: 10 }}>
+          <FilterChip active={!flatCat} onClick={() => setFlatCat(null)}>{t('allCats')} ({variants.length})</FilterChip>
+          {categories.map((c) => <FilterChip key={c.id} active={flatCat === c.id} onClick={() => setFlatCat(c.id)}>{(c.nameAr || c.nameEn)} ({countFor(c.id)})</FilterChip>)}
+        </div>
+        {vlist.length === 0 ? <EmptyState icon="📦" text={t('noData')} /> : (
+          <div style={{ display: 'grid', gap: 8 }}>
+            {vlist.map((v) => {
+              const stock = num(v.stockQty);
+              const low = stock <= num(v.stockMin) && num(v.stockMin) > 0;
+              const stockColor = stock <= 0 ? C.danger : low ? C.warning : C.success;
+              const attrs = Object.entries(v.attributes || {}).filter(([, val]) => val);
+              return (
+                <div key={v.id} onClick={editMode ? () => openEdit(TABLES.variants, 'variant', { ...v, attributes: { ...(v.attributes || {}) } }) : undefined}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: `1px solid ${C.border}`, borderRadius: RADIUS, boxShadow: SHADOW, padding: '10px 14px', cursor: editMode ? 'pointer' : 'default' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, color: C.text, fontSize: 13 }}>{editMode && '✎ '}{v.nameEn || v.sku}</div>
+                    {attrs.length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, margin: '4px 0 2px' }}>
+                        {attrs.map(([k, val]) => <span key={k} style={{ fontSize: 10, fontWeight: 700, color: C.primaryMid, background: C.primary + '12', borderRadius: 6, padding: '2px 7px' }}>{val}</span>)}
+                      </div>
+                    )}
+                    <div style={{ fontSize: 10, color: C.textMuted }}>{v.sku}</div>
+                  </div>
+                  <div style={{ textAlign: 'center', minWidth: 56 }}>
+                    <div style={{ fontSize: 17, fontWeight: 800, color: stockColor }}>{fmtNum(stock)}</div>
+                    <div style={{ fontSize: 9, color: C.textMuted }}>{t('stock')}</div>
+                  </div>
+                  <div style={{ minWidth: 88, textAlign: 'end' }}>
+                    <div style={{ fontWeight: 700, color: C.primary, fontSize: 13 }}>{fmtCur(v.sellingPriceDefault, displayCurrency, usdRate)}</div>
+                    <div style={{ fontSize: 10, color: C.textMuted }}>{t('avgCost')} {fmtCur(v.purchasePriceAvg, displayCurrency, usdRate)}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {Edit}
+      </div>
+    );
+  }
+
   // ── Step 1: categories ──
   if (!catId) {
     const list = categories.filter((c) => !q || catLabel(c).toLowerCase().includes(q.toLowerCase()));
     return (
       <div>
         <PageHeader title={t('catalogue')} action={<div style={{ display: 'flex', gap: 6 }}>
+          <Btn size="sm" variant="light" onClick={() => { setFlat(true); setQ(''); }}>📦 {t('allMaterials')}</Btn>
           {editMode && <Btn size="sm" onClick={() => openEdit(TABLES.categories, 'category', blankCategory())}>＋</Btn>}
           {EditToggle}
         </div>} />
@@ -179,8 +236,9 @@ export default function Catalogue() {
                           <div style={{ fontSize: 17, fontWeight: 800, color: stockColor }}>{fmtNum(stock)}</div>
                           <div style={{ fontSize: 9, color: C.textMuted }}>{t('stock')}{neg ? ' ⚠' : low ? ' !' : ''}</div>
                         </div>
-                        <div style={{ minWidth: 72, textAlign: 'end', fontWeight: 700, color: C.primary, fontSize: 13 }}>
-                          {fmtCur(v.sellingPriceDefault, displayCurrency, usdRate)}
+                        <div style={{ minWidth: 86, textAlign: 'end' }}>
+                          <div style={{ fontWeight: 700, color: C.primary, fontSize: 13 }}>{fmtCur(v.sellingPriceDefault, displayCurrency, usdRate)}</div>
+                          <div style={{ fontSize: 10, color: C.textMuted }}>{t('avgCost')} {fmtCur(v.purchasePriceAvg, displayCurrency, usdRate)}</div>
                         </div>
                       </div>
                     );

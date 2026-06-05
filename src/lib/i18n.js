@@ -68,7 +68,7 @@ export const DICT = {
     defaultPrice: 'السعر الافتراضي', finalTotal: 'الإجمالي النهائي', qty: 'الكمية', price: 'السعر',
     totalCost: 'إجمالي التكلفة', expectedProfit: 'الربح المتوقع', belowCost: 'بيع بأقل من التكلفة',
     insufficientStock: 'مخزون غير كافٍ', returnInvoice: 'إرجاع الفاتورة', returned: 'مُرتجعة',
-    confirmReturn: 'إرجاع الفاتورة؟ ستعاد المواد للمخزون', stockHistory: 'سجل حركة المخزون', stockAudit: 'تدقيق المخزون', stockAuditNote: 'مقارنة المخزون بمجموع الحركات لاكتشاف أي فرق', runCheck: 'فحص', stockAllConsistent: 'كل المخزون متطابق مع الحركات', stockMismatch: 'مادة بها فرق',
+    confirmReturn: 'إرجاع الفاتورة؟ ستعاد المواد للمخزون', stockHistory: 'سجل حركة المخزون', inventory: 'المخزون', allCats: 'الكل', byCategory: 'حسب الصنف', allMaterials: 'كل المواد', stockAudit: 'تدقيق المخزون', stockAuditNote: 'مقارنة المخزون بمجموع الحركات لاكتشاف أي فرق', runCheck: 'فحص', stockAllConsistent: 'كل المخزون متطابق مع الحركات', stockMismatch: 'مادة بها فرق',
     adjustment: 'تعديل', opening: 'افتتاحي', balance: 'الرصيد', noMovements: 'لا حركات بعد',
     numberOfShares: 'عدد الأسهم', live: 'مباشر', simulated: 'محاكاة', livePriceNote: 'أسعار محاكاة حيّة — يمكن ربطها بـ API حقيقي لاحقاً', activeStocks: 'الأسهم النشطة', soldStocks: 'الأسهم المباعة بالكامل', totalCashIn: 'إجمالي النقد الداخل', totalCashOut: 'إجمالي النقد الخارج', ledger: 'سجل الحركات', addDividend: 'إضافة أرباح موزّعة', lifetimePnL: 'إجمالي الربح/الخسارة', initialBuyHint: 'سيُسجَّل كأول عملية شراء بالسعر الحالي',
     investments: 'الاستثمار', portfolio: 'المحفظة', cashTab: 'النقد', addSecurity: 'إضافة سهم',
