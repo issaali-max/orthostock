@@ -25,7 +25,7 @@ export const DICT = {
     description: 'الوصف', image: 'الصورة', imageOrIcon: 'اختر صورة أو أيقونة', icon: 'الأيقونة', color: 'اللون', active: 'مفعّل', inactive: 'غير مفعّل',
     phone: 'الهاتف', whatsapp: 'واتساب', city: 'المدينة', currency: 'العملة',
     notes: 'ملاحظات', category: 'الفئة', unit: 'الوحدة', sku: 'رمز الصنف (SKU)',
-    sellingPrice: 'سعر البيع الافتراضي', avgCost: 'متوسط التكلفة', costPrice: 'سعر التكلفة',
+    sellingPrice: 'سعر البيع الافتراضي', avgCost: 'متوسط التكلفة', margin: 'الهامش', costPrice: 'سعر التكلفة',
     stock: 'المخزون', stockMin: 'الحد الأدنى للمخزون',
     // categories attributes
     attributes: 'الخصائص', attributeKey: 'المفتاح', attributeLabel: 'التسمية', options: 'الخيارات',
@@ -108,7 +108,7 @@ export const DICT = {
     description: 'Description', image: 'Image', imageOrIcon: 'Pick an image or an icon', icon: 'Icon', color: 'Color', active: 'Active', inactive: 'Inactive',
     phone: 'Phone', whatsapp: 'WhatsApp', city: 'City', currency: 'Currency',
     notes: 'Notes', category: 'Category', unit: 'Unit', sku: 'SKU',
-    sellingPrice: 'Default selling price', avgCost: 'Average cost', costPrice: 'Cost price',
+    sellingPrice: 'Default selling price', avgCost: 'Average cost', margin: 'Margin', costPrice: 'Cost price',
     stock: 'Stock', stockMin: 'Min stock level',
     attributes: 'Attributes', attributeKey: 'Key', attributeLabel: 'Label', options: 'Options',
     addAttribute: 'Add attribute', addOption: 'Add option',

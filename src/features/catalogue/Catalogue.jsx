@@ -62,6 +62,15 @@ export default function Catalogue() {
   const Edit = <EditModal edit={edit} setEdit={setEdit} app={app} t={t} products={products} categories={categories} onSave={saveEdit} onDelete={deleteEdit} />;
 
   const catIdByProduct = useMemo(() => { const m = {}; products.forEach((p) => { m[p.id] = p.categoryId; }); return m; }, [products]);
+  const lastByVar = useMemo(() => {
+    const m = {};
+    (data[TABLES.stockMovements] || []).forEach((mv) => {
+      const e = m[mv.variantId] || (m[mv.variantId] = {});
+      if (mv.type === 'purchase' && (!e.purchase || mv.createdAt > e.purchase)) e.purchase = mv.createdAt;
+      if (mv.type === 'sale' && (!e.sale || mv.createdAt > e.sale)) e.sale = mv.createdAt;
+    });
+    return m;
+  }, [data]);
 
   // ── Flat inventory: ALL materials with a per-category filter ──
   if (flat) {
@@ -85,6 +94,9 @@ export default function Catalogue() {
               const low = stock <= num(v.stockMin) && num(v.stockMin) > 0;
               const stockColor = stock <= 0 ? C.danger : low ? C.warning : C.success;
               const attrs = Object.entries(v.attributes || {}).filter(([, val]) => val);
+              const sell = num(v.sellingPriceDefault); const avg = num(v.purchasePriceAvg);
+              const margin = sell > 0 ? Math.round(((sell - avg) / sell) * 100) : 0;
+              const act = lastByVar[v.id] || {};
               return (
                 <div key={v.id} onClick={editMode ? () => openEdit(TABLES.variants, 'variant', { ...v, attributes: { ...(v.attributes || {}) } }) : undefined}
                   style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: `1px solid ${C.border}`, borderRadius: RADIUS, boxShadow: SHADOW, padding: '10px 14px', cursor: editMode ? 'pointer' : 'default' }}>
@@ -96,14 +108,18 @@ export default function Catalogue() {
                       </div>
                     )}
                     <div style={{ fontSize: 10, color: C.textMuted }}>{v.sku}</div>
+                    <div style={{ fontSize: 10, color: C.textMuted, marginTop: 2 }}>
+                      {act.purchase ? `🛒 ${fmtDate(act.purchase, lang)}` : `🛒 —`} · {act.sale ? `💸 ${fmtDate(act.sale, lang)}` : `💸 —`}
+                    </div>
                   </div>
                   <div style={{ textAlign: 'center', minWidth: 56 }}>
                     <div style={{ fontSize: 17, fontWeight: 800, color: stockColor }}>{fmtNum(stock)}</div>
                     <div style={{ fontSize: 9, color: C.textMuted }}>{t('stock')}</div>
                   </div>
-                  <div style={{ minWidth: 88, textAlign: 'end' }}>
-                    <div style={{ fontWeight: 700, color: C.primary, fontSize: 13 }}>{fmtCur(v.sellingPriceDefault, displayCurrency, usdRate)}</div>
-                    <div style={{ fontSize: 10, color: C.textMuted }}>{t('avgCost')} {fmtCur(v.purchasePriceAvg, displayCurrency, usdRate)}</div>
+                  <div style={{ minWidth: 92, textAlign: 'end' }}>
+                    <div style={{ fontWeight: 700, color: C.primary, fontSize: 13 }}>{fmtCur(sell, displayCurrency, usdRate)}</div>
+                    <div style={{ fontSize: 10, color: C.textMuted }}>{t('avgCost')} {fmtCur(avg, displayCurrency, usdRate)}</div>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: margin >= 0 ? C.success : C.danger }}>{t('margin')} {margin}%</div>
                   </div>
                 </div>
               );

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useApp } from '../../app/AppProvider.jsx';
 import { C, TABLES } from '../../lib/constants.js';
 import { fmtCur, fmtNum, num, round2, safeDiv } from '../../lib/money.js';
@@ -27,6 +27,13 @@ export default function InvoiceCreate({ open, onClose, editing }) {
   const [catId, setCatId] = useState('');
   const [prodId, setProdId] = useState('');
   const [customerId, setCustomerId] = useState('');
+  const [custCity, setCustCity] = useState('');
+  const cityOptions = useMemo(() => [...new Set(customers.map((c) => (c.city || '').trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, 'ar')).map((c) => ({ value: c, label: c })), [customers]);
+  const clinicOptions = useMemo(() => customers
+    .filter((c) => !custCity || (c.city || '').trim() === custCity)
+    .slice().sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ar'))
+    .map((c) => ({ value: c.id, label: c.name })), [customers, custCity]);
   const [date, setDate] = useState(todayISO());
   const [paymentStatus, setStatus] = useState('unpaid');
   const [paidAmount, setPaid] = useState('');
@@ -42,13 +49,14 @@ export default function InvoiceCreate({ open, onClose, editing }) {
       // reconstruct the pre-distribution unit price from listPrice/discount when possible
       setLines(its.map((it) => ({ variantId: it.variantId, qty: num(it.qty), unitPrice: num(it.listPrice) > 0 ? round2(num(it.listPrice) - safeDiv(num(it.discountAmount), num(it.qty))) : num(it.unitPrice) })));
       setCustomerId(editing.customerId || '');
+      setCustCity(customers.find((c) => c.id === editing.customerId)?.city || '');
       setDate(editing.date || todayISO());
       setStatus(editing.paymentStatus || 'unpaid');
       setPaid(editing.paidAmount ? num(editing.paidAmount) : '');
       setInvDiscount(editing.discountTotal ? num(editing.discountTotal) : '');
       setCatId(firstCat);
     } else {
-      setLines([]); setCatId(firstCat); setCustomerId(''); setDate(todayISO()); setStatus('unpaid'); setPaid(''); setInvDiscount('');
+      setLines([]); setCatId(firstCat); setCustomerId(''); setCustCity(''); setDate(todayISO()); setStatus('unpaid'); setPaid(''); setInvDiscount('');
     }
   }, [open, editing]);
 
@@ -98,9 +106,18 @@ export default function InvoiceCreate({ open, onClose, editing }) {
     <Modal open={open} onClose={onClose} title={editing ? `${t('editInvoice')} · ${editing.invoiceNumber}` : t('newInvoice')} width={520}
       footer={<><Btn variant="ghost" onClick={onClose}>{t('cancel')}</Btn><Btn onClick={save} disabled={busy || lines.length === 0}>{t('save')}</Btn></>}>
       <div style={{ position: 'sticky', top: -1, zIndex: 5, background: '#fff', paddingBottom: 8, marginBottom: 4, borderBottom: `1px solid ${C.surfaceAlt}` }}>
-        <Field label={t('customer')} required>
-          <Select value={customerId} onChange={setCustomerId} placeholder={t('selectCustomer')} options={customers.map((c) => ({ value: c.id, label: c.name }))} />
-        </Field>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ flex: 1 }}>
+            <Field label={t('city')}>
+              <Select value={custCity} onChange={(v) => { setCustCity(v); setCustomerId(''); }} placeholder={t('allCities')} options={cityOptions} />
+            </Field>
+          </div>
+          <div style={{ flex: 1 }}>
+            <Field label={t('customer')} required>
+              <Select value={customerId} onChange={setCustomerId} placeholder={t('selectCustomer')} options={clinicOptions} />
+            </Field>
+          </div>
+        </div>
         <Field label={t('date')}><Input type="date" value={date} onChange={setDate} /></Field>
       </div>
 

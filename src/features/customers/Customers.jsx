@@ -33,7 +33,7 @@ export default function Customers() {
       return { ...c, _st: st, _margin: margin };
     });
     const cmp = {
-      name: (a, b) => (a.name || '').localeCompare(b.name || ''),
+      name: (a, b) => (a.name || '').localeCompare(b.name || '', 'ar'),
       revenue: (a, b) => b._st.revenue - a._st.revenue,
       profit: (a, b) => b._st.profit - a._st.profit,
       margin: (a, b) => b._margin - a._margin,
