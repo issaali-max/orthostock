@@ -30,12 +30,7 @@ export default defineConfig({
           { src: '/icons/maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
       },
-      workbox: {
-        globPatterns: ['**/*.{js,css,html,woff2,png,svg,ico}'],
-        maximumFileSizeToCacheInBytes: 3 * 1024 * 1024, // exceljs chunk ~0.9MB needs headroom
-        navigateFallback: '/index.html',
-        cleanupOutdatedCaches: true,
-      },
+
     }),
   ],
   server: { port: 5173 },

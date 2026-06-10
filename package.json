@@ -1,7 +1,7 @@
 {
   "name": "orthostock",
   "private": true,
-  "version": "2.6.0",
+  "version": "2.7.0",
   "type": "module",
   "description": "OrthoStock — inventory, accounting, sales, purchasing, debt, investment & analytics for an orthodontic-supply business (UAE).",
   "scripts": {
