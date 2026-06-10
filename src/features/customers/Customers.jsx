@@ -6,7 +6,7 @@ import { fmtDate } from '../../lib/dates.js';
 import { customerStats, clinicRating, recordInvoicePayment } from '../../lib/engine.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, PaymentModal, SearchBar, Select, Textarea } from '../../ui/components.jsx';
 
-const blank = () => ({ name: '', type: 'doctor', phone: '', emirate: '', specialty: '', workingDays: [], notes: '', isActive: true });
+const blank = () => ({ name: '', type: 'doctor', phone: '', emirate: '', specialty: '', workingDays: WEEKDAYS.map((d) => d.key), notes: '', isActive: true });
 
 export default function Customers() {
   const app = useApp();

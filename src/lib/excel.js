@@ -10,7 +10,7 @@
 // Import stays SAFE: update-by-key (SKU / phone) or add; never deletes.
 // ExcelJS is lazy-loaded so it never bloats the initial bundle.
 // ─────────────────────────────────────────────────────────────
-import { TABLES, EMIRATES } from './constants.js';
+import { TABLES, EMIRATES, WEEKDAYS } from './constants.js';
 import { num, round2 } from './money.js';
 import * as db from '../db/db.js';
 
@@ -156,6 +156,7 @@ export async function exportExcel(data, lang = 'ar') {
   }));
 
   buildSheet(wb, 'Materials', [
+    { header: 'id', key: 'id', width: 14 },
     { header: 'SKU', key: 'sku', width: 16 },
     { header: 'Name', key: 'name', width: 26 },
     { header: 'Category', key: 'cat', width: 20 },
@@ -163,29 +164,32 @@ export async function exportExcel(data, lang = 'ar') {
     { header: 'Selling', key: 'sell', width: 12, money: true },
     { header: 'Stock', key: 'stock', width: 10 },
     { header: 'Min', key: 'min', width: 8 },
-    { header: 'StockValue', key: 'sv', width: 13, money: true, formula: (r) => `IF($A${r}="","",$D${r}*$F${r})` },
+    { header: 'StockValue', key: 'sv', width: 13, money: true, formula: (r) => `IF($B${r}="","",$E${r}*$G${r})` },
     { header: 'Brand', key: 'brand', width: 18 },
-  ], vars.map((v) => { const p = prods.find((x) => x.id === v.productId); return { sku: v.sku, name: varName(v), cat: p ? catName(p.categoryId) : '', cost: num(v.purchasePriceAvg), sell: num(v.sellingPriceDefault), stock: num(v.stockQty), min: num(v.stockMin), brand: p?.brand || '' }; }));
+  ], vars.map((v) => { const p = prods.find((x) => x.id === v.productId); return { id: v.id, sku: v.sku, name: varName(v), cat: p ? catName(p.categoryId) : '', cost: num(v.purchasePriceAvg), sell: num(v.sellingPriceDefault), stock: num(v.stockQty), min: num(v.stockMin), brand: p?.brand || '' }; }));
 
   buildSheet(wb, 'Customers', [
+    { header: 'id', key: 'id', width: 14 },
     { header: 'Name', key: 'name', width: 26 }, { header: 'Type', key: 'type', width: 10 },
     { header: 'Phone', key: 'phone', width: 16 }, { header: 'City', key: 'city', width: 14 },
     { header: 'Emirate', key: 'emirate', width: 14 }, { header: 'Specialty', key: 'spec', width: 16 },
     { header: 'WorkingDays', key: 'wd', width: 22 },
-  ], custs.map((c) => ({ name: c.name, type: c.type, phone: c.phone, city: c.city, emirate: c.emirate, spec: c.specialty, wd: (c.workingDays || []).join(',') })));
+  ], custs.map((c) => ({ id: c.id, name: c.name, type: c.type, phone: c.phone, city: c.city, emirate: c.emirate, spec: c.specialty, wd: (c.workingDays || []).join(',') })));
 
   buildSheet(wb, 'Suppliers', [
+    { header: 'id', key: 'id', width: 14 },
     { header: 'Name', key: 'name', width: 26 }, { header: 'Phone', key: 'phone', width: 16 },
     { header: 'City', key: 'city', width: 14 }, { header: 'Currency', key: 'cur', width: 10 },
-  ], sups.map((s) => ({ name: s.name, phone: s.phone, city: s.city, cur: s.currency })));
+  ], sups.map((s) => ({ id: s.id, name: s.name, phone: s.phone, city: s.city, cur: s.currency })));
 
   buildSheet(wb, 'Products', [
     { header: 'Product', key: 'n', width: 28 }, { header: 'Brand', key: 'b', width: 18 }, { header: 'Category', key: 'c', width: 28 },
   ], prods.map((p) => ({ n: p.nameEn, b: p.brand || '', c: catName(p.categoryId) })));
 
   buildSheet(wb, 'Categories', [
+    { header: 'id', key: 'id', width: 14 },
     { header: 'NameAR', key: 'a', width: 22 }, { header: 'NameEN', key: 'e', width: 22 }, { header: 'Icon', key: 'i', width: 8 },
-  ], cats.map((c) => ({ a: c.nameAr, e: c.nameEn, i: c.icon })));
+  ], cats.map((c) => ({ id: c.id, a: c.nameAr, e: c.nameEn, i: c.icon })));
 
   buildSheet(wb, 'Expenses', [
     { header: 'Date', key: 'date', width: 14 }, { header: 'Group', key: 'group', width: 22 },
@@ -264,6 +268,17 @@ const normEmirate = (x) => {
   if (/العين|al ?ain/i.test(s)) return 'Abu Dhabi'; // Al Ain is in Abu Dhabi emirate
   return s;
 };
+const ALL_DAYS = WEEKDAYS.map((d) => d.key);
+// Parse a WorkingDays cell (Arabic / English / keys, comma separated) into day
+// keys. Empty cell defaults to ALL days, as the owner requested.
+const parseWorkingDays = (x) => {
+  const s = String(x == null ? '' : x).trim();
+  if (!s) return [...ALL_DAYS];
+  if (/كل|all|7|يومي|daily/i.test(s)) return [...ALL_DAYS];
+  const tokens = s.split(/[,،/]+/).map((p) => p.trim().toLowerCase()).filter(Boolean);
+  const keys = tokens.map((tk) => WEEKDAYS.find((d) => d.key === tk || d.ar === tk || d.en.toLowerCase() === tk || d.ar.replace(/^ال/, '') === tk)?.key).filter(Boolean);
+  return keys.length ? [...new Set(keys)] : [...ALL_DAYS];
+};
 function headerIndex(ws) {
   const map = {};
   const norm = {};
@@ -323,16 +338,18 @@ export async function importExcel(file, data) {
   if (wsM) {
     const idx = headerIndex(wsM);
     const bySku = new Map((data[TABLES.variants] || []).map((v) => [String(v.sku), v]));
+    const byVid = new Map((data[TABLES.variants] || []).map((v) => [String(v.id), v]));
     const products = [...(data[TABLES.products] || [])];
     const rows = [];
     wsM.eachRow((row, n) => { if (n === 1) return; rows.push(row); });
     for (const row of rows) {
       const sku = cellVal(row, idx, 'SKU'); if (!sku) continue;
+      const rid = String(cellVal(row, idx, 'id') || '').trim();
       const cost = cellVal(row, idx, 'Cost') ?? cellVal(row, idx, 'Purchase (avg)');
       const sell = cellVal(row, idx, 'Selling');
       const stock = cellVal(row, idx, 'Stock');
       const min = cellVal(row, idx, 'Min');
-      const v = bySku.get(String(sku).trim());
+      const v = (rid && byVid.get(rid)) || bySku.get(String(sku).trim());
       if (v) {
         const patch = {};
         if (cost !== undefined && cost !== '') { patch.purchasePriceAvg = round2(cost); patch.purchasePriceLatest = round2(cost); }
@@ -358,11 +375,12 @@ export async function importExcel(file, data) {
     }
   }
 
-  // ── Customers sheet: dedupe by phone OR normalized name; read WorkingDays ──
+  // ── Customers sheet: match by id, else phone, else name; WorkingDays defaults to all days ──
   const wsC = wb.getWorksheet('Customers');
   if (wsC) {
     const idx = headerIndex(wsC);
     const existing = (data[TABLES.customers] || []);
+    const byId = new Map(existing.map((c) => [String(c.id), c]));
     const byPhone = new Map(existing.filter((c) => c.phone).map((c) => [String(c.phone).trim(), c]));
     const byName = new Map(existing.map((c) => [norm(c.name).toLowerCase(), c]));
     const seenNames = new Set();
@@ -370,20 +388,20 @@ export async function importExcel(file, data) {
     wsC.eachRow((row, n) => { if (n === 1) return; rows.push(row); });
     for (const row of rows) {
       const name = norm(cellVal(row, idx, 'Name')); if (!name) continue;
+      const rid = String(cellVal(row, idx, 'id') || '').trim();
       const phone = String(cellVal(row, idx, 'Phone') || '').trim();
-      const wdRaw = norm(cellVal(row, idx, 'WorkingDays'));
-      const workingDays = wdRaw ? wdRaw.split(/[,،]/).map((x) => x.trim()).filter(Boolean) : [];
+      const workingDays = parseWorkingDays(cellVal(row, idx, 'WorkingDays'));
       const rec = {
         name, type: normType(cellVal(row, idx, 'Type')),
         phone, city: norm(cellVal(row, idx, 'City')), emirate: normEmirate(cellVal(row, idx, 'Emirate')),
-        specialty: norm(cellVal(row, idx, 'Specialty')), isActive: true,
+        specialty: norm(cellVal(row, idx, 'Specialty')), workingDays, isActive: true,
       };
       const nameKey = name.toLowerCase();
-      if (seenNames.has(nameKey) && !phone) { summary.skipped++; continue; } // de-dup within the file
+      if (seenNames.has(nameKey) && !phone && !rid) { summary.skipped++; continue; } // de-dup within the file
       seenNames.add(nameKey);
-      const existingRow = (phone && byPhone.get(phone)) || byName.get(nameKey);
+      const existingRow = (rid && byId.get(rid)) || (phone && byPhone.get(phone)) || byName.get(nameKey);
       if (existingRow) { await db.update(TABLES.customers, existingRow.id, rec).then(() => { summary.customersUpdated++; }).catch(() => { summary.skipped++; }); }
-      else { const saved = await db.insert(TABLES.customers, { ...rec, workingDays, notes: '' }).catch(() => null); if (saved) { byName.set(nameKey, saved); summary.customersAdded++; } else summary.skipped++; }
+      else { const saved = await db.insert(TABLES.customers, { ...rec, notes: '' }).catch(() => null); if (saved) { byName.set(nameKey, saved); byId.set(String(saved.id), saved); summary.customersAdded++; } else summary.skipped++; }
     }
   }
 
@@ -392,6 +410,7 @@ export async function importExcel(file, data) {
   if (wsS) {
     const idx = headerIndex(wsS);
     const existing = (data[TABLES.suppliers] || []);
+    const byId = new Map(existing.map((s2) => [String(s2.id), s2]));
     const byPhone = new Map(existing.filter((s2) => s2.phone).map((s2) => [String(s2.phone).trim(), s2]));
     const byName = new Map(existing.map((s2) => [norm(s2.name).toLowerCase(), s2]));
     const seen = new Set();
@@ -399,15 +418,16 @@ export async function importExcel(file, data) {
     wsS.eachRow((row, n) => { if (n === 1) return; rows.push(row); });
     for (const row of rows) {
       const name = norm(cellVal(row, idx, 'Name')); if (!name) continue;
+      const rid = String(cellVal(row, idx, 'id') || '').trim();
       const phone = String(cellVal(row, idx, 'Phone') || '').trim();
       // suppliers use `city` as their location/emirate; accept either column
       const city = normEmirate(cellVal(row, idx, 'Emirate')) || norm(cellVal(row, idx, 'City'));
       const currency = (String(cellVal(row, idx, 'Currency') || 'AED').trim().toUpperCase() === 'USD') ? 'USD' : 'AED';
       const rec = { name, phone, city, currency, isActive: true };
       const key = name.toLowerCase();
-      if (seen.has(key) && !phone) { summary.skipped++; continue; }
+      if (seen.has(key) && !phone && !rid) { summary.skipped++; continue; }
       seen.add(key);
-      const found = (phone && byPhone.get(phone)) || byName.get(key);
+      const found = (rid && byId.get(rid)) || (phone && byPhone.get(phone)) || byName.get(key);
       if (found) { await db.update(TABLES.suppliers, found.id, rec).catch(() => { summary.skipped++; }); }
       else { const saved = await db.insert(TABLES.suppliers, rec).catch(() => null); if (saved) byName.set(key, saved); }
     }
