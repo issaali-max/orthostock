@@ -27,7 +27,7 @@ export default function Catalogue() {
   const [archFilter, setArchFilter] = useState('');
   const [editMode, setEditMode] = useState(false);
   const [edit, setEdit] = useState(null);
-  const [flat, setFlat] = useState(false);
+  const [flat, setFlat] = useState(true);
   const [flatCat, setFlatCat] = useState(null);
 
   const categories = (data[TABLES.categories] || []).filter((c) => c.isActive !== false);
@@ -81,7 +81,18 @@ export default function Catalogue() {
     vlist = vlist.slice().sort((a, b) => (a.nameEn || a.sku || '').localeCompare(b.nameEn || b.sku || ''));
     return (
       <div>
-        <PageHeader title={t('inventory')} action={<Btn size="sm" variant="light" onClick={() => { setFlat(false); setFlatCat(null); setQ(''); }}>🗂️ {t('byCategory')}</Btn>} />
+        <PageHeader title={t('inventory')} action={
+          <div style={{ display: 'flex', gap: 6 }}>
+            {EditToggle}
+            <Btn size="sm" variant="light" onClick={() => { setFlat(false); setFlatCat(null); setQ(''); }}>🗂️ {t('byCategory')}</Btn>
+          </div>
+        } />
+        {editMode && (
+          <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+            <Btn size="sm" onClick={() => openEdit(TABLES.variants, 'variant', blankVariant())}>＋ {t('materials')}</Btn>
+            <Btn size="sm" variant="light" onClick={() => openEdit(TABLES.categories, 'category', blankCategory())}>＋ {t('categories')}</Btn>
+          </div>
+        )}
         <SearchBar value={q} onChange={setQ} placeholder={t('search')} />
         <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 8, marginBottom: 10 }}>
           <FilterChip active={!flatCat} onClick={() => setFlatCat(null)}>{t('allCats')} ({variants.length})</FilterChip>
@@ -285,7 +296,7 @@ function EditModal({ edit, setEdit, app, t, products, categories, onSave, onDele
       {edit.type === 'category' && <CategoryForm rec={edit.rec} setRec={setRec} t={t} />}
       {edit.type === 'product' && <ProductForm rec={edit.rec} setRec={setRec} t={t} cats={categories} />}
       {edit.type === 'variant' && <VariantForm rec={edit.rec} setRec={setRec} t={t} products={products} categories={categories}
-        onAddOption={(pid, key, opt) => addOptionToCategory(app, categories, pid, key, opt)} />}
+        onAddOption={(catId, key, opt) => addOptionToCategory(app, categories, catId, key, opt)} />}
       {edit.type === 'variant' && edit.rec.id && <StockHistory app={app} t={t} variantId={edit.rec.id} />}
     </Modal>
   );

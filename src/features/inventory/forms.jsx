@@ -15,7 +15,7 @@ import { num } from '../../lib/money.js';
 export const blankCategory = () => ({ nameAr: '', nameEn: '', icon: '🦷', image_url: '', color: C.primary, attributes: [], isActive: true });
 export const blankProduct = (categoryId = '') => ({ nameEn: '', brand: '', categoryId, icon: '📦', image_url: '', description: '', isActive: true });
 export const blankVariant = (productId = '') => ({
-  productId, sku: '', nameEn: '', attributes: {},
+  productId, categoryId: '', sku: '', nameEn: '', attributes: {},
   purchasePriceLatest: '', purchasePriceAvg: '', purchasePriceMin: '', purchasePriceMax: '',
   sellingPriceDefault: '', stockQty: '', stockMin: '', unit: 'piece', notes: '', isActive: true,
 });
@@ -43,8 +43,25 @@ export async function saveProduct(app, rec) {
 }
 export async function saveVariant(app, rec) {
   if (!rec.sku?.trim()) return false;
+  // The UI is 2 levels (Category -> Material); the schema keeps a product row in
+  // between. Resolve it here: keep the existing product if the category didn't
+  // change, otherwise find-or-create a 1:1 product in the chosen category named
+  // after the material. The user never sees or manages products directly.
+  let productId = rec.productId || null;
+  const products = app.data[TABLES.products] || [];
+  const currentCatId = products.find((p) => p.id === productId)?.categoryId || '';
+  if (rec.categoryId && rec.categoryId !== currentCatId) {
+    const pname = (rec.nameEn || rec.sku).trim();
+    const match = products.find((p) => p.categoryId === rec.categoryId && (p.nameEn || '').trim().toLowerCase() === pname.toLowerCase());
+    if (match) productId = match.id;
+    else {
+      const saved = await app.createRow(TABLES.products, { nameEn: pname, brand: '', categoryId: rec.categoryId, icon: '📦', image_url: '', description: '', isActive: true });
+      productId = saved?.id || null;
+    }
+  }
+  if (!productId) return false; // a material must live under a category
   const payload = {
-    productId: rec.productId || null, sku: rec.sku.trim(), nameEn: rec.nameEn || '',
+    productId, sku: rec.sku.trim(), nameEn: rec.nameEn || '',
     attributes: rec.attributes || {}, image_url: rec.image_url || '',
     sellingPriceDefault: num(rec.sellingPriceDefault), stockMin: num(rec.stockMin),
     unit: rec.unit || 'piece', notes: rec.notes || '', isActive: true,
@@ -58,10 +75,8 @@ export async function saveVariant(app, rec) {
 }
 
 // Add a new attribute option to a category on the fly.
-export async function addOptionToCategory(app, categories, productId, attrKey, option) {
-  const products = app.data[TABLES.products] || [];
-  const p = products.find((x) => x.id === productId);
-  const cat = p ? categories.find((c) => c.id === p.categoryId) : null;
+export async function addOptionToCategory(app, categories, categoryId, attrKey, option) {
+  const cat = categories.find((c) => c.id === categoryId);
   if (!cat) return;
   const attrs = (cat.attributes || []).map((a) =>
     a.key === attrKey && !(a.options || []).includes(option) ? { ...a, options: [...(a.options || []), option] } : a);
@@ -154,33 +169,27 @@ export function ProductForm({ rec, setRec, t, cats }) {
 
 export function VariantForm({ rec, setRec, t, products, categories, onAddOption }) {
   const set = (k, v) => setRec((r) => ({ ...r, [k]: v }));
-  const productOf = (id) => products.find((p) => p.id === id);
-  const categoryOfProduct = (productId) => {
-    const p = productOf(productId);
-    return p ? categories.find((c) => c.id === p.categoryId) : null;
-  };
-  const [catFilter, setCatFilter] = useState(() => categoryOfProduct(rec.productId)?.id || '');
-  const filteredProducts = catFilter ? products.filter((p) => p.categoryId === catFilter) : products;
+  // 2-level UI: the material picks a CATEGORY only. For an existing material the
+  // category comes from its (hidden) product; for a new one from rec.categoryId.
+  const inheritedCatId = products.find((p) => p.id === rec.productId)?.categoryId || '';
+  const catId = rec.categoryId || inheritedCatId;
+  const cat = categories.find((c) => c.id === catId);
   return (
     <div>
       <Field label={t('categories')} required>
-        <Select value={catFilter} onChange={(v) => { setCatFilter(v); set('productId', ''); set('attributes', {}); }} placeholder="—"
-          options={categories.filter((c) => c.isActive !== false).map((c) => ({ value: c.id, label: `${c.icon} ${c.nameEn}` }))} />
-      </Field>
-      <Field label={t('products')} required>
-        <Select value={rec.productId} onChange={(v) => set('productId', v)} placeholder={catFilter ? '—' : t('pickProductFirst')}
-          options={filteredProducts.map((p) => ({ value: p.id, label: p.nameEn }))} />
+        <Select value={catId} onChange={(v) => { set('categoryId', v); set('attributes', {}); }} placeholder="—"
+          options={categories.filter((c) => c.isActive !== false).map((c) => ({ value: c.id, label: `${c.icon} ${c.nameAr || c.nameEn}` }))} />
       </Field>
       <Field label={t('sku')} required>
         <Input value={rec.sku} onChange={(v) => set('sku', v.toUpperCase())} placeholder="BRK-018-MET" />
       </Field>
       <Field label={t('nameEn')} hint="English only"><Input value={rec.nameEn} onChange={(v) => set('nameEn', v)} /></Field>
-      {rec.productId && (
+      {cat && (
         <AttributePicker
-          attributes={(categoryOfProduct(rec.productId)?.attributes) || []}
+          attributes={cat.attributes || []}
           values={rec.attributes}
           onChange={(vals) => set('attributes', vals)}
-          onAddOption={(key, opt) => onAddOption?.(rec.productId, key, opt)}
+          onAddOption={(key, opt) => onAddOption?.(cat.id, key, opt)}
           lang="en" t={t}
         />
       )}
