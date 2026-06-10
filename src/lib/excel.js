@@ -33,15 +33,34 @@ function headerStyle(ws, nCols, color = PRIMARY) {
 
 // columns: [{header,key,width,money,formula(r)}]; formula cols get a live
 // formula per row, plus EXTRA blank formula rows for manual entry.
-function buildSheet(wb, name, columns, rows) {
+// Build a sheet defensively. `items` + `mapFn` map each record to a row inside
+// a per-row try/catch, so a single bad record is skipped and reported instead of
+// killing the whole export. (Back-compat: if `items` is already an array of row
+// objects and no `mapFn` is given, it is used as-is.) Every cell value is
+// sanitized so an object/NaN/undefined can never throw.
+function buildSheet(wb, name, columns, items, mapFn, errors) {
   const ws = wb.addWorksheet(name);
   ws.columns = columns.map((c) => ({ header: c.header, key: c.key, width: c.width || 16 }));
+  const sanitize = (v) => {
+    if (v == null) return '';
+    if (typeof v === 'number') return Number.isFinite(v) ? v : '';
+    if (typeof v === 'boolean') return v ? 'yes' : 'no';
+    if (typeof v === 'object') return Array.isArray(v) ? v.join(', ') : String(v.text ?? v.result ?? '');
+    return v;
+  };
+  const rows = [];
+  (items || []).forEach((it, i) => {
+    try { rows.push(typeof mapFn === 'function' ? mapFn(it) : it); }
+    catch (e) { (errors || []).push(`${name} #${i + 1}: ${e.message}`); }
+  });
   const writeRow = (r, rowData) => {
     columns.forEach((c, ci) => {
       const cell = ws.getCell(r, ci + 1);
-      if (c.formula) cell.value = { formula: c.formula(r) };
-      else if (rowData) cell.value = rowData[c.key];
-      if (c.money) cell.numFmt = MONEY;
+      try {
+        if (c.formula) cell.value = { formula: c.formula(r) };
+        else if (rowData) cell.value = sanitize(rowData[c.key]);
+        if (c.money) cell.numFmt = MONEY;
+      } catch (e) { (errors || []).push(`${name} row ${r}: ${e.message}`); }
     });
   };
   rows.forEach((rd, i) => writeRow(i + 2, rd));
@@ -53,6 +72,7 @@ function buildSheet(wb, name, columns, rows) {
 export async function exportExcel(data, lang = 'ar') {
   const ExcelJS = await getExcelJS();
   const wb = new ExcelJS.Workbook();
+  const exportErrors = [];   // row-level problems are collected, never thrown
   wb.creator = 'OrthoStock'; wb.created = new Date();
   wb.calcProperties = { fullCalcOnLoad: true }; // recalculate all formulas when opened
 
@@ -166,7 +186,7 @@ export async function exportExcel(data, lang = 'ar') {
     { header: 'Min', key: 'min', width: 8 },
     { header: 'StockValue', key: 'sv', width: 13, money: true, formula: (r) => `IF($B${r}="","",$E${r}*$G${r})` },
     { header: 'Brand', key: 'brand', width: 18 },
-  ], vars.map((v) => { const p = prods.find((x) => x.id === v.productId); return { id: v.id, sku: v.sku, name: varName(v), cat: p ? catName(p.categoryId) : '', cost: num(v.purchasePriceAvg), sell: num(v.sellingPriceDefault), stock: num(v.stockQty), min: num(v.stockMin), brand: p?.brand || '' }; }));
+  ], vars, (v) => { const p = prods.find((x) => x.id === v.productId); return { id: v.id, sku: v.sku, name: varName(v), cat: p ? catName(p.categoryId) : '', cost: num(v.purchasePriceAvg), sell: num(v.sellingPriceDefault), stock: num(v.stockQty), min: num(v.stockMin), brand: p?.brand || '' }; }, exportErrors);
 
   buildSheet(wb, 'Customers', [
     { header: 'id', key: 'id', width: 14 },
@@ -174,22 +194,22 @@ export async function exportExcel(data, lang = 'ar') {
     { header: 'Phone', key: 'phone', width: 16 }, { header: 'City', key: 'city', width: 14 },
     { header: 'Emirate', key: 'emirate', width: 14 }, { header: 'Specialty', key: 'spec', width: 16 },
     { header: 'WorkingDays', key: 'wd', width: 22 },
-  ], custs.map((c) => ({ id: c.id, name: c.name, type: c.type, phone: c.phone, city: c.city, emirate: c.emirate, spec: c.specialty, wd: Array.isArray(c.workingDays) ? c.workingDays.join(',') : (c.workingDays || '') })));
+  ], custs, (c) => ({ id: c.id, name: c.name, type: c.type, phone: c.phone, city: c.city, emirate: c.emirate, spec: c.specialty, wd: Array.isArray(c.workingDays) ? c.workingDays.join(',') : (c.workingDays || '') }), exportErrors);
 
   buildSheet(wb, 'Suppliers', [
     { header: 'id', key: 'id', width: 14 },
     { header: 'Name', key: 'name', width: 26 }, { header: 'Phone', key: 'phone', width: 16 },
     { header: 'City', key: 'city', width: 14 }, { header: 'Currency', key: 'cur', width: 10 },
-  ], sups.map((s) => ({ id: s.id, name: s.name, phone: s.phone, city: s.city, cur: s.currency })));
+  ], sups, (s) => ({ id: s.id, name: s.name, phone: s.phone, city: s.city, cur: s.currency }), exportErrors);
 
   buildSheet(wb, 'Products', [
     { header: 'Product', key: 'n', width: 28 }, { header: 'Brand', key: 'b', width: 18 }, { header: 'Category', key: 'c', width: 28 },
-  ], prods.map((p) => ({ n: p.nameEn, b: p.brand || '', c: catName(p.categoryId) })));
+  ], prods, (p) => ({ n: p.nameEn, b: p.brand || '', c: catName(p.categoryId) }), exportErrors);
 
   buildSheet(wb, 'Categories', [
     { header: 'id', key: 'id', width: 14 },
     { header: 'NameAR', key: 'a', width: 22 }, { header: 'NameEN', key: 'e', width: 22 }, { header: 'Icon', key: 'i', width: 8 },
-  ], cats.map((c) => ({ id: c.id, a: c.nameAr, e: c.nameEn, i: c.icon })));
+  ], cats, (c) => ({ id: c.id, a: c.nameAr, e: c.nameEn, i: c.icon }), exportErrors);
 
   buildSheet(wb, 'Expenses', [
     { header: 'Date', key: 'date', width: 14 }, { header: 'Group', key: 'group', width: 22 },
@@ -246,6 +266,7 @@ export async function exportExcel(data, lang = 'ar') {
   a.href = url; a.download = `orthostock-${new Date().toISOString().slice(0, 10)}.xlsx`;
   document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(url);
+  return { skipped: exportErrors.length, errors: exportErrors };
 }
 
 // ── Import helpers ──
@@ -313,7 +334,7 @@ export async function importExcel(file, data) {
   const ExcelJS = await getExcelJS();
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(await file.arrayBuffer());
-  const summary = { materialsUpdated: 0, materialsAdded: 0, customersAdded: 0, customersUpdated: 0, categoriesAdded: 0, skipped: 0 };
+  const summary = { materialsUpdated: 0, materialsAdded: 0, customersAdded: 0, customersUpdated: 0, suppliersAdded: 0, suppliersUpdated: 0, categoriesAdded: 0, skipped: 0, errors: [] };
   const norm = (x) => String(x == null ? '' : x).replace(/\u00a0/g, ' ').trim().replace(/\s+/g, ' ');
 
   // ── Categories sheet (create any that don't already exist) ──
@@ -330,7 +351,7 @@ export async function importExcel(file, data) {
       if (findCat(ar) || findCat(en)) return;
       rows.push({ nameAr: ar || en, nameEn: en || ar, icon: String(cellVal(row, idx, 'Icon') || '📦'), color: '#0D3B6E', attributes: [], isActive: true });
     });
-    for (const r of rows) { const saved = await db.insert(TABLES.categories, r); cats.push(saved); summary.categoriesAdded++; }
+    for (const r of rows) { try { const saved = await db.insert(TABLES.categories, r); cats.push(saved); summary.categoriesAdded++; } catch (e) { summary.errors.push(`Categories "${r.nameAr || r.nameEn}": ${e.message}`); summary.skipped++; } }
   }
 
   // ── Materials sheet: update existing by SKU, else CREATE product + variant ──
@@ -343,6 +364,7 @@ export async function importExcel(file, data) {
     const rows = [];
     wsM.eachRow((row, n) => { if (n === 1) return; rows.push(row); });
     for (const row of rows) {
+     try {
       const sku = cellVal(row, idx, 'SKU'); if (!sku) continue;
       const rid = String(cellVal(row, idx, 'id') || '').trim();
       const cost = cellVal(row, idx, 'Cost') ?? cellVal(row, idx, 'Purchase (avg)');
@@ -372,6 +394,7 @@ export async function importExcel(file, data) {
         sellingPriceDefault: round2(sell || 0), stockQty: round2(stock || 0), stockMin: num(min || 0), unit: 'piece', notes: '', isActive: true,
       });
       summary.materialsAdded++;
+     } catch (e) { summary.errors.push(`Materials row ${row.number}: ${e.message}`); summary.skipped++; }
     }
   }
 
@@ -387,6 +410,7 @@ export async function importExcel(file, data) {
     const rows = [];
     wsC.eachRow((row, n) => { if (n === 1) return; rows.push(row); });
     for (const row of rows) {
+     try {
       const name = norm(cellVal(row, idx, 'Name')); if (!name) continue;
       const rid = String(cellVal(row, idx, 'id') || '').trim();
       const phone = String(cellVal(row, idx, 'Phone') || '').trim();
@@ -402,6 +426,7 @@ export async function importExcel(file, data) {
       const existingRow = (rid && byId.get(rid)) || (phone && byPhone.get(phone)) || byName.get(nameKey);
       if (existingRow) { await db.update(TABLES.customers, existingRow.id, rec).then(() => { summary.customersUpdated++; }).catch(() => { summary.skipped++; }); }
       else { const saved = await db.insert(TABLES.customers, { ...rec, notes: '' }).catch(() => null); if (saved) { byName.set(nameKey, saved); byId.set(String(saved.id), saved); summary.customersAdded++; } else summary.skipped++; }
+     } catch (e) { summary.errors.push(`Customers row ${row.number}: ${e.message}`); summary.skipped++; }
     }
   }
 
@@ -417,6 +442,7 @@ export async function importExcel(file, data) {
     const rows = [];
     wsS.eachRow((row, n) => { if (n === 1) return; rows.push(row); });
     for (const row of rows) {
+     try {
       const name = norm(cellVal(row, idx, 'Name')); if (!name) continue;
       const rid = String(cellVal(row, idx, 'id') || '').trim();
       const phone = String(cellVal(row, idx, 'Phone') || '').trim();
@@ -428,8 +454,9 @@ export async function importExcel(file, data) {
       if (seen.has(key) && !phone && !rid) { summary.skipped++; continue; }
       seen.add(key);
       const found = (rid && byId.get(rid)) || (phone && byPhone.get(phone)) || byName.get(key);
-      if (found) { await db.update(TABLES.suppliers, found.id, rec).catch(() => { summary.skipped++; }); }
-      else { const saved = await db.insert(TABLES.suppliers, rec).catch(() => null); if (saved) byName.set(key, saved); }
+      if (found) { await db.update(TABLES.suppliers, found.id, rec).then(() => { summary.suppliersUpdated++; }).catch(() => { summary.skipped++; }); }
+      else { const saved = await db.insert(TABLES.suppliers, rec).catch(() => null); if (saved) { byName.set(key, saved); byId.set(String(saved.id), saved); summary.suppliersAdded++; } else summary.skipped++; }
+     } catch (e) { summary.errors.push(`Suppliers row ${row.number}: ${e.message}`); summary.skipped++; }
     }
   }
 

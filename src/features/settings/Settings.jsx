@@ -15,6 +15,7 @@ export default function Settings() {
   const [userEdit, setUserEdit] = useState(null);
   const [showAudit, setShowAudit] = useState(false);
   const [showHealth, setShowHealth] = useState(false);
+  const [importReport, setImportReport] = useState(null);
   const saveUser = async () => {
     const u = userEdit;
     if (!u.email?.trim() || !u.name?.trim()) return;
@@ -59,18 +60,24 @@ export default function Settings() {
   };
 
   const doExportExcel = async () => {
-    try { await exportExcel(data, form.lang || 'ar'); showToast(t('saved'), 'success'); }
-    catch (e) { console.error(e); showToast('Export failed', 'error'); }
+    try {
+      const r = await exportExcel(data, form.lang || 'ar');
+      if (r && r.skipped > 0) { console.warn('Export skipped rows:', r.errors); showToast(`${t('saved')} · ${t('skipped')}: ${r.skipped}`, 'success'); }
+      else showToast(t('saved'), 'success');
+    } catch (e) { console.error(e); showToast(`${t('exportFailed')}: ${e.message || e}`, 'error'); }
   };
   const doImportExcel = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
       const s = await importExcel(file, data);
-      const msg = `✓ ${s.materialsUpdated} | +${s.customersAdded} / ↻${s.customersUpdated}`;
-      showToast(msg, 'success');
-      await Promise.all([refresh(TABLES.variants), refresh(TABLES.customers)]);
-    } catch (err) { console.error(err); showToast('Import failed', 'error'); }
+      await Promise.all([refresh(TABLES.variants), refresh(TABLES.customers), refresh(TABLES.suppliers), refresh(TABLES.categories), refresh(TABLES.products)]);
+      const added = (s.customersAdded || 0) + (s.materialsAdded || 0) + (s.suppliersAdded || 0) + (s.categoriesAdded || 0);
+      const updated = (s.customersUpdated || 0) + (s.materialsUpdated || 0) + (s.suppliersUpdated || 0);
+      setImportReport(s);
+      if ((s.errors || []).length || s.skipped) { console.warn('Import issues:', s.errors); showToast(`+${added} / ↻${updated} · ${t('skipped')}: ${s.skipped}`, s.errors.length ? 'error' : 'success'); }
+      else showToast(`+${added} / ↻${updated} ✓`, 'success');
+    } catch (err) { console.error(err); showToast(`${t('importFailed')}: ${err.message || err}`, 'error'); }
     finally { e.target.value = ''; }
   };
 
@@ -229,6 +236,26 @@ export default function Settings() {
         <div style={{ fontSize: 12, fontWeight: 700, color: C.textMid, marginBottom: 8 }}>Developer</div>
         <Btn variant="outline" onClick={doReset} style={{ color: C.danger }}>Reset to seed catalogue</Btn>
       </Card>
+
+      <Modal open={!!importReport} onClose={() => setImportReport(null)} title={`📥 ${t('importReport')}`}>
+        {importReport && (
+          <div style={{ display: 'grid', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <Badge tone="success">+{(importReport.customersAdded || 0) + (importReport.materialsAdded || 0) + (importReport.suppliersAdded || 0) + (importReport.categoriesAdded || 0)} {t('added')}</Badge>
+              <Badge tone="info">↻{(importReport.customersUpdated || 0) + (importReport.materialsUpdated || 0) + (importReport.suppliersUpdated || 0)} {t('updated')}</Badge>
+              {importReport.skipped > 0 && <Badge tone="warning">{t('skipped')}: {importReport.skipped}</Badge>}
+            </div>
+            {(importReport.errors || []).length > 0 ? (
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 800, color: C.danger, margin: '4px 0' }}>⚠ {(importReport.errors).length} {t('rowsWithErrors')}</div>
+                <div style={{ display: 'grid', gap: 4, maxHeight: 240, overflowY: 'auto' }}>
+                  {importReport.errors.map((er, i) => <div key={i} style={{ fontSize: 11, color: C.textMid, background: '#FBECEC', borderRadius: 8, padding: '5px 9px' }}>{er}</div>)}
+                </div>
+              </div>
+            ) : <div style={{ color: C.success, fontWeight: 700, textAlign: 'center', padding: 8 }}>✓ {t('importOk')}</div>}
+          </div>
+        )}
+      </Modal>
 
       <Modal open={showHealth} onClose={() => setShowHealth(false)} title={`🩺 ${t('dataHealth')}`}>
         {(() => {
