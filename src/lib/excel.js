@@ -174,7 +174,7 @@ export async function exportExcel(data, lang = 'ar') {
     { header: 'Phone', key: 'phone', width: 16 }, { header: 'City', key: 'city', width: 14 },
     { header: 'Emirate', key: 'emirate', width: 14 }, { header: 'Specialty', key: 'spec', width: 16 },
     { header: 'WorkingDays', key: 'wd', width: 22 },
-  ], custs.map((c) => ({ id: c.id, name: c.name, type: c.type, phone: c.phone, city: c.city, emirate: c.emirate, spec: c.specialty, wd: (c.workingDays || []).join(',') })));
+  ], custs.map((c) => ({ id: c.id, name: c.name, type: c.type, phone: c.phone, city: c.city, emirate: c.emirate, spec: c.specialty, wd: Array.isArray(c.workingDays) ? c.workingDays.join(',') : (c.workingDays || '') })));
 
   buildSheet(wb, 'Suppliers', [
     { header: 'id', key: 'id', width: 14 },
