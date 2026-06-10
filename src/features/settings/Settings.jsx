@@ -6,6 +6,7 @@ import { resetStore, dbMode } from '../../db/db.js';
 import { subscribeSync } from '../../db/sync.js';
 import { exportBackup, importBackup } from '../../lib/backup.js';
 import { exportExcel, importExcel } from '../../lib/excel.js';
+import { dataHealth } from '../../lib/engine.js';
 import { connectOneDrive, disconnectOneDrive, getOneDriveAccount, backupToOneDrive } from '../../lib/onedrive.js';
 import { num } from '../../lib/money.js';
 
@@ -13,6 +14,7 @@ export default function Settings() {
   const { t, settings, updateSettings, setLang, loading, showToast, data, refresh, createRow, updateRow, deleteRow, user } = useApp();
   const [userEdit, setUserEdit] = useState(null);
   const [showAudit, setShowAudit] = useState(false);
+  const [showHealth, setShowHealth] = useState(false);
   const saveUser = async () => {
     const u = userEdit;
     if (!u.email?.trim() || !u.name?.trim()) return;
@@ -198,6 +200,14 @@ export default function Settings() {
       </Card>
 
       <Card style={{ marginTop: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div><div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>🩺 {t('dataHealth')}</div>
+          <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>{t('dataHealthNote')}</div></div>
+          <Btn size="sm" variant="light" onClick={() => setShowHealth(true)}>{t('runCheck')}</Btn>
+        </div>
+      </Card>
+
+      <Card style={{ marginTop: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>👥 {t('users')}</div>
           <Btn size="sm" onClick={() => setUserEdit({ name: '', email: '', password: '', role: 'employee', isActive: true })}>＋ {t('addUser')}</Btn>
@@ -219,6 +229,32 @@ export default function Settings() {
         <div style={{ fontSize: 12, fontWeight: 700, color: C.textMid, marginBottom: 8 }}>Developer</div>
         <Btn variant="outline" onClick={doReset} style={{ color: C.danger }}>Reset to seed catalogue</Btn>
       </Card>
+
+      <Modal open={showHealth} onClose={() => setShowHealth(false)} title={`🩺 ${t('dataHealth')}`}>
+        {(() => {
+          const h = dataHealth(data);
+          const ok = h.orphan.length === 0 && h.hiddenDebt.length === 0 && h.dupCustomers.length === 0;
+          const Row = ({ tone, children }) => <div style={{ background: tone === 'bad' ? '#FBECEC' : C.surfaceAlt, borderRadius: 8, padding: '6px 10px', fontSize: 12, color: C.textMid }}>{children}</div>;
+          return (
+            <div style={{ display: 'grid', gap: 10 }}>
+              <div style={{ background: C.surfaceAlt, borderRadius: 10, padding: 12, textAlign: 'center' }}>
+                <div style={{ fontSize: 22, fontWeight: 800, color: h.totalDebt > 0 ? C.danger : C.success }}>{fmtCur(h.totalDebt, displayCurrency, usdRate)}</div>
+                <div style={{ fontSize: 11, color: C.textMuted }}>{t('totalOutstanding')}</div>
+              </div>
+              {ok ? <div style={{ padding: 12, textAlign: 'center', color: C.success, fontWeight: 700 }}>✓ {t('dataHealthOk')}</div> : (
+                <>
+                  {h.orphan.length > 0 && (<div><div style={{ fontSize: 12, fontWeight: 800, color: C.danger, marginBottom: 4 }}>⚠ {t('orphanInvoices')} ({h.orphan.length})</div>
+                    <div style={{ display: 'grid', gap: 4 }}>{h.orphan.map((o, i) => <Row key={i} tone="bad">{o.invoiceNumber} · {fmtCur(o.remaining, displayCurrency, usdRate)}</Row>)}</div></div>)}
+                  {h.hiddenDebt.length > 0 && (<div><div style={{ fontSize: 12, fontWeight: 800, color: C.warning, marginBottom: 4 }}>⚠ {t('hiddenDebt')} ({h.hiddenDebt.length})</div>
+                    <div style={{ display: 'grid', gap: 4 }}>{h.hiddenDebt.map((o, i) => <Row key={i}>{o.name} · {o.invoiceNumber} · {fmtCur(o.remaining, displayCurrency, usdRate)}</Row>)}</div></div>)}
+                  {h.dupCustomers.length > 0 && (<div><div style={{ fontSize: 12, fontWeight: 800, color: C.warning, marginBottom: 4 }}>⚠ {t('possibleDuplicates')} ({h.dupCustomers.length})</div>
+                    <div style={{ display: 'grid', gap: 4 }}>{h.dupCustomers.map((n, i) => <Row key={i}>{n}</Row>)}</div></div>)}
+                </>
+              )}
+            </div>
+          );
+        })()}
+      </Modal>
 
       <Modal open={showAudit} onClose={() => setShowAudit(false)} title={`🧮 ${t('stockAudit')}`}>
         {(() => {

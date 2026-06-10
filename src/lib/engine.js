@@ -184,6 +184,31 @@ export async function commitPurchase(app, purchaseData, lines) {
 }
 
 // ── Customer (clinic/doctor) lifetime stats ──
+// Data-integrity health check. Surfaces the exact problems that would make a
+// customer's debt/history look "lost": invoices whose customer no longer exists
+// (broken link), debt sitting on an archived customer (hidden from the list),
+// and duplicate customer names (usually a bad re-import). Nothing is changed —
+// this only reports, so the owner can verify the books are intact.
+export function dataHealth(data) {
+  const customers = data[TABLES.customers] || [];
+  const byId = new Map(customers.map((c) => [c.id, c]));
+  const invoices = (data[TABLES.invoices] || []).filter((i) => i.status !== 'returned');
+  const orphan = []; const hiddenDebt = []; let totalDebt = 0;
+  invoices.forEach((i) => {
+    const rem = Math.max(0, num(i.total) - num(i.paidAmount));
+    totalDebt += rem;
+    const c = i.customerId ? byId.get(i.customerId) : null;
+    if (i.customerId && !c) orphan.push({ invoiceNumber: i.invoiceNumber, customerId: i.customerId, remaining: round2(rem) });
+    else if (c && c.isActive === false && rem > 0) hiddenDebt.push({ invoiceNumber: i.invoiceNumber, name: c.name, remaining: round2(rem) });
+  });
+  const seen = {}; const dups = [];
+  customers.filter((c) => c.isActive !== false).forEach((c) => {
+    const k = (c.name || '').trim().toLowerCase(); if (!k) return;
+    if (seen[k]) dups.push(c.name); else seen[k] = true;
+  });
+  return { orphan, hiddenDebt, dupCustomers: [...new Set(dups)], totalDebt: round2(totalDebt) };
+}
+
 export function customerStats(invoices, items, customerId) {
   const mine = invoices.filter((i) => i.customerId === customerId && i.status !== 'returned');
   const ids = new Set(mine.map((i) => i.id));
