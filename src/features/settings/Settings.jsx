@@ -20,6 +20,7 @@ export default function Settings() {
   const [showAudit, setShowAudit] = useState(false);
   const [showHealth, setShowHealth] = useState(false);
   const [importReport, setImportReport] = useState(null);
+  const [exportScope, setExportScope] = useState('all');
   const saveUser = async () => {
     const u = userEdit;
     if (!u.email?.trim() || !u.name?.trim()) return;
@@ -65,7 +66,7 @@ export default function Settings() {
 
   const doExportExcel = async () => {
     try {
-      const r = await exportExcel(data, form.lang || 'ar');
+      const r = await exportExcel(data, form.lang || 'ar', exportScope);
       if (r && r.skipped > 0) { console.warn('Export skipped rows:', r.errors); showToast(`${t('saved')} · ${t('skipped')}: ${r.skipped}`, 'success'); }
       else showToast(t('saved'), 'success');
     } catch (e) { console.error(e); showToast(`${t('exportFailed')}: ${e.message || e}`, 'error'); }
@@ -185,7 +186,15 @@ export default function Settings() {
       <Card style={{ marginTop: 16 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 4 }}>📊 Excel</div>
         <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 10 }}>{t('excelHint')}</div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ minWidth: 130 }}>
+            <Select value={exportScope} onChange={setExportScope} options={[
+              { value: 'all', label: t('allData') },
+              { value: 'materials', label: t('materials') },
+              { value: 'customers', label: t('customers') },
+              { value: 'suppliers', label: t('suppliers') },
+            ]} />
+          </div>
           <Btn onClick={doExportExcel}>⬇ {t('exportExcel')}</Btn>
           <Btn variant="outline" onClick={() => xlsxRef.current?.click()}>⬆ {t('importExcel')}</Btn>
           <input ref={xlsxRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={doImportExcel} style={{ display: 'none' }} />

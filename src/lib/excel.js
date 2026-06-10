@@ -69,7 +69,10 @@ function buildSheet(wb, name, columns, items, mapFn, errors) {
   return ws;
 }
 
-export async function exportExcel(data, lang = 'ar') {
+// scope: 'all' (default) | 'materials' | 'customers' | 'suppliers' — lets the
+// owner export just one section for quick bulk edits, or the full workbook.
+export async function exportExcel(data, lang = 'ar', scope = 'all') {
+  const want = (s) => scope === 'all' || scope === s;
   const ExcelJS = await getExcelJS();
   const wb = new ExcelJS.Workbook();
   const exportErrors = [];   // row-level problems are collected, never thrown
@@ -99,7 +102,8 @@ export async function exportExcel(data, lang = 'ar') {
   const varName = (v) => v.nameEn || Object.values(v.attributes || {}).filter(Boolean).join(' . ');
   const varSku = (id) => vars.find((x) => x.id === id)?.sku || '';
 
-  // ── DASHBOARD (first = opening sheet) ──
+  // ── DASHBOARD (first = opening sheet; full workbook only) ──
+  if (scope === 'all') {
   const dash = wb.addWorksheet('Dashboard', { views: [{ showGridLines: false }] });
   dash.columns = [{ width: 30 }, { width: 20 }];
   const title = (r, text, color = PRIMARY) => {
@@ -138,7 +142,7 @@ export async function exportExcel(data, lang = 'ar') {
   line(10, 'Net profit (after all)', `B8-B9`, true);
 
   title(12, 'Inventory');
-  line(13, 'Inventory value (cost)', `SUMPRODUCT(Materials!$D$2:$D$${END},Materials!$F$2:$F$${END})`, true);
+  line(13, 'Inventory value (cost)', `SUMPRODUCT(Materials!$E$2:$E$${END},Materials!$G$2:$G$${END})`, true); // E=Cost, G=Stock (after id column)
 
   title(15, 'Investments');
   line(16, 'Holdings value', `SUM(Securities!$E$2:$E$${END})`);
@@ -149,8 +153,10 @@ export async function exportExcel(data, lang = 'ar') {
   line(21, 'Cash balance', `B19-SUM(Lots!$G$2:$G$${END})+SUM(Sells!$F$2:$F$${END})+B20+SUMIF(Cash!$A$2:$A$${END},"interest",Cash!$C$2:$C$${END})-SUMIF(Cash!$A$2:$A$${END},"fee",Cash!$C$2:$C$${END})`);
   line(22, 'Account value', `B21+B16`, true);
 
+  } // end dashboard
+
   // ── Data + formula sheets ──
-  buildSheet(wb, 'Invoices', [
+  if (scope === 'all') buildSheet(wb, 'Invoices', [
     { header: 'InvoiceNumber', key: 'no', width: 16 },
     { header: 'Date', key: 'date', width: 14 },
     { header: 'Customer', key: 'cust', width: 24 },
@@ -161,7 +167,7 @@ export async function exportExcel(data, lang = 'ar') {
     { header: 'Status', key: 'status', width: 12 },
   ], invoices.map((i) => ({ no: i.invoiceNumber, date: i.date, cust: custName(i.customerId), emirate: custEmirate(i.customerId), paid: num(i.paidAmount), status: i.paymentStatus })));
 
-  buildSheet(wb, 'InvoiceItems', [
+  if (scope === 'all') buildSheet(wb, 'InvoiceItems', [
     { header: 'InvoiceNumber', key: 'no', width: 16 },
     { header: 'SKU', key: 'sku', width: 14 },
     { header: 'Material', key: 'name', width: 24 },
@@ -175,7 +181,7 @@ export async function exportExcel(data, lang = 'ar') {
     return { no: inv?.invoiceNumber || '', sku: varSku(it.variantId), name: varName(vars.find((v) => v.id === it.variantId) || {}), qty: num(it.qty), price: num(it.unitPrice), cost: num(it.avgCostAtSale) };
   }));
 
-  buildSheet(wb, 'Materials', [
+  if (want('materials')) buildSheet(wb, 'Materials', [
     { header: 'id', key: 'id', width: 14 },
     { header: 'SKU', key: 'sku', width: 16 },
     { header: 'Name', key: 'name', width: 26 },
@@ -188,7 +194,7 @@ export async function exportExcel(data, lang = 'ar') {
     { header: 'Brand', key: 'brand', width: 18 },
   ], vars, (v) => { const p = prods.find((x) => x.id === v.productId); return { id: v.id, sku: v.sku, name: varName(v), cat: p ? catName(p.categoryId) : '', cost: num(v.purchasePriceAvg), sell: num(v.sellingPriceDefault), stock: num(v.stockQty), min: num(v.stockMin), brand: p?.brand || '' }; }, exportErrors);
 
-  buildSheet(wb, 'Customers', [
+  if (want('customers')) buildSheet(wb, 'Customers', [
     { header: 'id', key: 'id', width: 14 },
     { header: 'Name', key: 'name', width: 26 }, { header: 'Type', key: 'type', width: 10 },
     { header: 'Phone', key: 'phone', width: 16 }, { header: 'City', key: 'city', width: 14 },
@@ -196,32 +202,28 @@ export async function exportExcel(data, lang = 'ar') {
     { header: 'WorkingDays', key: 'wd', width: 22 },
   ], custs, (c) => ({ id: c.id, name: c.name, type: c.type, phone: c.phone, city: c.city, emirate: c.emirate, spec: c.specialty, wd: Array.isArray(c.workingDays) ? c.workingDays.join(',') : (c.workingDays || '') }), exportErrors);
 
-  buildSheet(wb, 'Suppliers', [
+  if (want('suppliers')) buildSheet(wb, 'Suppliers', [
     { header: 'id', key: 'id', width: 14 },
     { header: 'Name', key: 'name', width: 26 }, { header: 'Phone', key: 'phone', width: 16 },
     { header: 'City', key: 'city', width: 14 }, { header: 'Currency', key: 'cur', width: 10 },
   ], sups, (s) => ({ id: s.id, name: s.name, phone: s.phone, city: s.city, cur: s.currency }), exportErrors);
 
-  buildSheet(wb, 'Products', [
-    { header: 'Product', key: 'n', width: 28 }, { header: 'Brand', key: 'b', width: 18 }, { header: 'Category', key: 'c', width: 28 },
-  ], prods, (p) => ({ n: p.nameEn, b: p.brand || '', c: catName(p.categoryId) }), exportErrors);
-
-  buildSheet(wb, 'Categories', [
+  if (want('materials')) buildSheet(wb, 'Categories', [
     { header: 'id', key: 'id', width: 14 },
     { header: 'NameAR', key: 'a', width: 22 }, { header: 'NameEN', key: 'e', width: 22 }, { header: 'Icon', key: 'i', width: 8 },
   ], cats, (c) => ({ id: c.id, a: c.nameAr, e: c.nameEn, i: c.icon }), exportErrors);
 
-  buildSheet(wb, 'Expenses', [
+  if (scope === 'all') buildSheet(wb, 'Expenses', [
     { header: 'Date', key: 'date', width: 14 }, { header: 'Group', key: 'group', width: 22 },
     { header: 'Type', key: 'type', width: 12 }, { header: 'Amount', key: 'amount', width: 12, money: true }, { header: 'Note', key: 'note', width: 30 },
   ], expenses.map((e) => ({ date: e.date, group: grpName(e.groupId), type: grpType(e.groupId), amount: num(e.amount), note: e.note })));
 
-  buildSheet(wb, 'ExpenseGroups', [
+  if (scope === 'all') buildSheet(wb, 'ExpenseGroups', [
     { header: 'NameAR', key: 'a', width: 22 }, { header: 'NameEN', key: 'e', width: 22 }, { header: 'Type', key: 't', width: 12 },
   ], groups.filter((g) => g.isActive !== false).map((g) => ({ a: g.nameAr, e: g.nameEn, t: g.type })));
 
   // ── Investments ──
-  buildSheet(wb, 'Securities', [
+  if (scope === 'all') buildSheet(wb, 'Securities', [
     { header: 'Symbol', key: 'sym', width: 12 },
     { header: 'Name', key: 'name', width: 22 },
     { header: 'CurrentPrice', key: 'price', width: 13, money: true },
@@ -232,7 +234,7 @@ export async function exportExcel(data, lang = 'ar') {
     { header: 'Realized', key: 're', width: 13, money: true, formula: (r) => `IF($A${r}="","",SUMIF(Sells!$A$2:$A$${END},$A${r},Sells!$G$2:$G$${END}))` },
   ], secs.map((s) => ({ sym: s.symbol, name: s.name, price: num(s.currentPrice) })));
 
-  buildSheet(wb, 'Lots', [
+  if (scope === 'all') buildSheet(wb, 'Lots', [
     { header: 'Symbol', key: 'sym', width: 12 },
     { header: 'BuyDate', key: 'date', width: 14 },
     { header: 'QtyBought', key: 'qb', width: 11 },
@@ -243,7 +245,7 @@ export async function exportExcel(data, lang = 'ar') {
     { header: 'CostRemaining', key: 'crm', width: 14, money: true, formula: (r) => `IF($A${r}="","",$D${r}*$E${r})` },
   ], lots.map((l) => ({ sym: secName(l.securityId), date: l.buyDate, qb: num(l.qtyBought), qr: num(l.qtyRemaining), bp: num(l.buyPricePerShare), fees: num(l.buyFees) })));
 
-  buildSheet(wb, 'Sells', [
+  if (scope === 'all') buildSheet(wb, 'Sells', [
     { header: 'Symbol', key: 'sym', width: 12 },
     { header: 'SellDate', key: 'date', width: 14 },
     { header: 'Qty', key: 'qty', width: 8 },
@@ -254,7 +256,7 @@ export async function exportExcel(data, lang = 'ar') {
     { header: 'CostMatched', key: 'cm', width: 13, money: true },
   ], sells.map((s) => ({ sym: secName(s.securityId), date: s.sellDate, qty: num(s.qty), sp: num(s.sellPricePerShare), fees: num(s.sellFees), cm: num(s.costBasisMatched) })));
 
-  buildSheet(wb, 'Cash', [
+  if (scope === 'all') buildSheet(wb, 'Cash', [
     { header: 'Type', key: 'type', width: 12 }, { header: 'Date', key: 'date', width: 14 },
     { header: 'Amount', key: 'amount', width: 12, money: true }, { header: 'Note', key: 'note', width: 28 },
   ], flows.map((f) => ({ type: f.type, date: f.date, amount: num(f.amount), note: f.notes })));
@@ -263,7 +265,7 @@ export async function exportExcel(data, lang = 'ar') {
   const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url; a.download = `orthostock-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  a.href = url; a.download = `orthostock-${scope === 'all' ? '' : scope + '-'}${new Date().toISOString().slice(0, 10)}.xlsx`;
   document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(url);
   return { skipped: exportErrors.length, errors: exportErrors };
