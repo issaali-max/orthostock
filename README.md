@@ -1,61 +1,70 @@
-# OrthoStock (v2.6)
+# OrthoStock
 
-Inventory, accounting, sales, purchasing, debt, investment & analytics for an
-orthodontic-supply business in the UAE. React + Vite PWA, bilingual (AR/EN),
-AED base currency with USD display.
+Mobile-first PWA for an **orthodontic-supply business in the UAE**: inventory/
+catalogue, customers (clinics & doctors), suppliers, purchases, sales/invoicing
+(discounts, partial payments, debt), expenses, P&L, dashboard analytics, and a
+personal stock-investment tracker. **React + Vite**, bilingual **Arabic (RTL) +
+English**, **AED** base currency with a USD display toggle.
+
+Live: **orthostock-one.vercel.app** · Repo: **github.com/issaali-max/orthostock**
+(branch `main`, auto-deploys to Vercel on every push).
 
 ## Run it
 
 ```bash
 npm install
 npm run dev          # http://localhost:5173
+npm run build        # MUST pass before every push (ExcelJS chunk-size warning is expected)
 ```
 
-Login (seed admin): **admin@orthostock.ae / admin123**
+Seed login: **admin@orthostock.ae / admin123**
 
-The app runs out of the box in **memory mode** — an in-browser dev store that
-persists to `localStorage`, so you can click around with seeded sample data.
-Use Settings → "Reset dev data" to reseed.
+The app is **offline-first**: all data lives in **IndexedDB** in the browser and
+works fully offline. Set the two Supabase env vars (below) to also sync to the
+cloud. There is no demo data — you start clean (only a settings row + admin user).
 
-## Switch to real persistence (Supabase)
+## Cloud sync (Supabase) — optional
 
 1. Create a project at supabase.com.
-2. In the SQL editor, run `src/db/schema.sql`.
-3. Enable Row Level Security and add policies (see the bottom of `schema.sql`).
-4. Copy `.env.example` to `.env` and fill in:
+2. SQL editor → run `src/db/schema.sql` (idempotent; safe to re-run).
+3. Copy `.env.example` → `.env`:
    ```
-   VITE_DB_MODE=supabase
    VITE_SUPABASE_URL=...
    VITE_SUPABASE_ANON_KEY=...
    ```
-5. Restart `npm run dev`. **No feature code changes** — only `db.js` swaps impls.
+   (also set these in Vercel → Project → Settings → Environment Variables.)
+4. Restart. No feature code changes — sync drains an outbox of local mutations.
 
-## Architecture (one-paragraph)
+> **Security note:** current login is a local check against a `users` table and
+> RLS grants the anon key full access. This is NOT production-grade. See
+> `AI_HANDOFF.md` §"Known risks" before any real commercial use.
 
-Every screen talks to data through `src/db/db.js`, which picks one of two
-interchangeable implementations (`dbMemory` / `dbSupabase`) by the `VITE_DB_MODE`
-flag. This is the spine that keeps code updates from breaking the layout or
-losing data. Stock movements are the source of truth; `variant.stockQty` is a
-cache recomputed from movements (wired up in Phase 2). State lives in one React
+## Architecture (one paragraph)
+
+Every screen reads/writes through **`src/db/db.js`** — the single data interface
+(`getAll/findBy/insert/update/remove/atomicMutations`). It persists to
+**IndexedDB** via `src/db/local.js` and queues each write to an outbox that
+`src/db/sync.js` drains to Supabase when configured. **Stock movements are the
+source of truth**; `variant.stockQty` is a cache kept in step. All
+financial/stock logic lives in **`src/lib/engine.js`**. State is one React
 Context (`AppProvider` + `useApp()`); styling is inline via the `C` palette.
 
 ```
 src/
-  db/        db.js  dbMemory.js  dbSupabase.js  schema.sql
-  lib/       constants.js  ids.js  dates.js  money.js  i18n.js
-  ui/        components.jsx   (Btn, Input, Card, Modal, AttributePicker, …)
-  app/       AppProvider.jsx  Shell.jsx  ErrorBoundary.jsx
-  features/  auth  settings  categories  products  variants  suppliers
-             dashboard.jsx
+  db/        db.js  local.js (IndexedDB)  sync.js (Supabase)  schema.sql
+  lib/       engine.js  excel.js  constants.js  i18n.js  money.js  dates.js  ids.js  backup.js  onedrive.js
+  ui/        components.jsx (Btn, Field, Input, Select, Card, Modal, PaymentModal, …)  ImageUpload.jsx
+  app/       AppProvider.jsx  Shell.jsx
+  features/  auth  catalogue  customers  suppliers  sales  purchases  inventory
+             expenses  investments  settings  dashboard.jsx
 ```
 
-## Phase status
+## Status
 
-- ✅ **Phase 1** — Auth, Settings, Categories (dynamic attributes), Products, Variants, Suppliers.
-- ⬜ Phase 2 — Purchases, Inventory, Stock Movements, moving-average cost, late-purchase reconciliation.
-- ⬜ Phase 3 — Customers, customer pricing, sales invoices, returns.
-- ⬜ Phase 4 — Expenses, debts, three-tier profit.
-- ⬜ Phase 5 — Dashboard KPIs, charts, analytics.
-- ⬜ Phase 6 — Excel Center (ExcelJS export/import).
-- ⬜ Phase 7 — Investments / stock portfolio (FIFO lots).
-- ⬜ Phase 8 — Automatic OneDrive backup (Microsoft Graph + Supabase Edge Function).
+Core operational loop is **complete and deployed**: Catalogue/Inventory,
+Customers, Suppliers, Invoices (atomic save, partial payments, debt, payment
+recording), Purchases, Expenses, Dashboard (P&L + analytics), Investments,
+Settings. See **`AI_HANDOFF.md`** for the full feature list, data model, the
+exact current step, open issues, and the prioritized roadmap.
+
+**A new AI/developer continuing this project should read `AI_HANDOFF.md` first.**
