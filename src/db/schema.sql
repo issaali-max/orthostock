@@ -285,3 +285,19 @@ begin
     execute format('create policy app_all on %I for all to anon, authenticated using (true) with check (true)', t);
   end loop;
 end $$;
+
+
+create table if not exists "externalDebts" (
+  id uuid primary key default gen_random_uuid(),
+  "personName" text not null,
+  phone text default '',
+  notes text default '',
+  txns jsonb not null default '[]',
+  "isActive" boolean not null default true,
+  "createdAt" timestamptz default now(),
+  "updatedAt" timestamptz default now()
+);
+alter table "externalDebts" enable row level security;
+do $$ begin
+  create policy "anon all externalDebts" on "externalDebts" for all using (true) with check (true);
+exception when duplicate_object then null; end $$;

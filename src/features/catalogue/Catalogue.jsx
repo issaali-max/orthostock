@@ -86,6 +86,47 @@ export default function Catalogue() {
     if (flatBrand) vlist = vlist.filter((v) => brandOf(v) === flatBrand);
     if (q) { const s = q.toLowerCase(); vlist = vlist.filter((v) => (v.nameEn || '').toLowerCase().includes(s) || (v.sku || '').toLowerCase().includes(s)); }
     vlist = vlist.slice().sort((a, b) => (a.nameEn || a.sku || '').localeCompare(b.nameEn || b.sku || ''));
+    const renderVarCard = (v) => {
+      const stock = num(v.stockQty);
+      const low = stock <= num(v.stockMin) && num(v.stockMin) > 0;
+      const stockColor = stock <= 0 ? C.danger : low ? C.warning : C.success;
+      const attrs = Object.entries(v.attributes || {}).filter(([, val]) => val);
+      const sell = num(v.sellingPriceDefault); const avg = num(v.purchasePriceAvg);
+      const margin = sell > 0 ? Math.round(((sell - avg) / sell) * 100) : 0;
+      const act = lastByVar[v.id] || {};
+      return (
+        <div key={v.id} onClick={editMode ? () => openEdit(TABLES.variants, 'variant', { ...v, attributes: { ...(v.attributes || {}) } }) : undefined}
+          style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: `1px solid ${C.border}`, borderRadius: RADIUS, boxShadow: SHADOW, padding: '10px 14px', cursor: editMode ? 'pointer' : 'default' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 700, color: C.text, fontSize: 13 }}>{editMode && '✎ '}{v.nameEn || v.sku}</div>
+            {attrs.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, margin: '4px 0 2px' }}>
+                {attrs.map(([k, val]) => <span key={k} style={{ fontSize: 10, fontWeight: 700, color: C.primaryMid, background: C.primary + '12', borderRadius: 6, padding: '2px 7px' }}>{val}</span>)}
+              </div>
+            )}
+            <div style={{ fontSize: 10, color: C.textMuted }}>{v.sku}</div>
+            <div style={{ fontSize: 10, color: C.textMuted, marginTop: 2 }}>
+              {act.purchase ? `🛒 ${fmtDate(act.purchase, lang)}` : `🛒 —`} · {act.sale ? `💸 ${fmtDate(act.sale, lang)}` : `💸 —`}
+            </div>
+          </div>
+          <div style={{ textAlign: 'center', minWidth: 56 }}>
+            <div style={{ fontSize: 17, fontWeight: 800, color: stockColor }}>{fmtNum(stock)}</div>
+            <div style={{ fontSize: 9, color: C.textMuted }}>{t('stock')}</div>
+          </div>
+          <div style={{ minWidth: 92, textAlign: 'end' }}>
+            <div style={{ fontWeight: 700, color: C.primary, fontSize: 13 }}>{fmtCur(sell, displayCurrency, usdRate)}</div>
+            <div style={{ fontSize: 10, color: C.textMuted }}>{t('avgCost')} {fmtCur(avg, displayCurrency, usdRate)}</div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: margin >= 0 ? C.success : C.danger }}>{t('margin')} {margin}%</div>
+          </div>
+        </div>
+      );
+    };
+    // group materials by their (hidden) product when a single category is open
+    const groupIds = flatCat ? [...new Set(vlist.map((v) => v.productId))] : [];
+    const groups = groupIds.length > 1
+      ? groupIds.map((gid) => ({ gid, name: products.find((p) => p.id === gid)?.nameEn || '—', rows: vlist.filter((v) => v.productId === gid) }))
+          .sort((a, b) => a.name.localeCompare(b.name))
+      : null;
     const lowCount = variants.filter((v) => statusOf(v) === 'low').length;
     const outCount = variants.filter((v) => statusOf(v) === 'out').length;
     return (
@@ -115,41 +156,14 @@ export default function Catalogue() {
         </div>
         {vlist.length === 0 ? <EmptyState icon="📦" text={t('noData')} /> : (
           <div style={{ display: 'grid', gap: 8 }}>
-            {vlist.map((v) => {
-              const stock = num(v.stockQty);
-              const low = stock <= num(v.stockMin) && num(v.stockMin) > 0;
-              const stockColor = stock <= 0 ? C.danger : low ? C.warning : C.success;
-              const attrs = Object.entries(v.attributes || {}).filter(([, val]) => val);
-              const sell = num(v.sellingPriceDefault); const avg = num(v.purchasePriceAvg);
-              const margin = sell > 0 ? Math.round(((sell - avg) / sell) * 100) : 0;
-              const act = lastByVar[v.id] || {};
-              return (
-                <div key={v.id} onClick={editMode ? () => openEdit(TABLES.variants, 'variant', { ...v, attributes: { ...(v.attributes || {}) } }) : undefined}
-                  style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: `1px solid ${C.border}`, borderRadius: RADIUS, boxShadow: SHADOW, padding: '10px 14px', cursor: editMode ? 'pointer' : 'default' }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, color: C.text, fontSize: 13 }}>{editMode && '✎ '}{v.nameEn || v.sku}</div>
-                    {attrs.length > 0 && (
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, margin: '4px 0 2px' }}>
-                        {attrs.map(([k, val]) => <span key={k} style={{ fontSize: 10, fontWeight: 700, color: C.primaryMid, background: C.primary + '12', borderRadius: 6, padding: '2px 7px' }}>{val}</span>)}
-                      </div>
-                    )}
-                    <div style={{ fontSize: 10, color: C.textMuted }}>{v.sku}</div>
-                    <div style={{ fontSize: 10, color: C.textMuted, marginTop: 2 }}>
-                      {act.purchase ? `🛒 ${fmtDate(act.purchase, lang)}` : `🛒 —`} · {act.sale ? `💸 ${fmtDate(act.sale, lang)}` : `💸 —`}
-                    </div>
-                  </div>
-                  <div style={{ textAlign: 'center', minWidth: 56 }}>
-                    <div style={{ fontSize: 17, fontWeight: 800, color: stockColor }}>{fmtNum(stock)}</div>
-                    <div style={{ fontSize: 9, color: C.textMuted }}>{t('stock')}</div>
-                  </div>
-                  <div style={{ minWidth: 92, textAlign: 'end' }}>
-                    <div style={{ fontWeight: 700, color: C.primary, fontSize: 13 }}>{fmtCur(sell, displayCurrency, usdRate)}</div>
-                    <div style={{ fontSize: 10, color: C.textMuted }}>{t('avgCost')} {fmtCur(avg, displayCurrency, usdRate)}</div>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: margin >= 0 ? C.success : C.danger }}>{t('margin')} {margin}%</div>
-                  </div>
+            {groups
+              ? groups.map((g) => (
+                <div key={g.gid}>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: C.primary, margin: '4px 2px 6px' }}>▸ {g.name} ({g.rows.length})</div>
+                  <div style={{ display: 'grid', gap: 8 }}>{g.rows.map(renderVarCard)}</div>
                 </div>
-              );
-            })}
+              ))
+              : vlist.map(renderVarCard)}
           </div>
         )}
         {Edit}

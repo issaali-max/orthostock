@@ -50,7 +50,19 @@ export async function saveVariant(app, rec) {
   let productId = rec.productId || null;
   const products = app.data[TABLES.products] || [];
   const currentCatId = products.find((p) => p.id === productId)?.categoryId || '';
-  if (rec.categoryId && rec.categoryId !== currentCatId) {
+  const wantCat = rec.categoryId || currentCatId;
+  if (rec.groupId) {
+    productId = rec.groupId; // user picked an existing group inside the category
+  } else if ((rec.groupName || '').trim() && wantCat) {
+    // user typed a new group name: find-or-create it inside the category
+    const gname = rec.groupName.trim();
+    const match = products.find((p) => p.categoryId === wantCat && (p.nameEn || '').trim().toLowerCase() === gname.toLowerCase());
+    if (match) productId = match.id;
+    else {
+      const saved = await app.createRow(TABLES.products, { nameEn: gname, brand: rec.brand || '', categoryId: wantCat, icon: '📦', image_url: '', description: '', isActive: true });
+      productId = saved?.id || null;
+    }
+  } else if (rec.categoryId && rec.categoryId !== currentCatId) {
     const pname = (rec.nameEn || rec.sku).trim();
     const match = products.find((p) => p.categoryId === rec.categoryId && (p.nameEn || '').trim().toLowerCase() === pname.toLowerCase());
     if (match) productId = match.id;
@@ -183,9 +195,20 @@ export function VariantForm({ rec, setRec, t, products, categories, onAddOption 
   return (
     <div>
       <Field label={t('categories')} required>
-        <Select value={catId} onChange={(v) => { set('categoryId', v); set('attributes', {}); }} placeholder="—"
+        <Select value={catId} onChange={(v) => { set('categoryId', v); set('attributes', {}); set('groupId', ''); }} placeholder="—"
           options={categories.filter((c) => c.isActive !== false).map((c) => ({ value: c.id, label: `${c.icon} ${c.nameAr || c.nameEn}` }))} />
       </Field>
+      {catId && (
+        <Field label={t('group')} hint={t('groupHint')}>
+          <div style={{ display: 'grid', gap: 6 }}>
+            <Select value={rec.groupId ?? rec.productId ?? ''} onChange={(v) => { set('groupId', v); set('groupName', ''); }} placeholder="—"
+              options={products.filter((p) => p.categoryId === catId && p.isActive !== false)
+                .slice().sort((a, b) => (a.nameEn || '').localeCompare(b.nameEn || ''))
+                .map((p) => ({ value: p.id, label: p.nameEn }))} />
+            <Input value={rec.groupName || ''} onChange={(v) => { set('groupName', v); if (v) set('groupId', ''); }} placeholder={t('newGroupPh')} />
+          </div>
+        </Field>
+      )}
       <Field label={t('sku')} required>
         <Input value={rec.sku} onChange={(v) => set('sku', v.toUpperCase())} placeholder="BRK-018-MET" />
       </Field>

@@ -66,6 +66,7 @@ export const TABLES = {
   tradeSells: 'tradeSells',
   settings: 'settings',
   users: 'users',
+  externalDebts: 'externalDebts',
 };
 
 // A small set of icon glyphs offered for categories (kept simple — emoji,

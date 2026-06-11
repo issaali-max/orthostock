@@ -25,6 +25,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
 
   const [lines, setLines] = useState([]); // [{variantId, qty, unitPrice}]
   const [catId, setCatId] = useState('');
+  const [vq, setVq] = useState(''); // quick material search across ALL categories
   const [prodId, setProdId] = useState('');
   const [customerId, setCustomerId] = useState('');
   const [custCity, setCustCity] = useState('');
@@ -105,7 +106,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
   return (
     <Modal open={open} onClose={onClose} title={editing ? `${t('editInvoice')} · ${editing.invoiceNumber}` : t('newInvoice')} width={520}
       footer={<><Btn variant="ghost" onClick={onClose}>{t('cancel')}</Btn><Btn onClick={save} disabled={busy || lines.length === 0}>{t('save')}</Btn></>}>
-      <div style={{ position: 'sticky', top: -1, zIndex: 5, background: '#fff', paddingBottom: 8, marginBottom: 4, borderBottom: `1px solid ${C.surfaceAlt}` }}>
+      <div style={{ background: '#fff', paddingBottom: 8, marginBottom: 4, borderBottom: `1px solid ${C.surfaceAlt}` }}>
         <div style={{ display: 'flex', gap: 8 }}>
           <div style={{ flex: 1 }}>
             <Field label={t('city')}>
@@ -121,6 +122,27 @@ export default function InvoiceCreate({ open, onClose, editing }) {
         <Field label={t('date')}><Input type="date" value={date} onChange={setDate} /></Field>
       </div>
 
+      {/* Quick add: search any material directly, tap to add/remove */}
+      <input value={vq} onChange={(e) => setVq(e.target.value)} placeholder={`🔍 ${t('quickAddMaterial')}`}
+        style={{ width: '100%', boxSizing: 'border-box', border: `1.5px solid ${C.border}`, borderRadius: 12, padding: '10px 12px', fontSize: 14, marginBottom: 8, outline: 'none' }} />
+      {vq.trim().length >= 2 && (
+        <div style={{ display: 'grid', gap: 6, marginBottom: 10 }}>
+          {variants.filter((v) => {
+            const q2 = vq.trim().toLowerCase();
+            return (v.nameEn || '').toLowerCase().includes(q2) || (v.sku || '').toLowerCase().includes(q2);
+          }).slice(0, 8).map((v) => (
+            <button key={v.id} onClick={() => toggle(v)} style={{
+              display: 'flex', alignItems: 'center', gap: 8, textAlign: 'start', cursor: 'pointer',
+              border: `1.5px solid ${inCart(v.id) ? C.success : C.border}`, background: inCart(v.id) ? C.success + '14' : '#fff',
+              borderRadius: 10, padding: '8px 10px',
+            }}>
+              <span style={{ flex: 1, minWidth: 0, fontWeight: 700, fontSize: 13, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{inCart(v.id) ? '✓ ' : '＋ '}{v.nameEn || v.sku}</span>
+              <span style={{ fontSize: 11, color: C.textMuted, flexShrink: 0 }}>{fmtNum(num(v.stockQty))} 📦</span>
+              <span style={{ fontWeight: 800, fontSize: 12, color: C.primary, flexShrink: 0 }}>{fmtCur(num(v.sellingPriceDefault), displayCurrency, usdRate)}</span>
+            </button>
+          ))}
+        </div>
+      )}
       <div style={{ fontSize: 12, fontWeight: 700, color: C.textMid, margin: '4px 0 6px' }}>{t('categories')}</div>
       <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4, marginBottom: 8 }}>
         {categories.map((c) => (

@@ -235,6 +235,23 @@ export default function Dashboard() {
       </Card>
 
       {/* ── Top products / customers / doctors (by profit, for the selected period) ── */}
+      {(() => {
+        const ppl = (data[TABLES.externalDebts] || []).filter((p) => p.isActive !== false);
+        const tot = ppl.reduce((s, p) => s + (p.txns || []).reduce((a, x) => a + (x.type === 'collect' ? -num(x.amount) : num(x.amount)), 0), 0);
+        if (!ppl.length || tot <= 0) return null;
+        return (
+          <Card style={{ marginBottom: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: C.text }}>🤝 {t('extDebts')}</div>
+                <div style={{ fontSize: 11, color: C.textMuted }}>{ppl.length} {t('persons')}</div>
+              </div>
+              <div style={{ fontWeight: 800, fontSize: 16, color: C.danger }}>{cur(tot)}</div>
+            </div>
+          </Card>
+        );
+      })()}
+
       <RankCard title={`💎 ${t('topProducts')}`} rows={topProd} cur={cur}
         emptyIcon="💎" emptyText={t('noData')}
         primary={(r) => cur(r.profit)} secondary={(r) => `${fmtNum(r.qty)} × · ${cur(r.revenue)}`} label={(r) => r.label} />

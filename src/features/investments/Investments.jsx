@@ -175,9 +175,10 @@ export default function Investments() {
       <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
         <TabBtn active={tab === 'portfolio'} onClick={() => setTab('portfolio')}>📈 {t('portfolio')}</TabBtn>
         <TabBtn active={tab === 'cash'} onClick={() => setTab('cash')}>💵 {t('cashTab')}</TabBtn>
+        <TabBtn active={tab === 'debts'} onClick={() => setTab('debts')}>🤝 {t('extDebts')}</TabBtn>
       </div>
 
-      {tab === 'portfolio' ? (
+      {tab === 'debts' ? <ExternalDebts app={app} /> : tab === 'portfolio' ? (
         stats.positions.length === 0 ? <EmptyState icon="📈" text={t('noSecurities')} /> : (
           <div style={{ display: 'grid', gap: 10 }}>
             {active.length > 0 && <div style={{ fontSize: 12, fontWeight: 800, color: C.textMid }}>{t('activeStocks')}</div>}
@@ -378,5 +379,87 @@ function TabBtn({ active, onClick, children }) {
       padding: '8px 14px', borderRadius: 10, fontWeight: 700, fontSize: 13, cursor: 'pointer',
       background: active ? C.primary : '#fff', color: active ? '#fff' : C.textMid, border: `1px solid ${active ? C.primary : C.border}`,
     }}>{children}</button>
+  );
+}
+
+
+// ── External debts: people who owe the owner money (outside the business) ──
+function ExternalDebts({ app }) {
+  const { t, data, displayCurrency, usdRate, createRow, updateRow, showToast } = app;
+  const [openP, setOpenP] = useState(null);   // person being viewed
+  const [addP, setAddP] = useState(null);     // new person form
+  const [txn, setTxn] = useState(null);       // new txn form {type, amount, date, note}
+  const cur = (v) => fmtCur(v, displayCurrency, usdRate);
+  const people = (data[TABLES.externalDebts] || []).filter((p) => p.isActive !== false);
+  const balance = (p) => (p.txns || []).reduce((s, x) => s + (x.type === 'collect' ? -num(x.amount) : num(x.amount)), 0);
+  const total = people.reduce((s, p) => s + balance(p), 0);
+  const saveTxn = async () => {
+    if (!num(txn.amount)) return;
+    const p = people.find((x) => x.id === openP);
+    await updateRow(TABLES.externalDebts, p.id, { txns: [...(p.txns || []), { type: txn.type, amount: num(txn.amount), date: txn.date || todayISO(), note: txn.note || '' }] });
+    setTxn(null); showToast(t('saved'), 'success');
+  };
+  const person = people.find((x) => x.id === openP);
+  return (
+    <div>
+      <div style={{ background: C.primary, color: '#fff', borderRadius: 14, padding: 14, textAlign: 'center', marginBottom: 12 }}>
+        <div style={{ fontSize: 12, opacity: .85 }}>{t('extDebtsTotal')}</div>
+        <div style={{ fontSize: 24, fontWeight: 800 }}>{cur(total)}</div>
+        <div style={{ fontSize: 11, opacity: .8 }}>{people.length} {t('persons')}</div>
+      </div>
+      <Btn size="sm" onClick={() => setAddP({ personName: '', phone: '', notes: '' })}>＋ {t('addPerson')}</Btn>
+      <div style={{ display: 'grid', gap: 8, marginTop: 10 }}>
+        {people.length === 0 && <EmptyState icon="🤝" text={t('noData')} />}
+        {people.map((p) => (
+          <div key={p.id} onClick={() => setOpenP(p.id)} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: `1px solid ${C.border}`, borderRadius: 12, padding: '10px 14px', cursor: 'pointer' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 800, color: C.text, fontSize: 14 }}>{p.personName}</div>
+              {p.notes && <div style={{ fontSize: 11, color: C.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.notes}</div>}
+            </div>
+            <div style={{ fontWeight: 800, color: balance(p) > 0 ? C.danger : C.success }}>{cur(balance(p))}</div>
+          </div>
+        ))}
+      </div>
+
+      <Modal open={!!addP} onClose={() => setAddP(null)} title={`🤝 ${t('addPerson')}`}
+        footer={<Btn onClick={async () => { if (!addP.personName.trim()) return; await createRow(TABLES.externalDebts, { ...addP, txns: [], isActive: true }); setAddP(null); showToast(t('saved'), 'success'); }}>{t('save')}</Btn>}>
+        {addP && (<div>
+          <Field label={t('name')} required><Input value={addP.personName} onChange={(v) => setAddP((r) => ({ ...r, personName: v }))} /></Field>
+          <Field label={t('phone')}><Input value={addP.phone} onChange={(v) => setAddP((r) => ({ ...r, phone: v }))} /></Field>
+          <Field label={t('notes')}><Input value={addP.notes} onChange={(v) => setAddP((r) => ({ ...r, notes: v }))} /></Field>
+        </div>)}
+      </Modal>
+
+      <Modal open={!!person} onClose={() => { setOpenP(null); setTxn(null); }} title={person ? `🤝 ${person.personName}` : ''}>
+        {person && (<div style={{ display: 'grid', gap: 10 }}>
+          <div style={{ background: C.surfaceAlt, borderRadius: 10, padding: 10, textAlign: 'center' }}>
+            <div style={{ fontSize: 11, color: C.textMuted }}>{t('remaining')}</div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: balance(person) > 0 ? C.danger : C.success }}>{cur(balance(person))}</div>
+            {person.notes && <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>{person.notes}</div>}
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <Btn size="sm" onClick={() => setTxn({ type: 'lend', amount: '', date: todayISO(), note: '' })}>＋ {t('lend')}</Btn>
+            <Btn size="sm" variant="light" onClick={() => setTxn({ type: 'collect', amount: '', date: todayISO(), note: '' })}>💰 {t('collect')}</Btn>
+          </div>
+          {txn && (<div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: 10 }}>
+            <Field label={t('amount')} required><Input type="number" value={txn.amount} onChange={(v) => setTxn((x) => ({ ...x, amount: v }))} /></Field>
+            <Field label={t('date')}><Input type="date" value={txn.date} onChange={(v) => setTxn((x) => ({ ...x, date: v }))} /></Field>
+            <Field label={t('notes')}><Input value={txn.note} onChange={(v) => setTxn((x) => ({ ...x, note: v }))} /></Field>
+            <Btn size="sm" onClick={saveTxn}>{t('save')}</Btn>
+          </div>)}
+          <div style={{ display: 'grid', gap: 5 }}>
+            {[...(person.txns || [])].reverse().map((x, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, background: C.surfaceAlt, borderRadius: 9, padding: '7px 10px' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: C.text }}>{x.type === 'collect' ? `💰 ${t('collect')}` : `🤝 ${t('lend')}`}</div>
+                  <div style={{ fontSize: 10, color: C.textMuted }}>{x.date}{x.note ? ` · ${x.note}` : ''}</div>
+                </div>
+                <div style={{ fontWeight: 800, color: x.type === 'collect' ? C.success : C.danger }}>{x.type === 'collect' ? '-' : '+'}{cur(num(x.amount))}</div>
+              </div>
+            ))}
+          </div>
+        </div>)}
+      </Modal>
+    </div>
   );
 }
