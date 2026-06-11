@@ -55,11 +55,16 @@ export async function saveVariant(app, rec) {
     const match = products.find((p) => p.categoryId === rec.categoryId && (p.nameEn || '').trim().toLowerCase() === pname.toLowerCase());
     if (match) productId = match.id;
     else {
-      const saved = await app.createRow(TABLES.products, { nameEn: pname, brand: '', categoryId: rec.categoryId, icon: '📦', image_url: '', description: '', isActive: true });
+      const saved = await app.createRow(TABLES.products, { nameEn: pname, brand: rec.brand || '', categoryId: rec.categoryId, icon: '📦', image_url: '', description: '', isActive: true });
       productId = saved?.id || null;
     }
   }
   if (!productId) return false; // a material must live under a category
+  // Brand lives on the hidden product; update it there when the user edited it.
+  if (rec.brand !== undefined) {
+    const prod = (app.data[TABLES.products] || []).find((p) => p.id === productId);
+    if (prod && (prod.brand || '') !== (rec.brand || '')) await app.updateRow(TABLES.products, productId, { brand: rec.brand || '' });
+  }
   const payload = {
     productId, sku: rec.sku.trim(), nameEn: rec.nameEn || '',
     attributes: rec.attributes || {}, image_url: rec.image_url || '',
@@ -172,6 +177,7 @@ export function VariantForm({ rec, setRec, t, products, categories, onAddOption 
   // 2-level UI: the material picks a CATEGORY only. For an existing material the
   // category comes from its (hidden) product; for a new one from rec.categoryId.
   const inheritedCatId = products.find((p) => p.id === rec.productId)?.categoryId || '';
+  const inheritedBrand = products.find((p) => p.id === rec.productId)?.brand || '';
   const catId = rec.categoryId || inheritedCatId;
   const cat = categories.find((c) => c.id === catId);
   return (
@@ -184,6 +190,9 @@ export function VariantForm({ rec, setRec, t, products, categories, onAddOption 
         <Input value={rec.sku} onChange={(v) => set('sku', v.toUpperCase())} placeholder="BRK-018-MET" />
       </Field>
       <Field label={t('nameEn')} hint="English only"><Input value={rec.nameEn} onChange={(v) => set('nameEn', v)} /></Field>
+      <Field label={t('brand')}>
+        <Input value={rec.brand ?? inheritedBrand} onChange={(v) => set('brand', v)} placeholder="3M, Ormco, ..." />
+      </Field>
       {cat && (
         <AttributePicker
           attributes={cat.attributes || []}

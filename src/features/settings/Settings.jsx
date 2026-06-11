@@ -59,7 +59,10 @@ export default function Settings() {
     } catch { showToast('Import failed', 'error'); }
   };
   const doReset = async () => {
-    if (!window.confirm('Reset all local data to the seed catalogue?')) return;
+    // Destructive: wipes EVERY table (customers, invoices, debts, stock...).
+    // Guarded by type-to-confirm so it can never be triggered by an accidental tap.
+    const word = window.prompt('⚠️ هذا يحذف كل البيانات نهائياً (العملاء، الفواتير، الديون، المخزون).\nThis deletes ALL data permanently.\n\nاكتب  حذف  أو  DELETE  للتأكيد:');
+    if (word !== 'حذف' && word !== 'DELETE') return;
     await resetStore();
     window.location.reload();
   };
@@ -247,7 +250,7 @@ export default function Settings() {
 
       <Card style={{ marginTop: 16 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: C.textMid, marginBottom: 8 }}>Developer</div>
-        <Btn variant="outline" onClick={doReset} style={{ color: C.danger }}>Reset to seed catalogue</Btn>
+        <Btn variant="outline" onClick={doReset} style={{ color: C.danger }}>🗑 Delete ALL data / حذف كل البيانات</Btn>
       </Card>
 
       <Modal open={!!importReport} onClose={() => setImportReport(null)} title={`📥 ${t('importReport')}`}>

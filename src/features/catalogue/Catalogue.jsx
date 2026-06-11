@@ -28,6 +28,8 @@ export default function Catalogue() {
   const [editMode, setEditMode] = useState(false);
   const [edit, setEdit] = useState(null);
   const [flat, setFlat] = useState(true);
+  const [flatStatus, setFlatStatus] = useState('');
+  const [flatBrand, setFlatBrand] = useState('');
   const [flatCat, setFlatCat] = useState(null);
 
   const categories = (data[TABLES.categories] || []).filter((c) => c.isActive !== false);
@@ -72,13 +74,20 @@ export default function Catalogue() {
     return m;
   }, [data]);
 
-  // ── Flat inventory: ALL materials with a per-category filter ──
+  // ── Flat inventory: ALL materials with category / stock-status / brand filters ──
   if (flat) {
     const countFor = (cid) => variants.filter((v) => catIdByProduct[v.productId] === cid).length;
+    const brandOf = (v) => (products.find((p) => p.id === v.productId)?.brand || '').trim();
+    const statusOf = (v) => { const s = num(v.stockQty); if (s <= 0) return 'out'; if (num(v.stockMin) > 0 && s <= num(v.stockMin)) return 'low'; return 'ok'; };
+    const flatBrands = [...new Set(variants.map(brandOf).filter(Boolean))].sort();
     let vlist = variants;
     if (flatCat) vlist = vlist.filter((v) => catIdByProduct[v.productId] === flatCat);
+    if (flatStatus) vlist = vlist.filter((v) => statusOf(v) === flatStatus);
+    if (flatBrand) vlist = vlist.filter((v) => brandOf(v) === flatBrand);
     if (q) { const s = q.toLowerCase(); vlist = vlist.filter((v) => (v.nameEn || '').toLowerCase().includes(s) || (v.sku || '').toLowerCase().includes(s)); }
     vlist = vlist.slice().sort((a, b) => (a.nameEn || a.sku || '').localeCompare(b.nameEn || b.sku || ''));
+    const lowCount = variants.filter((v) => statusOf(v) === 'low').length;
+    const outCount = variants.filter((v) => statusOf(v) === 'out').length;
     return (
       <div>
         <PageHeader title={t('inventory')} action={
@@ -94,9 +103,15 @@ export default function Catalogue() {
           </div>
         )}
         <SearchBar value={q} onChange={setQ} placeholder={t('search')} />
-        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 8, marginBottom: 10 }}>
+        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 8 }}>
           <FilterChip active={!flatCat} onClick={() => setFlatCat(null)}>{t('allCats')} ({variants.length})</FilterChip>
           {categories.map((c) => <FilterChip key={c.id} active={flatCat === c.id} onClick={() => setFlatCat(c.id)}>{(c.nameAr || c.nameEn)} ({countFor(c.id)})</FilterChip>)}
+        </div>
+        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 8, marginBottom: 10 }}>
+          <FilterChip active={!flatStatus} onClick={() => setFlatStatus('')}>{t('allStock')}</FilterChip>
+          <FilterChip active={flatStatus === 'low'} onClick={() => setFlatStatus(flatStatus === 'low' ? '' : 'low')}>🟠 {t('lowStock')} ({lowCount})</FilterChip>
+          <FilterChip active={flatStatus === 'out'} onClick={() => setFlatStatus(flatStatus === 'out' ? '' : 'out')}>🔴 {t('outOfStock')} ({outCount})</FilterChip>
+          {flatBrands.length > 1 && flatBrands.map((b) => <FilterChip key={b} active={flatBrand === b} onClick={() => setFlatBrand(flatBrand === b ? '' : b)}>{b}</FilterChip>)}
         </div>
         {vlist.length === 0 ? <EmptyState icon="📦" text={t('noData')} /> : (
           <div style={{ display: 'grid', gap: 8 }}>
