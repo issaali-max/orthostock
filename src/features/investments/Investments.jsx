@@ -115,15 +115,7 @@ export default function Investments() {
     catch (e) { console.error(e); }
   };
 
-  const liveToggle = (
-    <button onClick={() => setLive((v) => !v)} title={t('livePriceNote')} style={{
-      display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', borderRadius: 999, padding: '5px 11px', fontSize: 12, fontWeight: 700,
-      border: `1.5px solid ${live ? C.success : C.border}`, background: live ? C.success : '#fff', color: live ? '#fff' : C.textMid,
-    }}>
-      <span style={{ width: 8, height: 8, borderRadius: 999, background: live ? '#fff' : C.textMuted, animation: live ? 'pulse 1.2s infinite' : 'none' }} />
-      {t('live')}{live ? ` · ${t('simulated')}` : ''}
-    </button>
-  );
+  const liveToggle = null; // simulator removed — real Finnhub prices replaced it
 
   // ───────── Stock detail page ─────────
   if (detailId) {
