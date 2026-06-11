@@ -3,6 +3,7 @@ import { useApp } from '../../app/AppProvider.jsx';
 import { C, TABLES } from '../../lib/constants.js';
 import { fmtCur, fmtNum, num, round2 } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
+import { refreshAllPrices, searchSymbols } from '../../lib/prices.js';
 import { commitBuy, commitSell, commitDividend, portfolioStats, stockLedger } from '../../lib/engine.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, Select, Textarea } from '../../ui/components.jsx';
 
@@ -13,12 +14,33 @@ const blankDiv = (securityId) => ({ securityId, date: todayISO(), amount: '' });
 
 export default function Investments() {
   const app = useApp();
-  const { t, lang, data, displayCurrency, usdRate, createRow, updateRow, deleteRow, showToast } = app;
+  const { t, lang, data, displayCurrency, usdRate, createRow, updateRow, deleteRow, showToast, settings, updateSettings, refresh } = app;
   const [tab, setTab] = useState('portfolio');
   const [detailId, setDetailId] = useState(null);
   const [editSec, setEditSec] = useState(null);
   const [trade, setTrade] = useState(null);
   const [priceEdit, setPriceEdit] = useState(null);
+  const [keyModal, setKeyModal] = useState(false);
+  const [keyDraft, setKeyDraft] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+  const [symQ, setSymQ] = useState(''); const [symHits, setSymHits] = useState([]);
+  const finnhubKey = settings.finnhubKey || '';
+  const doRefreshPrices = async (silent) => {
+    if (!finnhubKey || refreshing) return;
+    const list = (data[TABLES.securities] || []).filter((x) => x.isActive !== false && x.symbol);
+    if (!list.length) return;
+    setRefreshing(true);
+    const r = await refreshAllPrices(list, finnhubKey);
+    await refresh(TABLES.securities);
+    setRefreshing(false);
+    if (!silent) showToast(`🔄 ${r.updated} ✓${r.failed.length ? ` · ✗ ${r.failed.join(',')}` : ''}`, r.failed.length ? 'error' : 'success');
+  };
+  // auto-refresh once per day when a key is configured
+  useEffect(() => {
+    if (!finnhubKey) return;
+    const list = (data[TABLES.securities] || []).filter((x) => x.isActive !== false && x.symbol);
+    if (list.length && list.some((x) => (x.priceUpdatedAt || '') < todayISO())) doRefreshPrices(true);
+  }, [finnhubKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const [editFlow, setEditFlow] = useState(null);
   const [divEdit, setDivEdit] = useState(null);
 
@@ -150,7 +172,13 @@ export default function Investments() {
   return (
     <div>
       <style>{`@keyframes pulse{0%{opacity:1}50%{opacity:.3}100%{opacity:1}}`}</style>
-      <PageHeader title={t('investments')} action={<Btn onClick={() => setEditSec(blankSec())}>＋ {t('addSecurity')}</Btn>} />
+      <PageHeader title={t('investments')} action={
+        <div style={{ display: 'flex', gap: 6 }}>
+          <Btn size="sm" variant="light" onClick={() => { setKeyDraft(finnhubKey); setKeyModal(true); }}>🔑</Btn>
+          {finnhubKey && <Btn size="sm" variant="light" onClick={() => doRefreshPrices(false)}>{refreshing ? '⏳' : '🔄'}</Btn>}
+          <Btn onClick={() => setEditSec(blankSec())}>＋ {t('addSecurity')}</Btn>
+        </div>
+      } />
 
       <div style={{ borderRadius: 18, padding: 16, marginBottom: 14, color: '#fff', background: `linear-gradient(135deg, ${C.primary}, ${C.primaryLight})`, boxShadow: '0 10px 26px rgba(13,59,110,.25)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -210,8 +238,29 @@ export default function Investments() {
       )}
 
       {/* Security modal (with optional initial quantity) */}
+      <Modal open={keyModal} onClose={() => setKeyModal(false)} title={`🔑 ${t('priceApiKey')}`}
+        footer={<Btn onClick={async () => { await updateSettings({ finnhubKey: keyDraft.trim() }); setKeyModal(false); showToast(t('saved'), 'success'); }}>{t('save')}</Btn>}>
+        <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8 }}>{t('priceApiHint')}</div>
+        <Field label="Finnhub API Key"><Input value={keyDraft} onChange={setKeyDraft} placeholder="d8l..." /></Field>
+      </Modal>
+
       <Modal open={!!editSec} onClose={() => setEditSec(null)} title={editSec?.id ? t('edit') : t('addSecurity')}
         footer={<><Btn variant="ghost" onClick={() => setEditSec(null)}>{t('cancel')}</Btn><Btn onClick={saveSec}>{t('save')}</Btn></>}>
+        {editSec && finnhubKey && !editSec.id && (
+          <div style={{ marginBottom: 8 }}>
+            <Input value={symQ} onChange={async (v) => { setSymQ(v); if (v.trim().length >= 2) { try { setSymHits(await searchSymbols(v.trim(), finnhubKey)); } catch { setSymHits([]); } } else setSymHits([]); }} placeholder={`🔍 ${t('searchCompany')}`} />
+            {symHits.length > 0 && (
+              <div style={{ display: 'grid', gap: 4, marginTop: 6 }}>
+                {symHits.map((h) => (
+                  <button key={h.symbol} onClick={() => { setEditSec((r) => ({ ...r, symbol: h.symbol, name: h.name })); setSymQ(''); setSymHits([]); }}
+                    style={{ textAlign: 'start', border: `1px solid ${C.border}`, background: '#fff', borderRadius: 8, padding: '7px 10px', cursor: 'pointer', fontSize: 12 }}>
+                    <b>{h.symbol}</b> · <span style={{ color: C.textMuted }}>{h.name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         {editSec && (
           <div>
             <div style={{ display: 'flex', gap: 8 }}>
