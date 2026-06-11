@@ -14,7 +14,18 @@ import { TABLES, EMIRATES, WEEKDAYS } from './constants.js';
 import { num, round2 } from './money.js';
 import * as db from '../db/db.js';
 
-async function getExcelJS() { const m = await import('exceljs'); return m.default || m; }
+async function getExcelJS() {
+  try { const m = await import('exceljs'); return m.default || m; }
+  catch {
+    await new Promise((r) => setTimeout(r, 800)); // transient network blip — retry once
+    try { const m = await import('exceljs'); return m.default || m; }
+    catch {
+      // a fresh deploy removed the old chunk; main.jsx auto-reloads on
+      // vite:preloadError — this message covers the rare remaining case
+      throw new Error('تعذّر تحميل وحدة Excel — أعد تحميل الصفحة وحاول مجدداً (Could not load the Excel module — refresh the page and try again)');
+    }
+  }
+}
 
 const PRIMARY = 'FF0D3B6E', ALT = 'FFEFF4FB';
 const MONEY = '#,##0.00';
