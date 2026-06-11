@@ -4,7 +4,7 @@ import { C, TABLES } from '../../lib/constants.js';
 import { fmtCur, fmtNum, num, round2 } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
 import { refreshAllPrices, searchSymbols } from '../../lib/prices.js';
-import { commitBuy, commitSell, commitDividend, portfolioStats, stockLedger } from '../../lib/engine.js';
+import { commitBuy, commitSell, commitDividend, portfolioStats, stockLedger, applyTradeChange } from '../../lib/engine.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, Select, Textarea } from '../../ui/components.jsx';
 
 const blankSec = () => ({ symbol: '', name: '', market: '', currentPrice: '', qty: '', notes: '', isActive: true });
@@ -19,6 +19,27 @@ export default function Investments() {
   const [detailId, setDetailId] = useState(null);
   const [editSec, setEditSec] = useState(null);
   const [trade, setTrade] = useState(null);
+  const [tEdit, setTEdit] = useState(null); // {entry, qty, price, date}
+  const delTrade = async (e) => {
+    if (!window.confirm(t('confirmDelete'))) return;
+    if (e.kind === 'dividend') { await deleteRow(TABLES.cashFlows, e.id); }
+    else {
+      const r = await applyTradeChange(app, detailId, e.kind === 'buy' ? { deleteLot: e.id } : { deleteSell: e.id });
+      if (!r.ok) { showToast(t('oversellBlock'), 'error'); return; }
+    }
+    await Promise.all([refresh(TABLES.tradeLots), refresh(TABLES.tradeSells), refresh(TABLES.cashFlows)]);
+    showToast(t('saved'), 'success');
+  };
+  const saveTradeEdit = async () => {
+    const e = tEdit.entry;
+    const r = await applyTradeChange(app, detailId, e.kind === 'buy'
+      ? { patchLot: { id: e.id, qtyBought: num(tEdit.qty), buyPricePerShare: num(tEdit.price), buyDate: tEdit.date } }
+      : { patchSell: { id: e.id, qty: num(tEdit.qty), sellPricePerShare: num(tEdit.price), sellDate: tEdit.date } });
+    if (!r.ok) { showToast(t('oversellBlock'), 'error'); return; }
+    setTEdit(null);
+    await Promise.all([refresh(TABLES.tradeLots), refresh(TABLES.tradeSells)]);
+    showToast(t('saved'), 'success');
+  };
   const [priceEdit, setPriceEdit] = useState(null);
   const [keyModal, setKeyModal] = useState(false);
   const [keyDraft, setKeyDraft] = useState('');
@@ -130,6 +151,8 @@ export default function Investments() {
         onDividend={() => setDivEdit(blankDiv(p.id))}
         onPrice={() => setPriceEdit({ id: p.id, currentPrice: String(p.currentPrice) })}
         onEdit={() => setEditSec({ ...p, qty: '' })}
+        onEditTrade={(e) => setTEdit({ entry: e, qty: String(e.qty), price: String(e.price), date: e.date })}
+        onDeleteTrade={delTrade}
       />
     );
   }
@@ -237,6 +260,15 @@ export default function Investments() {
       )}
 
       {/* Security modal (with optional initial quantity) */}
+      <Modal open={!!tEdit} onClose={() => setTEdit(null)} title={`✎ ${tEdit?.entry?.kind === 'buy' ? t('buy') : t('sell')}`}
+        footer={<Btn onClick={saveTradeEdit}>{t('save')}</Btn>}>
+        {tEdit && (<div>
+          <Field label={t('numberOfShares')} required><Input type="number" value={tEdit.qty} onChange={(v) => setTEdit((x) => ({ ...x, qty: v }))} /></Field>
+          <Field label={t('pricePerShare')} required><Input type="number" value={tEdit.price} onChange={(v) => setTEdit((x) => ({ ...x, price: v }))} /></Field>
+          <Field label={t('date')}><Input type="date" value={tEdit.date} onChange={(v) => setTEdit((x) => ({ ...x, date: v }))} /></Field>
+        </div>)}
+      </Modal>
+
       <Modal open={keyModal} onClose={() => setKeyModal(false)} title={`🔑 ${t('priceApiKey')}`}
         footer={<Btn onClick={async () => { await updateSettings({ finnhubKey: keyDraft.trim() }); setKeyModal(false); showToast(t('saved'), 'success'); }}>{t('save')}</Btn>}>
         <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8 }}>{t('priceApiHint')}</div>
@@ -329,7 +361,7 @@ export default function Investments() {
   );
 }
 
-function StockDetail({ p, t, lang, cur, pnlColor, live, liveToggle, ledger, onBack, onBuy, onSell, onDividend, onPrice, onEdit }) {
+function StockDetail({ p, t, lang, cur, pnlColor, live, liveToggle, ledger, onBack, onBuy, onSell, onDividend, onPrice, onEdit, onEditTrade, onDeleteTrade }) {
   const kindLabel = { buy: t('buy'), sell: t('sell'), dividend: t('dividend'), fee: t('fees'), interest: t('interest'), deposit: t('deposit'), withdraw: t('withdraw') };
   return (
     <div>
@@ -387,6 +419,10 @@ function StockDetail({ p, t, lang, cur, pnlColor, live, liveToggle, ledger, onBa
                 <div style={{ textAlign: 'end' }}>
                   <div style={{ fontWeight: 800, color }}>{isBuy ? '−' : '+'}{cur(e.amount)}</div>
                   {isSell && <div style={{ fontSize: 10, fontWeight: 700, color: pnlColor(e.realizedPnL) }}>{t('realizedPnL')}: {e.realizedPnL >= 0 ? '+' : ''}{cur(e.realizedPnL)}</div>}
+                </div>
+                <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                  {(e.kind === 'buy' || e.kind === 'sell') && <button onClick={(ev) => { ev.stopPropagation(); onEditTrade(e); }} style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 14 }}>✎</button>}
+                  <button onClick={(ev) => { ev.stopPropagation(); onDeleteTrade(e); }} style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 14, color: '#C0392B' }}>🗑</button>
                 </div>
               </Card>
             );

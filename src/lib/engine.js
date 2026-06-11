@@ -549,3 +549,38 @@ export function periodTrend(data, mode = 'month', n = 6) {
     net: round2(b.salesProfit - b.businessExp - b.personalExp),
   }));
 }
+
+// ── Trade editing with full FIFO rebuild ──────────────────────────────────
+// Editing/deleting a buy or sell invalidates FIFO consumption AND realized P&L,
+// so we replay the whole security: lots (buyDate order) feed sells (sellDate
+// order); every sell's proceeds/realizedPnL and every lot's qtyRemaining are
+// recomputed. Validates in memory BEFORE persisting. Returns { ok, error }.
+export async function applyTradeChange(app, securityId, change) {
+  let L = (app.data[TABLES.tradeLots] || []).filter((l) => l.securityId === securityId).map((l) => ({ ...l }));
+  let S = (app.data[TABLES.tradeSells] || []).filter((x) => x.securityId === securityId).map((x) => ({ ...x }));
+  if (change.deleteLot) L = L.filter((l) => l.id !== change.deleteLot);
+  if (change.deleteSell) S = S.filter((x) => x.id !== change.deleteSell);
+  if (change.patchLot) L = L.map((l) => (l.id === change.patchLot.id ? { ...l, ...change.patchLot } : l));
+  if (change.patchSell) S = S.map((x) => (x.id === change.patchSell.id ? { ...x, ...change.patchSell } : x));
+  L.forEach((l) => { l.costBasis = round2(num(l.qtyBought) * num(l.buyPricePerShare) + num(l.buyFees)); });
+  const lotsR = L.slice().sort((a, b) => (a.buyDate || '').localeCompare(b.buyDate || ''))
+    .map((l) => ({ ...l, rem: num(l.qtyBought), unit: num(l.qtyBought) > 0 ? num(l.costBasis) / num(l.qtyBought) : 0 }));
+  const sellsR = S.slice().sort((a, b) => (a.sellDate || '').localeCompare(b.sellDate || ''));
+  for (const x of sellsR) {
+    let need = num(x.qty); let cost = 0;
+    for (const l of lotsR) {
+      if (need <= 0) break;
+      if ((l.buyDate || '') > (x.sellDate || '')) continue;
+      const take = Math.min(l.rem, need);
+      l.rem = round2(l.rem - take); need = round2(need - take); cost += take * l.unit;
+    }
+    if (need > 0) return { ok: false, error: 'oversell' };
+    x.proceeds = round2(num(x.qty) * num(x.sellPricePerShare) - num(x.sellFees));
+    x.realizedPnL = round2(x.proceeds - cost);
+  }
+  if (change.deleteLot) await db.remove(TABLES.tradeLots, change.deleteLot);
+  if (change.deleteSell) await db.remove(TABLES.tradeSells, change.deleteSell);
+  for (const l of lotsR) await db.update(TABLES.tradeLots, l.id, { buyDate: l.buyDate, qtyBought: num(l.qtyBought), buyPricePerShare: num(l.buyPricePerShare), buyFees: num(l.buyFees), costBasis: l.costBasis, qtyRemaining: l.rem });
+  for (const x of sellsR) await db.update(TABLES.tradeSells, x.id, { sellDate: x.sellDate, qty: num(x.qty), sellPricePerShare: num(x.sellPricePerShare), sellFees: num(x.sellFees), proceeds: x.proceeds, realizedPnL: x.realizedPnL });
+  return { ok: true };
+}
