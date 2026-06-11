@@ -19,10 +19,20 @@ const CORE_TABLES = [
 
 export function AppProvider({ children }) {
   const [user, setUser] = useState(null);
+  const SESSION_KEY = 'orthostock_session';
   const [lang, setLang] = useState('ar');
   const [displayCurrency, setDisplayCurrency] = useState('AED');
   const [data, setData] = useState(() => Object.fromEntries(CORE_TABLES.map((t) => [t, []])));
   const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    if (loading || user) return;
+    let email = null; try { email = localStorage.getItem(SESSION_KEY); } catch {}
+    if (!email) return;
+    db.findBy(TABLES.users, 'email', email).then((u) => {
+      if (u && u.isActive !== false) setUser(u);
+      else { try { localStorage.removeItem(SESSION_KEY); } catch {} }
+    });
+  }, [loading]); // eslint-disable-line react-hooks/exhaustive-deps
   const [toast, setToast] = useState(null);
   const toastTimer = useRef(null);
 
@@ -92,7 +102,7 @@ export function AppProvider({ children }) {
   // ── Auth (simple gate; Supabase Auth can replace this transparently) ──
   const login = useCallback(async (email, password) => {
     const u = await db.findBy(TABLES.users, 'email', String(email).trim().toLowerCase());
-    if (u && u.isActive !== false && u.password === password) { setUser(u); return true; }
+    if (u && u.isActive !== false && u.password === password) { setUser(u); try { localStorage.setItem(SESSION_KEY, u.email); } catch {} return true; }
     return false;
   }, []);
 
@@ -104,7 +114,7 @@ export function AppProvider({ children }) {
     await refresh(TABLES.users);
     return true;
   }, [refresh]);
-  const logout = useCallback(() => setUser(null), []);
+  const logout = useCallback(() => { setUser(null); try { localStorage.removeItem(SESSION_KEY); } catch {} }, []);
 
   // ── Generic CRUD helpers (refresh cache + toast + friendly errors) ──
   const createRow = useCallback(async (table, row) => {

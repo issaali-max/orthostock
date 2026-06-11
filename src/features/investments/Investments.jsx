@@ -145,6 +145,13 @@ export default function Investments() {
         </div>
         <div style={{ textAlign: 'end' }}>
           <div style={{ fontWeight: 800, color: C.text }}>{cur(p.price)}{live && <span style={{ color: C.success, fontSize: 10 }}> ●</span>}</div>
+          {(() => {
+            const sec = securities.find((x) => x.id === p.id);
+            const pc = num(sec?.prevClose);
+            if (!(pc > 0) || !(num(p.price) > 0)) return null;
+            const ch = ((num(p.price) - pc) / pc) * 100;
+            return <div style={{ fontSize: 10, fontWeight: 800, color: ch >= 0 ? C.success : C.danger }}>{ch >= 0 ? '▲' : '▼'} {Math.abs(ch).toFixed(2)}%{sec?.priceUpdatedAt ? ` · ${sec.priceUpdatedAt}` : ''}</div>;
+          })()}
           <div style={{ fontSize: 11, color: pnlColor(p.fullySold ? p.realized : p.totalPnL), fontWeight: 700 }}>
             {(p.fullySold ? p.realized : p.totalPnL) >= 0 ? '+' : ''}{cur(p.fullySold ? p.realized : p.totalPnL)}
           </div>

@@ -11,7 +11,8 @@ export async function fetchQuote(symbol, key) {
   const res = await fetch(`${BASE}/quote?symbol=${encodeURIComponent(symbol)}&token=${encodeURIComponent(key)}`);
   if (!res.ok) throw new Error(`quote ${symbol}: HTTP ${res.status}`);
   const j = await res.json();
-  return num(j.c) > 0 ? num(j.c) : null; // c = current price; 0 means unknown symbol
+  if (!(num(j.c) > 0)) return null; // 0 = unknown symbol
+  return { price: num(j.c), prevClose: num(j.pc) || 0 };
 }
 
 export async function searchSymbols(q, key) {
@@ -27,10 +28,10 @@ export async function refreshAllPrices(securities, key, onOne) {
   let updated = 0; const failed = [];
   for (const s of securities) {
     try {
-      const price = await fetchQuote(s.symbol, key);
-      if (price != null) {
-        await db.update(TABLES.securities, s.id, { currentPrice: price, priceUpdatedAt: todayISO() });
-        updated += 1; onOne?.(s.symbol, price);
+      const q = await fetchQuote(s.symbol, key);
+      if (q != null) {
+        await db.update(TABLES.securities, s.id, { currentPrice: q.price, prevClose: q.prevClose, priceUpdatedAt: todayISO() });
+        updated += 1; onOne?.(s.symbol, q.price);
       } else failed.push(s.symbol);
     } catch { failed.push(s.symbol); }
     await new Promise((r) => setTimeout(r, 250));
