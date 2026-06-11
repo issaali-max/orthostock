@@ -78,7 +78,7 @@ export default function Shell() {
         </aside>
         <main style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
           {Header}
-          <div style={{ padding: 24, maxWidth: 1100, width: '100%', margin: '0 auto' }}><Active /></div>
+          <div style={{ padding: 24, maxWidth: 760, width: '100%', margin: '0 auto' }}><Active /></div>
         </main>
       </div>
     );

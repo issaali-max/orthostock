@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 import { useApp } from '../../app/AppProvider.jsx';
 import { C, WEEKDAYS, emirateOptions, emirateLabel, TABLES } from '../../lib/constants.js';
 import { fmtCur, num, round2 } from '../../lib/money.js';
@@ -148,6 +149,34 @@ function CustomerProfile({ customer, onBack, onEdit, t, lang, displayCurrency, u
   const skuOf = (id) => variants.find((v) => v.id === id)?.sku || '—';
   const [payFor, setPayFor] = useState(null);
 
+  // Month-over-month sales & profit (last 6 months) + most-bought materials
+  const insight = useMemo(() => {
+    const mine = invoices.filter((i) => i.customerId === customer.id && i.status !== 'returned');
+    const ids = new Set(mine.map((i) => i.id));
+    const its = items.filter((it) => ids.has(it.invoiceId));
+    const profitByInv = {};
+    its.forEach((it) => { profitByInv[it.invoiceId] = (profitByInv[it.invoiceId] || 0) + num(it.lineProfit); });
+    const months = [];
+    const d = new Date();
+    for (let k = 5; k >= 0; k--) {
+      const dt = new Date(d.getFullYear(), d.getMonth() - k, 1);
+      const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
+      months.push({ key, label: dt.toLocaleDateString(lang === 'ar' ? 'ar' : 'en', { month: 'short' }), revenue: 0, profit: 0 });
+    }
+    mine.forEach((inv) => {
+      const key = (inv.date || '').slice(0, 7);
+      const row = months.find((m) => m.key === key);
+      if (row) { row.revenue += num(inv.total); row.profit += profitByInv[inv.id] || 0; }
+    });
+    const pm = {};
+    its.forEach((it) => { const e = pm[it.variantId] || (pm[it.variantId] = { qty: 0, revenue: 0 }); e.qty += num(it.qty); e.revenue += num(it.total); });
+    const topMats = Object.entries(pm).map(([vid, e]) => {
+      const v = variants.find((x) => x.id === vid);
+      return { ...e, label: v ? (v.nameEn || v.sku) : '—' };
+    }).sort((a, b) => b.revenue - a.revenue).slice(0, 5);
+    return { months, topMats, hasAny: mine.length > 0 };
+  }, [invoices, items, customer.id, variants, lang]);
+
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
@@ -166,6 +195,37 @@ function CustomerProfile({ customer, onBack, onEdit, t, lang, displayCurrency, u
         <MiniStat label={t('profit')} value={fmtCur(st.profit, displayCurrency, usdRate)} color={C.success} />
         <MiniStat label={t('rating')} value={`${rating}/100`} color={C.primary} />
       </div>
+
+      {insight.hasAny && (
+        <Card style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: C.text, marginBottom: 6 }}>📈 {t('monthlyComparison')}</div>
+          <ResponsiveContainer width="100%" height={170}>
+            <BarChart data={insight.months} margin={{ top: 4, right: 6, left: -14, bottom: 0 }} dir="ltr" barCategoryGap="24%">
+              <CartesianGrid strokeDasharray="3 3" vertical={false} />
+              <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+              <YAxis tick={{ fontSize: 9 }} />
+              <Tooltip formatter={(v) => fmtCur(v, displayCurrency, usdRate)} />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Bar dataKey="revenue" name={t('revenue')} fill={C.primary} radius={[4, 4, 0, 0]} />
+              <Bar dataKey="profit" name={t('profit')} fill={C.success} radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+          {insight.topMats.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ fontSize: 12, fontWeight: 800, color: C.textMid, marginBottom: 6 }}>📦 {t('mostBought')}</div>
+              <div style={{ display: 'grid', gap: 5 }}>
+                {insight.topMats.map((m, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, background: C.surfaceAlt, borderRadius: 9, padding: '6px 10px' }}>
+                    <div style={{ flex: 1, minWidth: 0, fontWeight: 700, fontSize: 12, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.label}</div>
+                    <div style={{ fontSize: 11, color: C.textMuted, flexShrink: 0 }}>{m.qty} ×</div>
+                    <div style={{ fontWeight: 800, fontSize: 12, color: C.primary, flexShrink: 0 }}>{fmtCur(m.revenue, displayCurrency, usdRate)}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
 
       {(customer.workingDays || []).length > 0 && (
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 14 }}>

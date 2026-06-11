@@ -22,23 +22,38 @@ export default function Dashboard() {
   const pl = useMemo(() => pnl(data, bounds), [data, range]);
   const today = useMemo(() => pnl(data, { from: todayISO(), to: todayISO() }), [data]);
 
-  // Drill-down: materials sold within the active range (active invoices only)
-  const soldList = useMemo(() => {
+  // Drill-down: materials sold + buyers within the active range (active invoices only)
+  const periodReport = useMemo(() => {
     const inRange = (d) => d && d >= bounds.from && (!bounds.to || d <= bounds.to);
     const invs = (data[TABLES.invoices] || []).filter((inv) => inv.status !== 'returned' && inRange(inv.date));
     const ids = new Set(invs.map((i) => i.id));
     const variants = data[TABLES.variants] || [];
+    const customers = data[TABLES.customers] || [];
+    const items = (data[TABLES.invoiceItems] || []).filter((it) => ids.has(it.invoiceId));
+    // materials: qty, revenue, profit, wholesale cost
     const m = {};
-    (data[TABLES.invoiceItems] || []).filter((it) => ids.has(it.invoiceId)).forEach((it) => {
-      const e = m[it.variantId] || (m[it.variantId] = { qty: 0, revenue: 0, profit: 0 });
-      e.qty += num(it.qty); e.revenue += num(it.total); e.profit += num(it.lineProfit);
+    items.forEach((it) => {
+      const e = m[it.variantId] || (m[it.variantId] = { qty: 0, revenue: 0, profit: 0, cost: 0 });
+      e.qty += num(it.qty); e.revenue += num(it.total); e.profit += num(it.lineProfit); e.cost += num(it.avgCostAtSale) * num(it.qty);
     });
-    return Object.entries(m).map(([vid, e]) => {
+    const sold = Object.entries(m).map(([vid, e]) => {
       const v = variants.find((x) => x.id === vid);
       const label = v ? (v.nameEn || Object.values(v.attributes || {}).filter(Boolean).join(' · ') || v.sku) : '—';
-      return { ...e, label, sku: v?.sku || '' };
+      return { ...e, label, sku: v?.sku || '', unitCost: e.qty ? e.cost / e.qty : 0, unitSell: e.qty ? e.revenue / e.qty : 0 };
     }).sort((a, b) => b.revenue - a.revenue);
-  }, [data, range]);
+    // buyers: which centers/doctors bought, how much, and what profit they generated
+    const profitByInv = {};
+    items.forEach((it) => { profitByInv[it.invoiceId] = (profitByInv[it.invoiceId] || 0) + num(it.lineProfit); });
+    const bm = {};
+    invs.forEach((inv) => {
+      const e = bm[inv.customerId] || (bm[inv.customerId] = { revenue: 0, profit: 0, count: 0 });
+      e.revenue += num(inv.total); e.profit += profitByInv[inv.id] || 0; e.count += 1;
+    });
+    const buyers = Object.entries(bm).map(([cid, e]) => ({ ...e, name: customers.find((c) => c.id === cid)?.name || '—' }))
+      .sort((a, b) => b.revenue - a.revenue);
+    return { sold, buyers };
+  }, [data, range]); // eslint-disable-line react-hooks/exhaustive-deps
+  const soldList = periodReport.sold;
   const trend = useMemo(() => periodTrend(data, trendMode, trendMode === 'year' ? 4 : 6), [data, trendMode]);
   const emirates = useMemo(() => emirateStats(data), [data]);
   const clinics = useMemo(() => topClinics(data, 5), [data]);
@@ -256,23 +271,71 @@ export default function Dashboard() {
         )}
       </Card>
 
-      {/* Interactive drill-down: materials sold in the active period */}
+      {/* Interactive drill-down: full period report (KPIs, chart, materials, buyers) */}
       <Modal open={showSold} onClose={() => setShowSold(false)}
-        title={`${t('soldMaterials')} — ${range === 'day' ? t('today') : range === 'year' ? t('thisYear') : t('thisMonth')}`}>
+        title={`📊 ${t('periodReport')} — ${range === 'day' ? t('today') : range === 'year' ? t('thisYear') : t('thisMonth')}`}>
         {soldList.length === 0 ? <EmptyState icon="🧾" text={t('noData')} /> : (
-          <div style={{ display: 'grid', gap: 6 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, fontWeight: 800, color: C.textMuted, padding: '0 4px' }}>
-              <span>{t('name')}</span><span>{t('profit')}</span>
-            </div>
-            {soldList.map((r, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, background: C.surfaceAlt, borderRadius: 10, padding: '8px 10px' }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 700, color: C.text, fontSize: 13 }}>{r.label}</div>
-                  <div style={{ fontSize: 11, color: C.textMuted }}>{fmtNum(r.qty)} × · {t('revenueLabel')} {cur(r.revenue)}</div>
+          <div style={{ display: 'grid', gap: 12 }}>
+            {/* KPI strip */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
+              {[
+                { l: t('revenueLabel'), v: pl.revenue, c: C.text },
+                { l: t('wholesaleCost'), v: pl.cogs, c: C.textMid },
+                { l: t('salesProfit'), v: pl.salesProfit, c: C.success },
+                { l: t('businessExpenses'), v: pl.businessExp, c: C.danger },
+              ].map((k, i) => (
+                <div key={i} style={{ background: C.surfaceAlt, borderRadius: 10, padding: '8px 10px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 10, color: C.textMuted, fontWeight: 700 }}>{k.l}</div>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: k.c }}>{cur(k.v)}</div>
                 </div>
-                <div style={{ fontWeight: 800, color: r.profit >= 0 ? C.success : C.danger }}>{cur(r.profit)}</div>
+              ))}
+            </div>
+            {/* Top materials by profit — visual */}
+            <div style={{ background: C.surfaceAlt, borderRadius: 10, padding: '8px 4px' }}>
+              <ResponsiveContainer width="100%" height={160}>
+                <BarChart data={soldList.slice(0, 6)} margin={{ top: 4, right: 6, left: -14, bottom: 0 }} dir="ltr">
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fontSize: 9 }} interval={0} tickFormatter={(s) => (s.length > 9 ? s.slice(0, 8) + '…' : s)} />
+                  <YAxis tick={{ fontSize: 9 }} />
+                  <Tooltip formatter={(v) => cur(v)} />
+                  <Bar dataKey="profit" name={t('profit')} fill={C.success} radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="revenue" name={t('revenueLabel')} fill={C.primary} radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            {/* Materials table — name with numbers right beside it */}
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 800, color: C.textMid, marginBottom: 6 }}>📦 {t('soldMaterials')}</div>
+              <div style={{ display: 'grid', gap: 6 }}>
+                {soldList.map((r, i) => (
+                  <div key={i} style={{ background: C.surfaceAlt, borderRadius: 10, padding: '8px 10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, justifyContent: 'space-between' }}>
+                      <div style={{ fontWeight: 700, color: C.text, fontSize: 13, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.label}</div>
+                      <div style={{ fontWeight: 800, color: r.profit >= 0 ? C.success : C.danger, flexShrink: 0 }}>{cur(r.profit)}</div>
+                    </div>
+                    <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>
+                      {fmtNum(r.qty)} × · {t('wholesale')} {cur(r.unitCost)} → {t('sell')} {cur(r.unitSell)}
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
+            </div>
+            {/* Buyers in this period */}
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 800, color: C.textMid, marginBottom: 6 }}>🏥 {t('whoBought')}</div>
+              <div style={{ display: 'grid', gap: 6 }}>
+                {periodReport.buyers.map((b, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, background: C.surfaceAlt, borderRadius: 10, padding: '8px 10px' }}>
+                    <div style={{ width: 20, textAlign: 'center', fontWeight: 800, color: C.textMuted, fontSize: 12 }}>{i + 1}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, color: C.text, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.name}</div>
+                      <div style={{ fontSize: 11, color: C.textMuted }}>{b.count} {t('invoices')} · {cur(b.revenue)}</div>
+                    </div>
+                    <div style={{ fontWeight: 800, color: C.success, flexShrink: 0 }}>{cur(b.profit)}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         )}
       </Modal>
