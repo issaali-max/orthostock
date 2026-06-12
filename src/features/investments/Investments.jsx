@@ -4,7 +4,7 @@ import { C, TABLES } from '../../lib/constants.js';
 import { fmtCur, fmtNum, num, round2 } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
 import { refreshAllPrices, searchSymbols } from '../../lib/prices.js';
-import { commitBuy, commitSell, commitDividend, portfolioStats, stockLedger, applyTradeChange } from '../../lib/engine.js';
+import { commitBuy, commitSell, commitDividend, portfolioStats, stockLedger, applyTradeChange, deleteSecurityCascade } from '../../lib/engine.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, Select, Textarea } from '../../ui/components.jsx';
 
 const blankSec = () => ({ symbol: '', name: '', market: '', currency: 'USD', currentPrice: '', qty: '', notes: '', isActive: true });
@@ -92,6 +92,12 @@ export default function Investments() {
   const moneyIn = (v, ccy) => ccy === 'USD' ? `$${fmtNum(round2(num(v)))}` : cur(v);
   const curFor = (id) => (v) => moneyIn(v, ccyOf(id));
   // portfolio totals: if every active security is USD (the common case), show $
+  useEffect(() => {
+    if (settings.ccyMigrated) return;
+    const aed = securities.filter((x) => x.currency === 'AED');
+    Promise.all(aed.map((x) => updateRow(TABLES.securities, x.id, { currency: 'USD' })))
+      .then(() => updateSettings({ ccyMigrated: true }));
+  }, [securities.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const allUSD = securities.filter((x) => x.isActive !== false).every((x) => (x.currency || 'USD') !== 'AED');
   const curTot = (v) => moneyIn(v, allUSD ? 'USD' : 'AED');
   const flows = useMemo(() => (data[TABLES.cashFlows] || []).slice().sort((a, b) => (b.date || '').localeCompare(a.date || '')), [data]);
@@ -267,6 +273,13 @@ export default function Investments() {
         onEdit={() => setEditSec({ ...p, qty: '' })}
         onEditTrade={(e) => setTEdit({ entry: e, qty: String(e.qty), price: String(e.price), date: e.date })}
         onDeleteTrade={delTrade}
+        onDeleteSecurity={async () => {
+          if (!window.confirm(t('confirmDelete'))) return;
+          await deleteSecurityCascade(app, detailId);
+          setDetailId(null);
+          await Promise.all([refresh(TABLES.securities), refresh(TABLES.tradeLots), refresh(TABLES.tradeSells), refresh(TABLES.cashFlows)]);
+          showToast(t('saved'), 'success');
+        }}
       />
       {invModals}
       </>
@@ -381,7 +394,7 @@ export default function Investments() {
   );
 }
 
-function StockDetail({ p, t, lang, cur, pnlColor, live, liveToggle, ledger, onBack, onBuy, onSell, onDividend, onPrice, onEdit, onEditTrade, onDeleteTrade }) {
+function StockDetail({ p, t, lang, cur, pnlColor, live, liveToggle, ledger, onBack, onBuy, onSell, onDividend, onPrice, onEdit, onEditTrade, onDeleteTrade, onDeleteSecurity }) {
   const kindLabel = { buy: t('buy'), sell: t('sell'), dividend: t('dividend'), fee: t('fees'), interest: t('interest'), deposit: t('deposit'), withdraw: t('withdraw') };
   return (
     <div>
@@ -390,6 +403,7 @@ function StockDetail({ p, t, lang, cur, pnlColor, live, liveToggle, ledger, onBa
         <h2 style={{ fontSize: 16, fontWeight: 800, color: C.text, margin: 0, flex: 1 }}>{p.symbol} {p.market ? `· ${p.market}` : ''}</h2>
         {liveToggle}
         <Btn size="sm" variant="light" onClick={onEdit}>✎</Btn>
+        <Btn size="sm" variant="light" onClick={onDeleteSecurity} style={{ color: "#C0392B" }}>🗑</Btn>
       </div>
       {p.fullySold && <div style={{ marginBottom: 10 }}><Badge tone="neutral">🗄️ {t('soldStocks')}</Badge></div>}
       {p.name && <div style={{ fontSize: 13, color: C.textMuted, marginBottom: 10 }}>{p.name}</div>}

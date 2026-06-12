@@ -584,3 +584,12 @@ export async function applyTradeChange(app, securityId, change) {
   for (const x of sellsR) await db.update(TABLES.tradeSells, x.id, { sellDate: x.sellDate, qty: num(x.qty), sellPricePerShare: num(x.sellPricePerShare), sellFees: num(x.sellFees), proceeds: x.proceeds, realizedPnL: x.realizedPnL });
   return { ok: true };
 }
+
+// Hard-delete a security AND everything attached to it (lots, sells, dividend
+// cash flows) so the owner can re-enter it from scratch.
+export async function deleteSecurityCascade(app, securityId) {
+  for (const l of (app.data[TABLES.tradeLots] || []).filter((x) => x.securityId === securityId)) await db.remove(TABLES.tradeLots, l.id);
+  for (const x of (app.data[TABLES.tradeSells] || []).filter((y) => y.securityId === securityId)) await db.remove(TABLES.tradeSells, x.id);
+  for (const f of (app.data[TABLES.cashFlows] || []).filter((y) => y.securityId === securityId)) await db.remove(TABLES.cashFlows, f.id);
+  await db.remove(TABLES.securities, securityId);
+}
