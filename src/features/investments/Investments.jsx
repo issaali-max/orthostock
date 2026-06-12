@@ -7,7 +7,7 @@ import { refreshAllPrices, searchSymbols } from '../../lib/prices.js';
 import { commitBuy, commitSell, commitDividend, portfolioStats, stockLedger, applyTradeChange } from '../../lib/engine.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, Select, Textarea } from '../../ui/components.jsx';
 
-const blankSec = () => ({ symbol: '', name: '', market: '', currentPrice: '', qty: '', notes: '', isActive: true });
+const blankSec = () => ({ symbol: '', name: '', market: '', currency: 'USD', currentPrice: '', qty: '', notes: '', isActive: true });
 const blankTrade = (securityId, mode) => ({ securityId, mode, date: todayISO(), qty: '', pricePerShare: '', fees: '' });
 const blankFlow = () => ({ type: 'deposit', date: todayISO(), amount: '', notes: '' });
 const blankDiv = (securityId) => ({ securityId, date: todayISO(), amount: '' });
@@ -87,6 +87,13 @@ export default function Investments() {
 
   const priceOf = useMemo(() => (live ? (sid) => livePrices[sid] : undefined), [live, livePrices]);
   const stats = useMemo(() => portfolioStats(data, priceOf), [data, priceOf]);
+  // each security displays in ITS OWN currency; USD never converted by mistake
+  const ccyOf = (id) => (securities.find((x) => x.id === id)?.currency) === 'AED' ? 'AED' : 'USD';
+  const moneyIn = (v, ccy) => ccy === 'USD' ? `$${fmtNum(round2(num(v)))}` : cur(v);
+  const curFor = (id) => (v) => moneyIn(v, ccyOf(id));
+  // portfolio totals: if every active security is USD (the common case), show $
+  const allUSD = securities.filter((x) => x.isActive !== false).every((x) => (x.currency || 'USD') !== 'AED');
+  const curTot = (v) => moneyIn(v, allUSD ? 'USD' : 'AED');
   const flows = useMemo(() => (data[TABLES.cashFlows] || []).slice().sort((a, b) => (b.date || '').localeCompare(a.date || '')), [data]);
   const cur = (v) => fmtCur(v, displayCurrency, usdRate);
   const pnlColor = (v) => (v > 0 ? C.success : v < 0 ? C.danger : C.textMid);
@@ -97,7 +104,7 @@ export default function Investments() {
   const saveSec = async () => {
     const r = editSec;
     if (!r.symbol?.trim()) return;
-    const payload = { symbol: r.symbol.trim().toUpperCase(), name: r.name || '', market: r.market || '', currentPrice: num(r.currentPrice), priceUpdatedAt: todayISO(), notes: r.notes || '', isActive: true, currency: 'AED' };
+    const payload = { symbol: r.symbol.trim().toUpperCase(), name: r.name || '', market: r.market || '', currentPrice: num(r.currentPrice), priceUpdatedAt: todayISO(), notes: r.notes || '', isActive: true, currency: r.currency === 'AED' ? 'AED' : 'USD' };
     try {
       if (r.id) { await updateRow(TABLES.securities, r.id, payload); }
       else {
@@ -177,6 +184,10 @@ export default function Investments() {
           <div>
             <div style={{ display: 'flex', gap: 8 }}>
               <Field label={t('symbol')} required><Input value={editSec.symbol} onChange={(v) => setEditSec((r) => ({ ...r, symbol: v }))} /></Field>
+              <Field label={t('currency')} required>
+                <Select value={editSec.currency === 'AED' ? 'AED' : 'USD'} onChange={(v) => setEditSec((r) => ({ ...r, currency: v }))}
+                  options={[{ value: 'USD', label: '$ USD' }, { value: 'AED', label: 'AED درهم' }]} />
+              </Field>
               <Field label={t('market')}><Input value={editSec.market} onChange={(v) => setEditSec((r) => ({ ...r, market: v }))} /></Field>
             </div>
             <Field label={t('securityName')}><Input value={editSec.name} onChange={(v) => setEditSec((r) => ({ ...r, name: v }))} /></Field>
@@ -246,7 +257,7 @@ export default function Investments() {
     if (!p) { setDetailId(null); return null; }
     return (
       <>
-      <StockDetail {...{ p, app, t, lang, cur, pnlColor, live, liveToggle }}
+      <StockDetail {...{ p, app, t, lang, pnlColor, live, liveToggle }} cur={curFor(p.id)}
         ledger={stockLedger(data, p.id)}
         onBack={() => setDetailId(null)}
         onBuy={() => setTrade(blankTrade(p.id, 'buy'))}
@@ -262,7 +273,7 @@ export default function Investments() {
     );
   }
 
-  const posRow = (p) => (
+  const posRow = (p) => { const curP = curFor(p.id); return (
     <Card key={p.id} style={{ cursor: 'pointer' }} onClick={() => setDetailId(p.id)}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -272,7 +283,7 @@ export default function Investments() {
           {p.name && <div style={{ fontSize: 11, color: C.textMuted }}>{p.name}</div>}
         </div>
         <div style={{ textAlign: 'end' }}>
-          <div style={{ fontWeight: 800, color: C.text }}>{cur(p.price)}{live && <span style={{ color: C.success, fontSize: 10 }}> ●</span>}</div>
+          <div style={{ fontWeight: 800, color: C.text }}>{curP(p.price)}{live && <span style={{ color: C.success, fontSize: 10 }}> ●</span>}</div>
           {(() => {
             const sec = securities.find((x) => x.id === p.id);
             const pc = num(sec?.prevClose);
@@ -281,7 +292,7 @@ export default function Investments() {
             return <div style={{ fontSize: 10, fontWeight: 800, color: ch >= 0 ? C.success : C.danger }}>{ch >= 0 ? '▲' : '▼'} {Math.abs(ch).toFixed(2)}%{sec?.priceUpdatedAt ? ` · ${sec.priceUpdatedAt}` : ''}</div>;
           })()}
           <div style={{ fontSize: 11, color: pnlColor(p.fullySold ? p.realized : p.totalPnL), fontWeight: 700 }}>
-            {(p.fullySold ? p.realized : p.totalPnL) >= 0 ? '+' : ''}{cur(p.fullySold ? p.realized : p.totalPnL)}
+            {(p.fullySold ? p.realized : p.totalPnL) >= 0 ? '+' : ''}{curP(p.fullySold ? p.realized : p.totalPnL)}
           </div>
         </div>
         <span style={{ color: C.textMuted }}>›</span>
@@ -289,12 +300,12 @@ export default function Investments() {
       {!p.fullySold && (
         <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 11, color: C.textMid }}>
           <span>{t('shares')}: <b>{fmtNum(p.qty)}</b></span>
-          <span>{t('avgCost')}: <b>{cur(p.avgCost)}</b></span>
-          <span>{t('marketValue')}: <b>{cur(p.marketValue)}</b></span>
+          <span>{t('avgCost')}: <b>{curP(p.avgCost)}</b></span>
+          <span>{t('marketValue')}: <b>{curP(p.marketValue)}</b></span>
         </div>
       )}
     </Card>
-  );
+  ); };
 
   return (
     <div>
@@ -315,15 +326,15 @@ export default function Investments() {
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
           <Mini label={t('cashBalance')} value={cur(stats.cash)} />
-          <Mini label={t('holdings')} value={cur(stats.holdingsValue)} />
+          <Mini label={t('holdings')} value={curTot(stats.holdingsValue)} />
           <Mini label={t('capital')} value={cur(stats.netCapital)} />
-          <Mini label={t('totalPnL')} value={cur(stats.totalPnL)} accent={stats.totalPnL >= 0 ? '#BFF3D6' : '#FFD9D9'} />
+          <Mini label={t('totalPnL')} value={curTot(stats.totalPnL)} accent={stats.totalPnL >= 0 ? '#BFF3D6' : '#FFD9D9'} />
         </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 14 }}>
-        <StatCard label={t('realizedPnL')} value={cur(stats.totalRealized)} color={pnlColor(stats.totalRealized)} />
-        <StatCard label={t('unrealizedPnL')} value={cur(stats.totalUnrealized)} color={pnlColor(stats.totalUnrealized)} />
+        <StatCard label={t('realizedPnL')} value={curTot(stats.totalRealized)} color={pnlColor(stats.totalRealized)} />
+        <StatCard label={t('unrealizedPnL')} value={curTot(stats.totalUnrealized)} color={pnlColor(stats.totalUnrealized)} />
         <StatCard label={t('dividends')} value={cur(stats.dividends)} color={C.primary} />
       </div>
 
