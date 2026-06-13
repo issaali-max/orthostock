@@ -13,7 +13,7 @@
 // ─────────────────────────────────────────────────────────────
 import { createClient } from '@supabase/supabase-js';
 import { TABLES } from '../lib/constants.js';
-import { idbBulkPut, outboxAll, outboxDelete, metaSet } from './local.js';
+import { idbGetAll, idbBulkPut, outboxAll, outboxDelete, metaSet } from './local.js';
 
 // Supabase connection. Reads Vercel env vars first; falls back to the project's
 // own values so sync works out-of-the-box without any Vercel configuration.
@@ -45,6 +45,33 @@ export async function refreshPending() {
   state.pending = o.length;
   emit();
 }
+
+// One-time (or on-demand) upload of EVERYTHING in local IndexedDB to the cloud.
+// Needed because data created before cloud sync was enabled never entered the
+// outbox, so it would otherwise stay only on the device. Upserts by id, so it
+// is safe to run repeatedly and on every device — the cloud becomes the union.
+export async function pushAllLocal(onProgress) {
+  if (!supabase) return { ok: false, error: 'cloud_not_configured', pushed: 0, errors: ['cloud not configured'] };
+  if (!isOnline()) return { ok: false, error: 'offline', pushed: 0, errors: ['offline'] };
+  let pushed = 0; const errors = [];
+  for (const table of Object.values(TABLES)) {
+    let rows = [];
+    try { rows = await idbGetAll(table); } catch { continue; }
+    if (!rows || !rows.length) continue;
+    for (let i = 0; i < rows.length; i += 200) {
+      const chunk = rows.slice(i, i + 200);
+      try {
+        const { error } = await supabase.from(table).upsert(chunk);
+        if (error) errors.push(`${table}: ${error.message}`);
+        else pushed += chunk.length;
+      } catch (e) { errors.push(`${table}: ${e.message || e}`); }
+    }
+    onProgress?.(table);
+  }
+  return { ok: errors.length === 0, pushed, errors };
+}
+
+export const cloudReady = () => !!supabase;
 
 export async function flush() {
   if (!supabase || !isOnline() || state.syncing) return;

@@ -3,7 +3,7 @@ import { useApp } from '../../app/AppProvider.jsx';
 import { C, TABLES } from '../../lib/constants.js';
 import { Badge, Btn, Card, Field, Input, Modal, PageHeader, Select } from '../../ui/components.jsx';
 import { resetStore, dbMode } from '../../db/db.js';
-import { subscribeSync } from '../../db/sync.js';
+import { subscribeSync, pushAllLocal, pull, cloudReady } from '../../db/sync.js';
 import { exportBackup, importBackup } from '../../lib/backup.js';
 import { exportExcel, importExcel } from '../../lib/excel.js';
 import { dataHealth, mergeCustomers } from '../../lib/engine.js';
@@ -21,6 +21,19 @@ export default function Settings() {
   const [showHealth, setShowHealth] = useState(false);
   const [importReport, setImportReport] = useState(null);
   const [exportScope, setExportScope] = useState('all');
+  const [syncing, setSyncing] = useState(false);
+  const doSyncNow = async () => {
+    if (!cloudReady() || syncing) return;
+    setSyncing(true);
+    try {
+      const r = await pushAllLocal();
+      await pull(() => {});
+      await Promise.all(['variants','customers','suppliers','categories','products','invoices','invoiceItems','expenses','expenseGroups','securities','tradeLots','tradeSells','cashFlows','externalDebts'].map((tb) => refresh(TABLES[tb] || tb).catch(() => {})));
+      if (r.errors && r.errors.length) { console.warn('sync errors', r.errors); showToast(`⬆ ${r.pushed} · ⚠ ${r.errors[0]}`, 'error'); }
+      else showToast(`☁️ ${r.pushed} ✓`, 'success');
+    } catch (e) { showToast(`${e.message || e}`, 'error'); }
+    finally { setSyncing(false); }
+  };
   const saveUser = async () => {
     const u = userEdit;
     if (!u.email?.trim() || !u.name?.trim()) return;
@@ -184,6 +197,16 @@ export default function Settings() {
           {t('autoBackup')}
         </label>
         {od.lastBackupAt && <div style={{ fontSize: 11, color: C.textMuted, marginTop: 6 }}>{t('lastBackup')}: {new Date(od.lastBackupAt).toLocaleString()}</div>}
+      </Card>
+
+      <Card style={{ marginTop: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 4 }}>☁️ {t('cloudSync')}</div>
+        <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 10 }}>
+          {cloudReady() ? t('cloudOn') : t('cloudOff')}
+        </div>
+        <Btn onClick={doSyncNow} variant={cloudReady() ? 'primary' : 'light'} disabled={!cloudReady() || syncing}>
+          {syncing ? `⏳ ${t('syncing')}` : `⟳ ${t('syncNow')}`}
+        </Btn>
       </Card>
 
       <Card style={{ marginTop: 16 }}>
