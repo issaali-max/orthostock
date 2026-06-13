@@ -201,12 +201,36 @@ export function dataHealth(data) {
     if (i.customerId && !c) orphan.push({ invoiceNumber: i.invoiceNumber, customerId: i.customerId, remaining: round2(rem) });
     else if (c && c.isActive === false && rem > 0) hiddenDebt.push({ invoiceNumber: i.invoiceNumber, name: c.name, remaining: round2(rem) });
   });
-  const seen = {}; const dups = [];
+  // Duplicate groups (same normalized name) with each member's id + invoice
+  // count, so the owner can safely MERGE them instead of guessing.
+  const invByCust = {};
+  (data[TABLES.invoices] || []).forEach((i) => { if (i.customerId) invByCust[i.customerId] = (invByCust[i.customerId] || 0) + 1; });
+  const groups = {};
   customers.filter((c) => c.isActive !== false).forEach((c) => {
     const k = (c.name || '').trim().toLowerCase(); if (!k) return;
-    if (seen[k]) dups.push(c.name); else seen[k] = true;
+    (groups[k] = groups[k] || []).push({ id: c.id, name: c.name, phone: c.phone || '', invoices: invByCust[c.id] || 0 });
   });
-  return { orphan, hiddenDebt, dupCustomers: [...new Set(dups)], totalDebt: round2(totalDebt) };
+  const dupGroups = Object.values(groups).filter((g) => g.length > 1)
+    .map((g) => g.slice().sort((a, b) => b.invoices - a.invoices)); // primary (most invoices) first
+  const dups = dupGroups.map((g) => g[0].name);
+  return { orphan, hiddenDebt, dupCustomers: [...new Set(dups)], dupGroups, totalDebt: round2(totalDebt) };
+}
+
+// Merge duplicate customers: repoint every invoice / special price from the
+// dropped ids onto the kept id, then SOFT-DELETE the duplicates (reversible —
+// nothing is hard-deleted, history is preserved on the surviving record).
+export async function mergeCustomers(app, keepId, dropIds) {
+  const ids = dropIds.filter((id) => id && id !== keepId);
+  if (!ids.length) return { moved: 0 };
+  let moved = 0;
+  for (const inv of (app.data[TABLES.invoices] || []).filter((i) => ids.includes(i.customerId))) {
+    await db.update(TABLES.invoices, inv.id, { customerId: keepId }); moved += 1;
+  }
+  for (const cp of (app.data[TABLES.customerPrices] || []).filter((c) => ids.includes(c.customerId))) {
+    await db.update(TABLES.customerPrices, cp.id, { customerId: keepId });
+  }
+  for (const id of ids) await db.update(TABLES.customers, id, { isActive: false });
+  return { moved, merged: ids.length };
 }
 
 export function customerStats(invoices, items, customerId) {

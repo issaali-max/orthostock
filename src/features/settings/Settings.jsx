@@ -6,7 +6,7 @@ import { resetStore, dbMode } from '../../db/db.js';
 import { subscribeSync } from '../../db/sync.js';
 import { exportBackup, importBackup } from '../../lib/backup.js';
 import { exportExcel, importExcel } from '../../lib/excel.js';
-import { dataHealth } from '../../lib/engine.js';
+import { dataHealth, mergeCustomers } from '../../lib/engine.js';
 import { connectOneDrive, disconnectOneDrive, getOneDriveAccount, backupToOneDrive } from '../../lib/onedrive.js';
 import { num, fmtCur } from '../../lib/money.js';
 
@@ -290,8 +290,25 @@ export default function Settings() {
                     <div style={{ display: 'grid', gap: 4 }}>{h.orphan.map((o, i) => <Row key={i} tone="bad">{o.invoiceNumber} · {cur(o.remaining)}</Row>)}</div></div>)}
                   {h.hiddenDebt.length > 0 && (<div><div style={{ fontSize: 12, fontWeight: 800, color: C.warning, marginBottom: 4 }}>⚠ {t('hiddenDebt')} ({h.hiddenDebt.length})</div>
                     <div style={{ display: 'grid', gap: 4 }}>{h.hiddenDebt.map((o, i) => <Row key={i}>{o.name} · {o.invoiceNumber} · {cur(o.remaining)}</Row>)}</div></div>)}
-                  {h.dupCustomers.length > 0 && (<div><div style={{ fontSize: 12, fontWeight: 800, color: C.warning, marginBottom: 4 }}>⚠ {t('possibleDuplicates')} ({h.dupCustomers.length})</div>
-                    <div style={{ display: 'grid', gap: 4 }}>{h.dupCustomers.map((n, i) => <Row key={i}>{n}</Row>)}</div></div>)}
+                  {h.dupGroups && h.dupGroups.length > 0 && (<div><div style={{ fontSize: 12, fontWeight: 800, color: C.warning, marginBottom: 4 }}>⚠ {t('possibleDuplicates')} ({h.dupGroups.length})</div>
+                    <div style={{ display: 'grid', gap: 8 }}>{h.dupGroups.map((g, i) => (
+                      <div key={i} style={{ background: C.surfaceAlt, borderRadius: 10, padding: '8px 10px' }}>
+                        <div style={{ fontWeight: 800, fontSize: 13, color: C.text, marginBottom: 4 }}>{g[0].name}</div>
+                        {g.map((m, j) => (
+                          <div key={m.id} style={{ fontSize: 11, color: C.textMid, display: 'flex', justifyContent: 'space-between' }}>
+                            <span>{j === 0 ? '✅ ' : '• '}{m.phone || '—'}</span>
+                            <span style={{ color: C.textMuted }}>{m.invoices} {t('invoices')}</span>
+                          </div>
+                        ))}
+                        <Btn size="sm" variant="light" style={{ marginTop: 6 }} onClick={async () => {
+                          if (!window.confirm(t('mergeConfirm'))) return;
+                          const r = await mergeCustomers({ data }, g[0].id, g.slice(1).map((x) => x.id));
+                          await Promise.all([refresh(TABLES.customers), refresh(TABLES.invoices)]);
+                          showToast(`✓ ${r.merged} → 1 · ${r.moved} ${t('invoices')}`, 'success');
+                          setShowHealth(false);
+                        }}>🔗 {t('mergeInto')} ✅ {g[0].phone || g[0].name}</Btn>
+                      </div>
+                    ))}</div></div>)}
                 </>
               )}
             </div>
