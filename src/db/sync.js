@@ -15,8 +15,13 @@ import { createClient } from '@supabase/supabase-js';
 import { TABLES } from '../lib/constants.js';
 import { idbBulkPut, outboxAll, outboxDelete, metaSet } from './local.js';
 
-const url = import.meta.env?.VITE_SUPABASE_URL;
-const key = import.meta.env?.VITE_SUPABASE_ANON_KEY;
+// Supabase connection. Reads Vercel env vars first; falls back to the project's
+// own values so sync works out-of-the-box without any Vercel configuration.
+// (The anon key is public by design — it ships in the browser bundle either way.)
+const FALLBACK_URL = 'https://eucqxzqhmubbvudmkkjz.supabase.co';
+const FALLBACK_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV1Y3F4enFobXViYnZ1ZG1ra2p6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NjM0MTUsImV4cCI6MjA5NjEzOTQxNX0.YDy85fvQT-wB_FrMZZ7Hj4RhN4H4urqJgyPE0XC3Hk4';
+const url = import.meta.env?.VITE_SUPABASE_URL || FALLBACK_URL;
+const key = import.meta.env?.VITE_SUPABASE_ANON_KEY || FALLBACK_KEY;
 export const cloudConfigured = !!(url && key);
 const supabase = cloudConfigured ? createClient(url, key) : null;
 
