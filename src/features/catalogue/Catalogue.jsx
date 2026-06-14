@@ -55,6 +55,13 @@ export default function Catalogue() {
     if (!edit.rec.id || !window.confirm(t('deactivate') + '?')) return;
     await deleteRow(edit.table, edit.rec.id); setEdit(null);
   };
+  // delete a product/group from its card; warn if it still holds materials
+  const delProduct = async (p, count) => {
+    const msg = count > 0 ? `${t('groupHasMaterials')} (${count})` : t('deactivate');
+    if (!window.confirm(msg + '?')) return;
+    for (const v of (variantsByProduct[p.id] || [])) await deleteRow(TABLES.variants, v.id);
+    await deleteRow(TABLES.products, p.id);
+  };
 
   const EditToggle = (
     <Btn size="sm" variant={editMode ? 'success' : 'outline'} onClick={() => setEditMode((v) => !v)}>
@@ -94,11 +101,14 @@ export default function Catalogue() {
       const sell = num(v.sellingPriceDefault); const avg = num(v.purchasePriceAvg);
       const margin = sell > 0 ? Math.round(((sell - avg) / sell) * 100) : 0;
       const act = lastByVar[v.id] || {};
+      const prod = products.find((p) => p.id === v.productId);
+      const pimg = prod?.image_url;
       return (
         <div key={v.id} onClick={editMode ? () => openEdit(TABLES.variants, 'variant', { ...v, attributes: { ...(v.attributes || {}) } }) : undefined}
-          style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: `1px solid ${C.border}`, borderRadius: RADIUS, boxShadow: SHADOW, padding: '10px 14px', cursor: editMode ? 'pointer' : 'default' }}>
+          style={{ display: 'flex', alignItems: 'center', gap: 12, background: '#fff', border: `1px solid ${C.border}`, borderRadius: RADIUS, boxShadow: SHADOW, padding: '12px 14px', cursor: editMode ? 'pointer' : 'default' }}>
+          <div style={{ width: 52, height: 52, borderRadius: 12, flexShrink: 0, overflow: 'hidden', background: pimg ? `center/cover no-repeat url(${pimg})` : C.primary + '12', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>{!pimg && (prod?.icon || '📦')}</div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontWeight: 700, color: C.text, fontSize: 13 }}>{editMode && '✎ '}{v.nameEn || v.sku}</div>
+            <div style={{ fontWeight: 700, color: C.text, fontSize: 15 }}>{editMode && '✎ '}{v.nameEn || v.sku}</div>
             {attrs.length > 0 && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, margin: '4px 0 2px' }}>
                 {attrs.map(([k, val]) => <span key={k} style={{ fontSize: 10, fontWeight: 700, color: C.primaryMid, background: C.primary + '12', borderRadius: 6, padding: '2px 7px' }}>{val}</span>)}
@@ -110,11 +120,11 @@ export default function Catalogue() {
             </div>
           </div>
           <div style={{ textAlign: 'center', minWidth: 56 }}>
-            <div style={{ fontSize: 17, fontWeight: 800, color: stockColor }}>{fmtNum(stock)}</div>
-            <div style={{ fontSize: 9, color: C.textMuted }}>{t('stock')}</div>
+            <span style={{ display: 'inline-block', minWidth: 40, padding: '3px 10px', borderRadius: 999, background: stockColor + '18', color: stockColor, fontSize: 17, fontWeight: 800 }}>{fmtNum(stock)}</span>
+            <div style={{ fontSize: 9, color: C.textMuted, marginTop: 2 }}>{t('stock')}</div>
           </div>
           <div style={{ minWidth: 92, textAlign: 'end' }}>
-            <div style={{ fontWeight: 700, color: C.primary, fontSize: 13 }}>{fmtCur(sell, displayCurrency, usdRate)}</div>
+            <div style={{ fontWeight: 800, color: C.primary, fontSize: 14 }}>{fmtCur(sell, displayCurrency, usdRate)}</div>
             <div style={{ fontSize: 10, color: C.textMuted }}>{t('avgCost')} {fmtCur(avg, displayCurrency, usdRate)}</div>
             <div style={{ fontSize: 10, fontWeight: 700, color: margin >= 0 ? C.success : C.danger }}>{t('margin')} {margin}%</div>
           </div>
@@ -246,27 +256,43 @@ export default function Catalogue() {
       {editMode && <Btn size="sm" style={{ marginBottom: 10 }} onClick={() => openEdit(TABLES.products, 'product', blankProduct(catId))}>＋ {t('products')}</Btn>}
 
       {shownProducts.length === 0 ? <EmptyState icon="📦" text={t('noProducts')} /> : (
-        <div style={{ display: 'grid', gap: 14 }}>
+        <div style={{ display: 'grid', gap: 16 }}>
           {shownProducts.map((p) => {
             const vs = (variantsByProduct[p.id] || []).filter(matchVariantArch);
+            const img = p.image_url;
+            const totalStock = vs.reduce((s, v) => s + num(v.stockQty), 0);
+            const editProd = () => openEdit(TABLES.products, 'product', { ...blankProduct(catId), ...p });
+            const headBtns = editMode && (
+              <div style={{ position: 'absolute', top: 8, insetInlineEnd: 8, display: 'flex', gap: 6, zIndex: 2 }}>
+                <button onClick={(e) => { e.stopPropagation(); editProd(); }} style={imgBtn}>✎</button>
+                <button onClick={(e) => { e.stopPropagation(); openEdit(TABLES.variants, 'variant', blankVariant(p.id)); }} style={imgBtn}>＋</button>
+                <button onClick={(e) => { e.stopPropagation(); delProduct(p, vs.length); }} style={{ ...imgBtn, color: C.danger }}>🗑</button>
+              </div>
+            );
             return (
               <div key={p.id} style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: RADIUS, boxShadow: SHADOW, overflow: 'hidden' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 14, borderBottom: vs.length ? `1px solid ${C.surfaceAlt}` : 'none' }}>
-                  <div style={{ width: 50, height: 50, borderRadius: 12, flexShrink: 0, overflow: 'hidden',
-                    background: p.image_url ? `center/cover no-repeat url(${p.image_url})` : (cat?.color || C.primary) + '1f',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26 }}>{!p.image_url && (p.icon || cat?.icon)}</div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 800, color: C.text }}>{p.nameEn}</div>
-                    <div style={{ fontSize: 12, color: C.textMuted }}>{[p.brand, `${vs.length} ${t('variations')}`].filter(Boolean).join(' · ')}</div>
-                  </div>
-                  {editMode && (
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <Btn size="sm" variant="light" onClick={() => openEdit(TABLES.products, 'product', { ...blankProduct(catId), ...p })}>✎</Btn>
-                      <Btn size="sm" onClick={() => openEdit(TABLES.variants, 'variant', blankVariant(p.id))}>＋</Btn>
+                {img ? (
+                  // image-rich: large hero photo with the name overlaid for a clean, professional look
+                  <div onClick={editMode ? editProd : undefined} style={{ position: 'relative', height: 170, background: `center/cover no-repeat url(${img})`, cursor: editMode ? 'pointer' : 'default' }}>
+                    {headBtns}
+                    <div style={{ position: 'absolute', insetInlineStart: 0, insetInlineEnd: 0, bottom: 0, padding: '26px 16px 12px', background: 'linear-gradient(to top, rgba(0,0,0,.72), rgba(0,0,0,0))' }}>
+                      <div style={{ fontSize: 19, fontWeight: 800, color: '#fff', lineHeight: 1.25 }}>{p.nameEn}</div>
+                      <div style={{ fontSize: 12, color: 'rgba(255,255,255,.85)', marginTop: 2 }}>{[p.brand, `${vs.length} ${t('variations')}`, `${t('stock')} ${fmtNum(totalStock)}`].filter(Boolean).join(' · ')}</div>
                     </div>
-                  )}
-                </div>
-                {/* Materials listed vertically: attributes as chips, stock emphasised */}
+                  </div>
+                ) : (
+                  // no image yet: big icon tile beside a large name (encourages adding a photo)
+                  <div onClick={editMode ? editProd : undefined} style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 14, padding: 16, borderBottom: vs.length ? `1px solid ${C.surfaceAlt}` : 'none', cursor: editMode ? 'pointer' : 'default' }}>
+                    {headBtns}
+                    <div style={{ width: 72, height: 72, borderRadius: 16, flexShrink: 0, background: `linear-gradient(135deg, ${(cat?.color || C.primary)}26, ${(cat?.color || C.primary)}0d)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 38 }}>{p.icon || cat?.icon || '📦'}</div>
+                    <div style={{ flex: 1, minWidth: 0, paddingInlineEnd: editMode ? 88 : 0 }}>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: C.text, lineHeight: 1.25 }}>{p.nameEn}</div>
+                      <div style={{ fontSize: 12, color: C.textMuted, marginTop: 3 }}>{[p.brand, `${vs.length} ${t('variations')}`].filter(Boolean).join(' · ')}</div>
+                      {editMode && !img && <div style={{ fontSize: 11, color: C.primary, marginTop: 4, fontWeight: 700 }}>＋ {t('addPhoto')}</div>}
+                    </div>
+                  </div>
+                )}
+                {/* Materials (sizes) — tap any row in edit mode to change stock/price */}
                 <div>
                   {vs.map((v, i) => {
                     const stock = num(v.stockQty);
@@ -276,29 +302,34 @@ export default function Catalogue() {
                     const attrs = Object.entries(v.attributes || {}).filter(([, val]) => val);
                     return (
                       <div key={v.id} onClick={editMode ? () => openEdit(TABLES.variants, 'variant', { ...v, attributes: { ...(v.attributes || {}) } }) : undefined}
-                        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderTop: i ? `1px solid ${C.surfaceAlt}` : 'none', cursor: editMode ? 'pointer' : 'default' }}>
+                        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', borderTop: (i || img) ? `1px solid ${C.surfaceAlt}` : 'none', cursor: editMode ? 'pointer' : 'default' }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontWeight: 700, color: C.text, fontSize: 13 }}>{editMode && '✎ '}{v.nameEn || variantLabel(v)}</div>
+                          <div style={{ fontWeight: 700, color: C.text, fontSize: 14 }}>{editMode && '✎ '}{v.nameEn || variantLabel(v)}</div>
                           {attrs.length > 0 && (
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, margin: '4px 0 2px' }}>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, margin: '5px 0 2px' }}>
                               {attrs.map(([k, val]) => (
-                                <span key={k} style={{ fontSize: 10, fontWeight: 700, color: C.primaryMid, background: C.primary + '12', borderRadius: 6, padding: '2px 7px' }}>{val}</span>
+                                <span key={k} style={{ fontSize: 11, fontWeight: 700, color: C.primaryMid, background: C.primary + '12', borderRadius: 6, padding: '2px 8px' }}>{val}</span>
                               ))}
                             </div>
                           )}
                           <div style={{ fontSize: 10, color: C.textMuted }}>{v.sku}</div>
                         </div>
-                        <div style={{ textAlign: 'center', minWidth: 64 }}>
-                          <div style={{ fontSize: 17, fontWeight: 800, color: stockColor }}>{fmtNum(stock)}</div>
-                          <div style={{ fontSize: 9, color: C.textMuted }}>{t('stock')}{neg ? ' ⚠' : low ? ' !' : ''}</div>
+                        <div style={{ textAlign: 'center', minWidth: 66 }}>
+                          <span style={{ display: 'inline-block', minWidth: 40, padding: '3px 10px', borderRadius: 999, background: stockColor + '18', color: stockColor, fontSize: 17, fontWeight: 800 }}>{fmtNum(stock)}</span>
+                          <div style={{ fontSize: 9, color: C.textMuted, marginTop: 2 }}>{t('stock')}{neg ? ' ⚠' : low ? ' !' : ''}</div>
                         </div>
-                        <div style={{ minWidth: 86, textAlign: 'end' }}>
-                          <div style={{ fontWeight: 700, color: C.primary, fontSize: 13 }}>{fmtCur(v.sellingPriceDefault, displayCurrency, usdRate)}</div>
+                        <div style={{ minWidth: 88, textAlign: 'end' }}>
+                          <div style={{ fontWeight: 800, color: C.primary, fontSize: 14 }}>{fmtCur(v.sellingPriceDefault, displayCurrency, usdRate)}</div>
                           <div style={{ fontSize: 10, color: C.textMuted }}>{t('avgCost')} {fmtCur(v.purchasePriceAvg, displayCurrency, usdRate)}</div>
                         </div>
                       </div>
                     );
                   })}
+                  {vs.length === 0 && editMode && (
+                    <div style={{ padding: '10px 16px', borderTop: `1px solid ${C.surfaceAlt}` }}>
+                      <Btn size="sm" onClick={() => openEdit(TABLES.variants, 'variant', blankVariant(p.id))}>＋ {t('materials')}</Btn>
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -310,6 +341,7 @@ export default function Catalogue() {
   );
 }
 
+const imgBtn = { border: 'none', background: 'rgba(255,255,255,.92)', color: C.primary, borderRadius: 8, width: 30, height: 30, cursor: 'pointer', fontWeight: 800, fontSize: 14, boxShadow: '0 1px 3px rgba(0,0,0,.2)' };
 const pencilBtn = { position: 'absolute', top: 6, insetInlineEnd: 6, border: 'none', background: C.surfaceDark, color: C.primary, borderRadius: 8, width: 26, height: 26, cursor: 'pointer', fontWeight: 700 };
 
 function EditModal({ edit, setEdit, app, t, products, categories, onSave, onDelete }) {
