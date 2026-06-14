@@ -94,6 +94,28 @@ export async function saveInvoiceAtomic(app, { editingId, invoiceData, lines, in
   return invId;
 }
 
+// Permanently delete an invoice: restore the sold stock, then remove the
+// invoice, its line items and its stock movements — atomically.
+export async function deleteInvoiceAtomic(app, invoiceId) {
+  const [variants, allItems, allMoves] = await Promise.all([
+    db.getAll(TABLES.variants), db.getAll(TABLES.invoiceItems), db.getAll(TABLES.stockMovements),
+  ]);
+  const vById = new Map(variants.map((v) => [v.id, v]));
+  const items = allItems.filter((x) => x.invoiceId === invoiceId);
+  const moves = allMoves.filter((x) => x.refType === 'invoice' && x.refId === invoiceId);
+  const stock = new Map();
+  const ensure = (id) => { if (!stock.has(id)) stock.set(id, num(vById.get(id)?.stockQty)); return stock.get(id); };
+  const specs = [];
+  // give back the sold quantities
+  for (const it of items) { if (vById.has(it.variantId)) stock.set(it.variantId, round2(ensure(it.variantId) + num(it.qty))); specs.push({ op: 'remove', table: TABLES.invoiceItems, id: it.id }); }
+  for (const m of moves) specs.push({ op: 'remove', table: TABLES.stockMovements, id: m.id });
+  for (const [vid, finalQty] of stock) specs.push({ op: 'update', table: TABLES.variants, id: vid, patch: { stockQty: round2(finalQty) } });
+  specs.push({ op: 'remove', table: TABLES.invoices, id: invoiceId });
+  await db.atomicMutations(specs);
+  await Promise.all([app.refresh(TABLES.invoices), app.refresh(TABLES.invoiceItems), app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements)]);
+  return true;
+}
+
 // Commit a SALE: invoice + items + stock-out movements.
 // opts.invoiceDiscount = amount discounted off the items subtotal
 // (distributed proportionally across lines so lineProfit stays honest).
@@ -284,7 +306,7 @@ export function invoiceTotals(lines, settings) {
 // severity (3 = critical, 2 = warning, 1 = info).
 // ─────────────────────────────────────────────────────────────
 function variantLabel(v) {
-  return Object.values(v.attributes || {}).filter(Boolean).join(' · ') || v.nameEn || v.sku;
+  return v.nameEn || Object.values(v.attributes || {}).filter(Boolean).join(' · ') || v.sku;
 }
 
 export function buildAlerts(data, opts = {}) {

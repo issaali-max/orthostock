@@ -3,7 +3,7 @@ import { useApp } from '../../app/AppProvider.jsx';
 import { C, TABLES } from '../../lib/constants.js';
 import { fmtCur, num } from '../../lib/money.js';
 import { fmtDate } from '../../lib/dates.js';
-import { recordInvoicePayment } from '../../lib/engine.js';
+import { recordInvoicePayment, deleteInvoiceAtomic } from '../../lib/engine.js';
 import { Badge, Btn, Card, EmptyState, PageHeader, PaymentModal, SearchBar } from '../../ui/components.jsx';
 import InvoiceCreate from './InvoiceCreate.jsx';
 
@@ -50,6 +50,13 @@ export default function Invoices() {
                     <Btn size="sm" variant="light" onClick={() => setPayFor(inv)}>💵 {t('recordPayment')}</Btn>
                   </div>
                 )}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: `1px solid ${C.surfaceAlt}`, paddingTop: 8 }}>
+                  <button onClick={async () => {
+                    if (!window.confirm(`${t('deleteInvoiceConfirm')}\n${inv.invoiceNumber} · ${cur(inv.total)}`)) return;
+                    await deleteInvoiceAtomic(app, inv.id);
+                    app.showToast(t('invoiceDeleted'), 'success');
+                  }} style={{ border: 'none', background: 'none', color: C.danger, cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>🗑 {t('deleteInvoice')}</button>
+                </div>
               </Card>
             );
           })}
