@@ -40,16 +40,30 @@ export default function Catalogue() {
   }, [variants]);
 
   const openEdit = (table, type, rec) => setEdit({ table, type, rec });
+  // open a material for edit with its category + brand pre-filled (they live on
+  // the hidden product, so without this the form's Category/Brand look empty)
+  const editVariant = (v) => {
+    const prod = products.find((pp) => pp.id === v.productId);
+    openEdit(TABLES.variants, 'variant', { ...v, attributes: { ...(v.attributes || {}) }, categoryId: prod?.categoryId || '', brand: prod?.brand || '', groupId: '', groupName: '' });
+  };
   const saveEdit = async () => {
     const fn = edit.table === TABLES.categories ? saveCategory : edit.table === TABLES.products ? saveProduct : saveVariant;
     const isVariant = edit.table === TABLES.variants && edit.rec.id;
     const before = isVariant ? num((variants.find((v) => v.id === edit.rec.id) || {}).stockQty) : null;
+    // friendly validation so saving never fails silently
+    if (edit.table === TABLES.variants) {
+      if (!edit.rec.sku?.trim()) return app.showToast(t('skuRequired'), 'error');
+      if (!edit.rec.categoryId && !edit.rec.productId) return app.showToast(t('categoryRequired'), 'error');
+    }
+    if (edit.table === TABLES.products && !edit.rec.nameEn?.trim()) return app.showToast(t('nameRequired'), 'error');
+    if (edit.table === TABLES.categories && !edit.rec.nameAr?.trim() && !edit.rec.nameEn?.trim()) return app.showToast(t('nameRequired'), 'error');
     try {
       if (await fn(app, edit.rec)) {
         if (isVariant) { const after = num(edit.rec.stockQty); if (after !== before) await logStockMovement(app, edit.rec.id, before, after, 'adjustment'); }
+        app.showToast(t('saved'), 'success');
         setEdit(null);
-      }
-    } catch { /* toast shown */ }
+      } else app.showToast(t('checkFields'), 'error');
+    } catch { app.showToast(t('checkFields'), 'error'); }
   };
   const deleteEdit = async () => {
     if (!edit.rec.id || !window.confirm(t('deactivate') + '?')) return;
@@ -104,7 +118,7 @@ export default function Catalogue() {
       const prod = products.find((p) => p.id === v.productId);
       const pimg = prod?.image_url;
       return (
-        <div key={v.id} onClick={editMode ? () => openEdit(TABLES.variants, 'variant', { ...v, attributes: { ...(v.attributes || {}) } }) : undefined}
+        <div key={v.id} onClick={editMode ? () => editVariant(v) : undefined}
           style={{ display: 'flex', alignItems: 'center', gap: 12, background: '#fff', border: `1px solid ${C.border}`, borderRadius: RADIUS, boxShadow: SHADOW, padding: '12px 14px', cursor: editMode ? 'pointer' : 'default' }}>
           <div style={{ width: 52, height: 52, borderRadius: 12, flexShrink: 0, overflow: 'hidden', background: pimg ? `center/cover no-repeat url(${pimg})` : C.primary + '12', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>{!pimg && (prod?.icon || '📦')}</div>
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -222,6 +236,7 @@ export default function Catalogue() {
   const arches = [...new Set(allCatVariants.map(archValueOf).filter(Boolean))].sort();
   const matchVariantArch = (v) => !archFilter || archValueOf(v) === archFilter;
   const shownProducts = catProducts
+    .filter((p) => editMode || (variantsByProduct[p.id] || []).some(matchVariantArch))
     .filter((p) => !brandFilter || (p.brand || '') === brandFilter)
     .filter((p) => !archFilter || (variantsByProduct[p.id] || []).some(matchVariantArch));
 
@@ -229,8 +244,8 @@ export default function Catalogue() {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
         <button onClick={() => { setCatId(null); setQ(''); setBrandFilter(''); setArchFilter(''); }} style={{ border: `1px solid ${C.border}`, background: '#fff', borderRadius: 10, padding: '6px 12px', fontWeight: 700, color: C.primary, cursor: 'pointer' }}>← {t('catalogue')}</button>
-        <h2 style={{ fontSize: 16, fontWeight: 800, color: C.text, margin: 0, flex: 1 }}>{cat ? catLabel(cat) : ''}</h2>
-        {editMode && cat && <Btn size="sm" variant="light" onClick={() => openEdit(TABLES.categories, 'category', JSON.parse(JSON.stringify(cat)))}>✎</Btn>}
+        <h2 style={{ fontSize: 18, fontWeight: 800, color: C.text, margin: 0, flex: 1 }}>{cat ? catLabel(cat) : ''}</h2>
+        {editMode && cat && <Btn size="sm" variant="light" onClick={() => openEdit(TABLES.categories, 'category', JSON.parse(JSON.stringify(cat)))}>✎ {t('categoryName')}</Btn>}
         {EditToggle}
       </div>
       <SearchBar value={q} onChange={setQ} placeholder={t('search')} />
@@ -253,7 +268,7 @@ export default function Catalogue() {
           )}
         </div>
       )}
-      {editMode && <Btn size="sm" style={{ marginBottom: 10 }} onClick={() => openEdit(TABLES.products, 'product', blankProduct(catId))}>＋ {t('products')}</Btn>}
+      {editMode && <Btn size="sm" style={{ marginBottom: 10 }} onClick={() => openEdit(TABLES.products, 'product', blankProduct(catId))}>＋ {t('addGroup')}</Btn>}
 
       {shownProducts.length === 0 ? <EmptyState icon="📦" text={t('noProducts')} /> : (
         <div style={{ display: 'grid', gap: 16 }}>
@@ -301,7 +316,7 @@ export default function Catalogue() {
                     const stockColor = neg ? C.danger : low ? C.warning : C.success;
                     const attrs = Object.entries(v.attributes || {}).filter(([, val]) => val);
                     return (
-                      <div key={v.id} onClick={editMode ? () => openEdit(TABLES.variants, 'variant', { ...v, attributes: { ...(v.attributes || {}) } }) : undefined}
+                      <div key={v.id} onClick={editMode ? () => editVariant(v) : undefined}
                         style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', borderTop: (i || img) ? `1px solid ${C.surfaceAlt}` : 'none', cursor: editMode ? 'pointer' : 'default' }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontWeight: 700, color: C.text, fontSize: 14 }}>{editMode && '✎ '}{v.nameEn || variantLabel(v)}</div>
