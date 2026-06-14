@@ -1,13 +1,13 @@
 import { useMemo, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 import { useApp } from '../../app/AppProvider.jsx';
-import { C, WEEKDAYS, emirateOptions, emirateLabel, TABLES } from '../../lib/constants.js';
+import { C, WEEKDAYS, emirateOptions, emirateLabel, citiesOfEmirate, allCities, TABLES } from '../../lib/constants.js';
 import { fmtCur, num, round2 } from '../../lib/money.js';
 import { fmtDate } from '../../lib/dates.js';
 import { customerStats, clinicRating, recordInvoicePayment } from '../../lib/engine.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, PaymentModal, SearchBar, Select, Textarea } from '../../ui/components.jsx';
 
-const blank = () => ({ name: '', type: 'doctor', phone: '', emirate: '', specialty: '', workingDays: WEEKDAYS.map((d) => d.key), notes: '', isActive: true });
+const blank = () => ({ name: '', type: 'doctor', phone: '', emirate: '', city: '', specialty: '', workingDays: WEEKDAYS.map((d) => d.key), notes: '', isActive: true });
 
 export default function Customers() {
   const app = useApp();
@@ -17,6 +17,7 @@ export default function Customers() {
   const [viewing, setViewing] = useState(null);
   const [sortBy, setSortBy] = useState('name');     // name | revenue | profit | margin | debt
   const [emirateFilter, setEmirateFilter] = useState('');
+  const [cityFilter, setCityFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('');  // '' | doctor | center
 
   const invoices = data[TABLES.invoices] || [];
@@ -27,6 +28,7 @@ export default function Customers() {
     const s = q.trim().toLowerCase();
     if (s) rows = rows.filter((r) => `${r.name} ${r.phone} ${r.emirate}`.toLowerCase().includes(s));
     if (emirateFilter) rows = rows.filter((r) => r.emirate === emirateFilter);
+    if (cityFilter) rows = rows.filter((r) => (r.city || '').trim() === cityFilter);
     if (typeFilter) rows = rows.filter((r) => r.type === typeFilter);
     const withStats = rows.map((c) => {
       const st = customerStats(invoices, items, c.id);
@@ -42,7 +44,7 @@ export default function Customers() {
       city: (a, b) => (a.emirate || '').localeCompare(b.emirate || '') || (a.name || '').localeCompare(b.name || ''),
     }[sortBy] || (() => 0);
     return withStats.sort(cmp);
-  }, [data, q, emirateFilter, typeFilter, sortBy, invoices, items]);
+  }, [data, q, emirateFilter, cityFilter, typeFilter, sortBy, invoices, items]);
 
   const save = async () => {
     const r = editing;
@@ -63,21 +65,20 @@ export default function Customers() {
       <PageHeader title={t('customers')} action={<Btn onClick={() => setEditing(blank())}>＋ {t('add')}</Btn>} />
       <SearchBar value={q} onChange={setQ} placeholder={t('search')} />
 
-      {/* Sort + filters */}
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '8px 0' }}>
-        {[['name', t('byName')], ['revenue', t('byRevenue')], ['profit', t('byProfit')], ['margin', t('byMargin')], ['debt', t('byDebt')], ['city', t('byCity')]].map(([k, label]) => (
-          <button key={k} onClick={() => setSortBy(k)} style={{
-            padding: '5px 11px', borderRadius: 999, fontSize: 12, fontWeight: 700, cursor: 'pointer',
-            background: sortBy === k ? C.primary : '#fff', color: sortBy === k ? '#fff' : C.textMid,
-            border: `1px solid ${sortBy === k ? C.primary : C.border}`,
-          }}>{label}</button>
-        ))}
-      </div>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-        <Select value={emirateFilter} onChange={setEmirateFilter} placeholder={t('allEmirates')}
-          options={[{ value: '', label: t('allEmirates') }, ...emirateOptions(lang)]} />
-        <Select value={typeFilter} onChange={setTypeFilter} placeholder={t('allTypes')}
-          options={[{ value: '', label: t('allTypes') }, { value: 'doctor', label: t('doctor') }, { value: 'center', label: t('center') }]} />
+      {/* Emirate -> City filters (city list follows the chosen emirate) */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+        <div style={{ flex: '1 1 45%' }}>
+          <Select value={emirateFilter} onChange={(v) => { setEmirateFilter(v); setCityFilter(''); }} placeholder={t('allEmirates')}
+            options={[{ value: '', label: t('allEmirates') }, ...emirateOptions(lang)]} />
+        </div>
+        <div style={{ flex: '1 1 45%' }}>
+          <Select value={cityFilter} onChange={setCityFilter} placeholder={t('allCities')}
+            options={[{ value: '', label: t('allCities') }, ...(emirateFilter ? citiesOfEmirate(emirateFilter) : allCities()).map((c) => ({ value: c, label: c }))]} />
+        </div>
+        <div style={{ flex: '1 1 45%' }}>
+          <Select value={typeFilter} onChange={setTypeFilter} placeholder={t('allTypes')}
+            options={[{ value: '', label: t('allTypes') }, { value: 'doctor', label: t('doctor') }, { value: 'center', label: t('center') }]} />
+        </div>
       </div>
 
       {list.length === 0 ? <EmptyState icon="🧑‍⚕️" text={q ? t('searchEmpty') : t('noData')} /> : (
@@ -116,7 +117,11 @@ export default function Customers() {
               <Field label={t('phone')}><Input value={editing.phone} onChange={(v) => setEditing((r) => ({ ...r, phone: v }))} /></Field>
               <Field label={t('specialty')}><Input value={editing.specialty} onChange={(v) => setEditing((r) => ({ ...r, specialty: v }))} /></Field>
             </div>
-            <Field label={t('emirate')}><Select value={editing.emirate} onChange={(v) => setEditing((r) => ({ ...r, emirate: v }))} placeholder="—" options={emirateOptions(lang)} /></Field>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Field label={t('emirate')}><Select value={editing.emirate} onChange={(v) => setEditing((r) => ({ ...r, emirate: v, city: '' }))} placeholder="—" options={emirateOptions(lang)} /></Field>
+              <Field label={t('city')}><Select value={editing.city} onChange={(v) => setEditing((r) => ({ ...r, city: v }))} placeholder={editing.emirate ? '—' : t('allEmirates')}
+                options={(editing.emirate ? citiesOfEmirate(editing.emirate) : allCities()).map((c) => ({ value: c, label: c }))} /></Field>
+            </div>
             <Field label={t('workingDays')}>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {WEEKDAYS.map((d) => {

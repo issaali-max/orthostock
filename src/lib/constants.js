@@ -38,6 +38,27 @@ export const EMIRATES = [
 export const emirateOptions = (lang = 'ar') => EMIRATES.map((e) => ({ value: e.en, label: lang === 'ar' ? e.ar : e.en }));
 export const emirateLabel = (value, lang = 'ar') => { const e = EMIRATES.find((x) => x.en === value); return e ? (lang === 'ar' ? e.ar : e.en) : (value || ''); };
 
+// Cities grouped UNDER each emirate (Arabic, fixed). Picking an emirate filters
+// the city list to just its cities. Keyed by the emirate's English value (stored).
+export const CITIES_BY_EMIRATE = {
+  'Abu Dhabi': ['أبو ظبي', 'العين', 'مدينة زايد', 'الرويس', 'مصفح', 'المرفأ', 'بني ياس', 'الشهامة', 'الشامخة', 'محمد بن زايد', 'خليفة', 'شخبوط', 'الفلاح', 'الريف', 'الوثبة', 'الباهية', 'اليحر', 'الفوعة', 'الرياض'],
+  'Dubai': ['دبي', 'ديرة', 'بر دبي', 'الكرامة', 'القوز', 'الراشدية', 'القصيص', 'المزهر', 'جبل علي', 'الورقاء', 'ند الشبا', 'المرقبات', 'الخوانيج', 'دبي لاند', 'الممزر'],
+  'Sharjah': ['الشارقة', 'خورفكان', 'كلباء', 'الذيد', 'دبا الحصن', 'المجاز', 'النهدة', 'القاسمية', 'مويلح', 'الرحمانية', 'أبو شغارة', 'الناصرية'],
+  'Ajman': ['عجمان', 'المويهات', 'الراشدية', 'النعيمية', 'الجرف', 'الزوراء', 'مصفوت', 'المنامة'],
+  'Umm Al Quwain': ['أم القيوين', 'الرولة', 'السلمة', 'فلج المعلا'],
+  'Ras Al Khaimah': ['رأس الخيمة', 'الجزيرة الحمراء', 'الرمس', 'خت', 'المعيريض', 'الدقداقة', 'النخيل', 'الحمرانية'],
+  'Fujairah': ['الفجيرة', 'دبا الفجيرة', 'مسافي', 'البثنة', 'القرية', 'الطويين', 'مربح'],
+};
+// Cities for a given emirate (English value). Falls back to all cities.
+export const citiesOfEmirate = (emirateEn) => CITIES_BY_EMIRATE[emirateEn] || [];
+export const allCities = () => Object.values(CITIES_BY_EMIRATE).flat();
+// Reverse lookup: which emirate (English) does a city belong to?
+export const emirateOfCity = (city) => {
+  const c = String(city || '').trim();
+  for (const [em, list] of Object.entries(CITIES_BY_EMIRATE)) if (list.includes(c)) return em;
+  return '';
+};
+
 // Common UAE cities for customer/supplier location fields.
 export const CITIES = [
   'Dubai', 'Abu Dhabi', 'Sharjah', 'Al Ain', 'Ajman', 'Ras Al Khaimah',

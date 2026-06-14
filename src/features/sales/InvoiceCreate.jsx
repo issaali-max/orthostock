@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useApp } from '../../app/AppProvider.jsx';
-import { C, TABLES } from '../../lib/constants.js';
+import { C, TABLES, emirateOptions, citiesOfEmirate, allCities } from '../../lib/constants.js';
 import { fmtCur, fmtNum, num, round2, safeDiv } from '../../lib/money.js';
 import { todayISO } from '../../lib/dates.js';
 import { nextDocNumber } from '../../lib/ids.js';
@@ -16,7 +16,7 @@ const variantLabel = (v) => {
 // `editing` (an invoice row) switches the modal into edit mode.
 export default function InvoiceCreate({ open, onClose, editing }) {
   const app = useApp();
-  const { t, data, settings, displayCurrency, usdRate, showToast } = app;
+  const { t, lang, data, settings, displayCurrency, usdRate, showToast } = app;
   const categories = (data[TABLES.categories] || []).filter((c) => c.isActive !== false);
   const products = (data[TABLES.products] || []).filter((p) => p.isActive !== false);
   const variants = (data[TABLES.variants] || []).filter((v) => v.isActive !== false);
@@ -28,13 +28,16 @@ export default function InvoiceCreate({ open, onClose, editing }) {
   const [vq, setVq] = useState(''); // quick material search across ALL categories
   const [prodId, setProdId] = useState('');
   const [customerId, setCustomerId] = useState('');
+  const [custEmirate, setCustEmirate] = useState('');
   const [custCity, setCustCity] = useState('');
-  const cityOptions = useMemo(() => [...new Set(customers.map((c) => (c.city || '').trim()).filter(Boolean))]
-    .sort((a, b) => a.localeCompare(b, 'ar')).map((c) => ({ value: c, label: c })), [customers]);
+  // city list follows the chosen emirate (fixed Arabic cities), else every city
+  const cityOptions = useMemo(() => (custEmirate ? citiesOfEmirate(custEmirate) : allCities())
+    .map((c) => ({ value: c, label: c })), [custEmirate]);
   const clinicOptions = useMemo(() => customers
+    .filter((c) => !custEmirate || c.emirate === custEmirate)
     .filter((c) => !custCity || (c.city || '').trim() === custCity)
     .slice().sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ar'))
-    .map((c) => ({ value: c.id, label: c.name })), [customers, custCity]);
+    .map((c) => ({ value: c.id, label: c.name })), [customers, custEmirate, custCity]);
   const [date, setDate] = useState(todayISO());
   const [paymentStatus, setStatus] = useState('unpaid');
   const [paidAmount, setPaid] = useState('');
@@ -50,14 +53,14 @@ export default function InvoiceCreate({ open, onClose, editing }) {
       // reconstruct the pre-distribution unit price from listPrice/discount when possible
       setLines(its.map((it) => ({ variantId: it.variantId, qty: num(it.qty), unitPrice: num(it.listPrice) > 0 ? round2(num(it.listPrice) - safeDiv(num(it.discountAmount), num(it.qty))) : num(it.unitPrice) })));
       setCustomerId(editing.customerId || '');
-      setCustCity(customers.find((c) => c.id === editing.customerId)?.city || '');
+      { const _c = customers.find((c) => c.id === editing.customerId); setCustEmirate(_c?.emirate || ''); setCustCity(_c?.city || ''); }
       setDate(editing.date || todayISO());
       setStatus(editing.paymentStatus || 'unpaid');
       setPaid(editing.paidAmount ? num(editing.paidAmount) : '');
       setInvDiscount(editing.discountTotal ? num(editing.discountTotal) : '');
       setCatId(firstCat);
     } else {
-      setLines([]); setCatId(firstCat); setCustomerId(''); setCustCity(''); setDate(todayISO()); setStatus('unpaid'); setPaid(''); setInvDiscount('');
+      setLines([]); setCatId(firstCat); setCustomerId(''); setCustEmirate(''); setCustCity(''); setDate(todayISO()); setStatus('unpaid'); setPaid(''); setInvDiscount('');
     }
   }, [open, editing]);
 
@@ -109,16 +112,20 @@ export default function InvoiceCreate({ open, onClose, editing }) {
       <div style={{ background: '#fff', paddingBottom: 8, marginBottom: 4, borderBottom: `1px solid ${C.surfaceAlt}` }}>
         <div style={{ display: 'flex', gap: 8 }}>
           <div style={{ flex: 1 }}>
+            <Field label={t('emirate')}>
+              <Select value={custEmirate} onChange={(v) => { setCustEmirate(v); setCustCity(''); setCustomerId(''); }} placeholder={t('allEmirates')}
+                options={emirateOptions(lang)} />
+            </Field>
+          </div>
+          <div style={{ flex: 1 }}>
             <Field label={t('city')}>
               <Select value={custCity} onChange={(v) => { setCustCity(v); setCustomerId(''); }} placeholder={t('allCities')} options={cityOptions} />
             </Field>
           </div>
-          <div style={{ flex: 1 }}>
-            <Field label={t('customer')} required>
-              <Select value={customerId} onChange={setCustomerId} placeholder={t('selectCustomer')} options={clinicOptions} />
-            </Field>
-          </div>
         </div>
+        <Field label={t('customer')} required>
+          <Select value={customerId} onChange={setCustomerId} placeholder={t('selectCustomer')} options={clinicOptions} />
+        </Field>
         <Field label={t('date')}><Input type="date" value={date} onChange={setDate} /></Field>
       </div>
 
