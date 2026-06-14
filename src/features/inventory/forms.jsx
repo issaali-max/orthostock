@@ -232,7 +232,7 @@ export function VariantForm({ rec, setRec, t, products, categories, variants = [
           options={categories.filter((c) => c.isActive !== false).map((c) => ({ value: c.id, label: `${c.icon} ${c.nameAr || c.nameEn}` }))} />
       </Field>
       {catId && (() => {
-        const vCount = (pid) => variants.filter((v) => v.productId === pid && v.isActive !== false).length;
+        const vCount = (pid) => (variants || []).filter((v) => v.productId === pid && v.isActive !== false).length;
         const groupsInCat = products.filter((p) => p.categoryId === catId && p.isActive !== false
             && (p.isGroup === true || vCount(p.id) > 1))   // real groups only, not standalone materials
           .slice().sort((a, b) => (a.nameEn || '').localeCompare(b.nameEn || ''));
