@@ -53,6 +53,16 @@ export async function saveVariant(app, rec) {
   const wantCat = rec.categoryId || currentCatId;
   if (rec.groupId) {
     productId = rec.groupId; // user picked an existing group inside the category
+  } else if (rec.groupMode === 'none') {
+    // explicit standalone: this material gets its OWN product. Only create a new
+    // one if it currently shares a product with other materials (avoids orphans
+    // and re-creating a product on every save of an already-standalone item).
+    const siblings = (app.data[TABLES.variants] || []).filter((v) => v.productId === productId && v.id !== rec.id && v.isActive !== false);
+    if (!productId || siblings.length > 0) {
+      const pname = (rec.nameEn || rec.sku).trim();
+      const saved = await app.createRow(TABLES.products, { nameAr: pname, nameEn: pname, brand: rec.brand || '', categoryId: wantCat, icon: '📦', image_url: rec.image_url || '', description: '', isActive: true });
+      productId = saved?.id || null;
+    }
   } else if ((rec.groupName || '').trim() && wantCat) {
     // user typed a new group name: find-or-create it inside the category
     const gname = rec.groupName.trim();
@@ -204,17 +214,35 @@ export function VariantForm({ rec, setRec, t, products, categories, onAddOption 
         <Select value={catId} onChange={(v) => { set('categoryId', v); set('attributes', {}); set('groupId', ''); }} placeholder="—"
           options={categories.filter((c) => c.isActive !== false).map((c) => ({ value: c.id, label: `${c.icon} ${c.nameAr || c.nameEn}` }))} />
       </Field>
-      {catId && (
-        <Field label={t('group')} hint={t('groupHint')}>
-          <div style={{ display: 'grid', gap: 6 }}>
-            <Select value={rec.groupId ?? rec.productId ?? ''} onChange={(v) => { set('groupId', v); set('groupName', ''); }} placeholder="—"
-              options={products.filter((p) => p.categoryId === catId && p.isActive !== false)
-                .slice().sort((a, b) => (a.nameEn || '').localeCompare(b.nameEn || ''))
-                .map((p) => ({ value: p.id, label: p.nameEn }))} />
-            <Input value={rec.groupName || ''} onChange={(v) => { set('groupName', v); if (v) set('groupId', ''); }} placeholder={t('newGroupPh')} />
-          </div>
-        </Field>
-      )}
+      {catId && (() => {
+        const groupsInCat = products.filter((p) => p.categoryId === catId && p.isActive !== false)
+          .slice().sort((a, b) => (a.nameEn || '').localeCompare(b.nameEn || ''));
+        // current mode: existing group selected / typing a new group / standalone material
+        const mode = rec.groupMode || (rec.groupName ? 'new' : (rec.groupId || rec.productId) ? 'existing' : 'none');
+        const pickMode = (m) => {
+          if (m === 'existing') setRec((r) => ({ ...r, groupMode: 'existing', groupName: '', groupId: r.groupId || r.productId || (groupsInCat[0]?.id || '') }));
+          else if (m === 'new') setRec((r) => ({ ...r, groupMode: 'new', groupId: '' }));
+          else setRec((r) => ({ ...r, groupMode: 'none', groupId: '', groupName: '' }));
+        };
+        const tab = (m, label) => (
+          <button type="button" onClick={() => pickMode(m)} style={{ flex: 1, padding: '9px 6px', borderRadius: 10, border: `1.5px solid ${mode === m ? C.primary : C.border}`, background: mode === m ? C.primary : '#fff', color: mode === m ? '#fff' : C.textMid, fontSize: 12, fontWeight: 800, cursor: 'pointer' }}>{label}</button>
+        );
+        return (
+          <Field label={t('group')}>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+              {tab('existing', `🗂️ ${t('existingGroup')}`)}
+              {tab('new', `＋ ${t('newGroup')}`)}
+              {tab('none', `▫️ ${t('standalone')}`)}
+            </div>
+            {mode === 'existing' && (groupsInCat.length > 0
+              ? <Select value={rec.groupId ?? rec.productId ?? ''} onChange={(v) => set('groupId', v)} placeholder="—"
+                  options={groupsInCat.map((p) => ({ value: p.id, label: p.nameEn }))} />
+              : <div style={{ fontSize: 12, color: C.textMuted, padding: '8px 0' }}>{t('noGroupsYet')}</div>)}
+            {mode === 'new' && <Input value={rec.groupName || ''} onChange={(v) => set('groupName', v)} placeholder={t('newGroupPh')} />}
+            {mode === 'none' && <div style={{ fontSize: 12, color: C.textMuted, padding: '8px 0' }}>{t('standaloneHint')}</div>}
+          </Field>
+        );
+      })()}
       <Field label={t('sku')} required>
         <Input value={rec.sku} onChange={(v) => set('sku', v.toUpperCase())} placeholder="BRK-018-MET" />
       </Field>
