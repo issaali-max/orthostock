@@ -419,6 +419,7 @@ const pencilBtn = { position: 'absolute', top: 6, insetInlineEnd: 6, border: 'no
 
 function EditModal({ edit, setEdit, app, t, products, categories, onSave, onDelete }) {
   if (!edit) return null;
+  const variants = (app.data[TABLES.variants] || []).filter((v) => v.isActive !== false);
   const setRec = (updater) => setEdit((e) => ({ ...e, rec: typeof updater === 'function' ? updater(e.rec) : updater }));
   return (
     <Modal open onClose={() => setEdit(null)} title={edit.rec.id ? t('edit') : t('add')}
