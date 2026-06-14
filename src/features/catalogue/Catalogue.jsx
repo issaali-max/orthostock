@@ -298,14 +298,12 @@ export default function Catalogue() {
             const isGroup = vs.length > 1;              // group = multiple sizes; else a standalone material
             const totalStock = vs.reduce((s, v) => s + num(v.stockQty), 0);
             const editProd = () => openEdit(TABLES.products, 'product', { ...blankProduct(catId), ...p });
-            // Edit controls live in a BOTTOM toolbar so the card layout/text size
-            // never changes between view and edit mode.
-            const editToolbar = (onEditTarget) => editMode && (
+            // One primary action (add material). Editing the group's name/photo
+            // happens by tapping the group header itself — no separate edit button.
+            const editToolbar = () => editMode && (
               <div style={{ display: 'flex', gap: 8, borderTop: `1px solid ${C.surfaceAlt}`, padding: '8px 12px', background: C.surfaceAlt + '80' }}>
-                <button onClick={(e) => { e.stopPropagation(); onEditTarget(); }} style={toolBtn}>✎ {t('edit')}</button>
-                <button onClick={(e) => { e.stopPropagation(); onEditTarget(); }} style={toolBtn}>📷 {t('image')}</button>
-                <button onClick={(e) => { e.stopPropagation(); openEdit(TABLES.variants, 'variant', blankVariant(p.id)); }} style={toolBtn}>＋ {t('materials')}</button>
-                <button onClick={(e) => { e.stopPropagation(); delProduct(p, vs.length); }} style={{ ...toolBtn, color: C.danger, marginInlineStart: 'auto' }}>🗑</button>
+                <button onClick={(e) => { e.stopPropagation(); openEdit(TABLES.variants, 'variant', blankVariant(p.id)); }} style={{ ...toolBtn, flex: 1, background: C.primary, color: '#fff', border: 'none' }}>＋ {t('addMaterial')}</button>
+                <button onClick={(e) => { e.stopPropagation(); delProduct(p, vs.length); }} style={{ ...toolBtn, color: C.danger }}>🗑</button>
               </div>
             );
             const stockPill = (v) => {
@@ -330,13 +328,13 @@ export default function Catalogue() {
                   <div onClick={editMode ? () => editVariant(v) : undefined} style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 13, cursor: editMode ? 'pointer' : 'default' }}>
                     <div style={{ width: 76, height: 76, borderRadius: 14, flexShrink: 0, overflow: 'hidden', background: img ? `center/cover no-repeat url(${img})` : `linear-gradient(135deg, ${(cat?.color || C.primary)}26, ${(cat?.color || C.primary)}0d)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 34 }}>{!img && (p.icon || cat?.icon || '📦')}</div>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 16, fontWeight: 800, color: C.text, lineHeight: 1.3 }}>{prettyName(p.nameEn)}</div>
-                      <div style={{ fontSize: 10, color: C.textMuted, marginTop: 2 }}>{[p.brand, v.sku].filter(Boolean).join(' · ')}</div>
+                      <div style={{ fontSize: 16, fontWeight: 800, color: C.text, lineHeight: 1.3 }}>{editMode && <span style={{ color: C.primary }}>✎ </span>}{prettyName(p.nameEn)}</div>
+                      <div style={{ fontSize: 10, color: C.textMuted, marginTop: 2 }}>{editMode ? t('tapToEdit') : [p.brand, v.sku].filter(Boolean).join(' · ')}</div>
                     </div>
                     {stockPill(v)}
                     {priceBlock(v)}
                   </div>
-                  {editToolbar(() => editVariant(v))}
+                  {editToolbar()}
                 </div>
               );
             }
@@ -347,6 +345,7 @@ export default function Catalogue() {
                 {img ? (
                   <div onClick={editMode ? editProd : undefined} style={{ position: 'relative', height: 175, background: `center/cover no-repeat url(${img})`, cursor: editMode ? 'pointer' : 'default' }}>
                     <span style={badgeGroup}>🗂️ {t('group')}</span>
+                    {editMode && <span style={{ ...badgeGroup, insetInlineStart: 'auto', insetInlineEnd: 10, background: C.primary }}>✎ {t('edit')}</span>}
                     <div style={{ position: 'absolute', insetInlineStart: 0, insetInlineEnd: 0, bottom: 0, padding: '38px 16px 13px', background: 'linear-gradient(to top, rgba(0,0,0,.9), rgba(0,0,0,.45) 45%, rgba(0,0,0,0))' }}>
                       <div style={{ fontSize: 21, fontWeight: 900, color: '#fff', lineHeight: 1.2, textShadow: '0 2px 6px rgba(0,0,0,.9)' }}>{prettyName(p.nameEn)}</div>
                       <div style={{ fontSize: 12.5, fontWeight: 700, color: '#fff', marginTop: 3, textShadow: '0 1px 4px rgba(0,0,0,.9)' }}>{[p.brand, `${vs.length} ${t('variations')}`, `${t('stock')} ${fmtNum(totalStock)}`].filter(Boolean).join(' · ')}</div>
@@ -356,7 +355,7 @@ export default function Catalogue() {
                   <div onClick={editMode ? editProd : undefined} style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 14, padding: 16, borderBottom: `1px solid ${C.surfaceAlt}`, cursor: editMode ? 'pointer' : 'default' }}>
                     <div style={{ width: 72, height: 72, borderRadius: 16, flexShrink: 0, background: `linear-gradient(135deg, ${(cat?.color || C.primary)}26, ${(cat?.color || C.primary)}0d)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 38 }}>{p.icon || cat?.icon || '📦'}</div>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <span style={{ ...badgeGroup, position: 'static', display: 'inline-block', marginBottom: 4 }}>🗂️ {t('group')}</span>
+                      <span style={{ ...badgeGroup, position: 'static', display: 'inline-block', marginBottom: 4 }}>🗂️ {t('group')}{editMode ? ` · ✎ ${t('edit')}` : ''}</span>
                       <div style={{ fontSize: 19, fontWeight: 900, color: C.text, lineHeight: 1.2 }}>{prettyName(p.nameEn)}</div>
                       <div style={{ fontSize: 12, color: C.textMuted, marginTop: 3 }}>{[p.brand, `${vs.length} ${t('variations')}`].filter(Boolean).join(' · ')}</div>
                     </div>
@@ -385,7 +384,7 @@ export default function Catalogue() {
                     );
                   })}
                 </div>
-                {editToolbar(editProd)}
+                {editToolbar()}
               </div>
             );
           })}
