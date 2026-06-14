@@ -35,9 +35,29 @@ export default function Catalogue() {
   const categories = (data[TABLES.categories] || []).filter((c) => c.isActive !== false);
   const products = (data[TABLES.products] || []).filter((p) => p.isActive !== false);
   const variants = (data[TABLES.variants] || []).filter((v) => v.isActive !== false);
+  // Fixed ordering rule for materials inside a group:
+  //   1) base name (alphabetical)  2) size (numeric)  3) position (upper before lower)
+  const variantSortKey = (v) => {
+    const name = (v.nameEn || v.sku || '').toLowerCase();
+    const attrTxt = Object.values(v.attributes || {}).join(' ').toLowerCase();
+    const hay = `${name} ${attrTxt}`;
+    const numM = name.match(/(\d+(?:\.\d+)?)/);
+    const size = numM ? parseFloat(numM[1]) : Number.POSITIVE_INFINITY;
+    let pos = 2; // unspecified sorts last
+    if (/(upper|top|علوي)/.test(hay)) pos = 0;
+    else if (/(lower|bottom|سفلي)/.test(hay)) pos = 1;
+    const base = name.replace(/\d+(?:\.\d+)?/g, '').replace(/\b(upper|lower|top|bottom)\b/g, '').replace(/(علوي|سفلي)/g, '').replace(/\s+/g, ' ').trim();
+    return { base, size, pos };
+  };
+  const sortVariants = (arr) => arr.slice().sort((a, b) => {
+    const ka = variantSortKey(a), kb = variantSortKey(b);
+    return ka.base.localeCompare(kb.base, 'en') || ka.size - kb.size || ka.pos - kb.pos;
+  });
   const variantsByProduct = useMemo(() => {
-    const m = {}; variants.forEach((v) => { (m[v.productId] = m[v.productId] || []).push(v); }); return m;
-  }, [variants]);
+    const m = {}; variants.forEach((v) => { (m[v.productId] = m[v.productId] || []).push(v); });
+    Object.keys(m).forEach((k) => { m[k] = sortVariants(m[k]); });
+    return m;
+  }, [variants]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const openEdit = (table, type, rec) => setEdit({ table, type, rec });
   // open a material for edit with its category + brand pre-filled (they live on
@@ -106,7 +126,7 @@ export default function Catalogue() {
     if (flatStatus) vlist = vlist.filter((v) => statusOf(v) === flatStatus);
     if (flatBrand) vlist = vlist.filter((v) => brandOf(v) === flatBrand);
     if (q) { const s = q.toLowerCase(); vlist = vlist.filter((v) => (v.nameEn || '').toLowerCase().includes(s) || (v.sku || '').toLowerCase().includes(s)); }
-    vlist = vlist.slice().sort((a, b) => (a.nameEn || a.sku || '').localeCompare(b.nameEn || b.sku || ''));
+    vlist = sortVariants(vlist);
     const renderVarCard = (v) => {
       const stock = num(v.stockQty);
       const low = stock <= num(v.stockMin) && num(v.stockMin) > 0;
