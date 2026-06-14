@@ -73,6 +73,22 @@ export async function pushAllLocal(onProgress) {
 
 export const cloudReady = () => !!supabase;
 
+// Wipe EVERY row from EVERY table in the cloud. Used by "Delete ALL data" so a
+// reset doesn't resurrect on the next pull (and clears every other device too).
+export async function wipeCloud() {
+  if (!supabase) return { ok: false, error: 'cloud_not_configured' };
+  if (!isOnline()) return { ok: false, error: 'offline' };
+  const errors = [];
+  for (const table of Object.values(TABLES)) {
+    try {
+      // delete all rows (id is never null, so this matches everything)
+      const { error } = await supabase.from(table).delete().not('id', 'is', null);
+      if (error) errors.push(`${table}: ${error.message}`);
+    } catch (e) { errors.push(`${table}: ${e.message || e}`); }
+  }
+  return { ok: errors.length === 0, errors };
+}
+
 export async function flush() {
   if (!supabase || !isOnline() || state.syncing) return;
   state.syncing = true; emit();

@@ -3,7 +3,7 @@ import { useApp } from '../../app/AppProvider.jsx';
 import { C, TABLES } from '../../lib/constants.js';
 import { Badge, Btn, Card, Field, Input, Modal, PageHeader, Select } from '../../ui/components.jsx';
 import { resetStore, dbMode } from '../../db/db.js';
-import { subscribeSync, pushAllLocal, pull, cloudReady } from '../../db/sync.js';
+import { subscribeSync, pushAllLocal, pull, cloudReady, wipeCloud } from '../../db/sync.js';
 import { exportBackup, importBackup } from '../../lib/backup.js';
 import { exportExcel, importExcel } from '../../lib/excel.js';
 import { dataHealth, mergeCustomers } from '../../lib/engine.js';
@@ -76,6 +76,12 @@ export default function Settings() {
     // Guarded by type-to-confirm so it can never be triggered by an accidental tap.
     const word = window.prompt('⚠️ هذا يحذف كل البيانات نهائياً (العملاء، الفواتير، الديون، المخزون).\nThis deletes ALL data permanently.\n\nاكتب  حذف  أو  DELETE  للتأكيد:');
     if (word !== 'حذف' && word !== 'DELETE') return;
+    // If cloud sync is on, wipe the cloud too — otherwise the next pull would
+    // restore everything, and other devices would re-upload it.
+    if (cloudReady()) {
+      const wipeCloudToo = window.confirm('☁️ المزامنة مفعّلة. امسح السحابة وكل الأجهزة أيضاً؟\nCloud sync is ON. Also wipe the cloud (and every device)?\n\nموافق = امسح كل شيء · إلغاء = امسح هذا الجهاز فقط');
+      if (wipeCloudToo) { const r = await wipeCloud(); if (!r.ok && r.errors?.length) { showToast(`⚠ ${r.errors[0]}`, 'error'); return; } }
+    }
     await resetStore();
     window.location.reload();
   };
