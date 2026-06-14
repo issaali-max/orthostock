@@ -50,7 +50,7 @@ export default function Customers() {
     const r = editing;
     if (!r.name?.trim()) return;
     const payload = { name: r.name.trim(), type: r.type || 'doctor', phone: r.phone || '',
-      emirate: r.emirate || '', specialty: r.specialty || '', workingDays: r.workingDays || [], notes: r.notes || '', isActive: true };
+      emirate: r.emirate || '', city: r.city || '', specialty: r.specialty || '', workingDays: r.workingDays || [], notes: r.notes || '', isActive: true };
     try { if (r.id) await updateRow(TABLES.customers, r.id, payload); else await createRow(TABLES.customers, payload); setEditing(null); }
     catch { /* toast shown (duplicate phone) */ }
   };
