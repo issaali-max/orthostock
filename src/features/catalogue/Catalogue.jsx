@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useApp } from '../../app/AppProvider.jsx';
 import { C, RADIUS, SHADOW, TABLES } from '../../lib/constants.js';
-import { fmtCur, fmtNum, num } from '../../lib/money.js';
+import { fmtCur, fmtNum, num, prettyName } from '../../lib/money.js';
 import { Badge, Btn, EmptyState, Modal, PageHeader, SearchBar } from '../../ui/components.jsx';
 import { logStockMovement } from '../../lib/engine.js';
 import { fmtDate } from '../../lib/dates.js';
@@ -142,7 +142,7 @@ export default function Catalogue() {
           style={{ display: 'flex', alignItems: 'center', gap: 12, background: '#fff', border: `1px solid ${C.border}`, borderRadius: RADIUS, boxShadow: SHADOW, padding: '12px 14px', cursor: editMode ? 'pointer' : 'default' }}>
           <div style={{ width: 52, height: 52, borderRadius: 12, flexShrink: 0, overflow: 'hidden', background: pimg ? `center/cover no-repeat url(${pimg})` : C.primary + '12', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>{!pimg && (prod?.icon || '📦')}</div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontWeight: 700, color: C.text, fontSize: 15 }}>{editMode && '✎ '}{v.nameEn || v.sku}</div>
+            <div style={{ fontWeight: 700, color: C.text, fontSize: 15 }}>{prettyName(v.nameEn) || v.sku}</div>
             {attrs.length > 0 && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, margin: '4px 0 2px' }}>
                 {attrs.map(([k, val]) => <span key={k} style={{ fontSize: 10, fontWeight: 700, color: C.primaryMid, background: C.primary + '12', borderRadius: 6, padding: '2px 7px' }}>{val}</span>)}
@@ -298,11 +298,14 @@ export default function Catalogue() {
             const isGroup = vs.length > 1;              // group = multiple sizes; else a standalone material
             const totalStock = vs.reduce((s, v) => s + num(v.stockQty), 0);
             const editProd = () => openEdit(TABLES.products, 'product', { ...blankProduct(catId), ...p });
-            const headBtns = editMode && (
-              <div style={{ position: 'absolute', top: 8, insetInlineEnd: 8, display: 'flex', gap: 6, zIndex: 2 }}>
-                <button onClick={(e) => { e.stopPropagation(); isGroup ? editProd() : editVariant(vs[0]); }} style={imgBtn}>✎</button>
-                <button onClick={(e) => { e.stopPropagation(); openEdit(TABLES.variants, 'variant', blankVariant(p.id)); }} style={imgBtn}>＋</button>
-                <button onClick={(e) => { e.stopPropagation(); delProduct(p, vs.length); }} style={{ ...imgBtn, color: C.danger }}>🗑</button>
+            // Edit controls live in a BOTTOM toolbar so the card layout/text size
+            // never changes between view and edit mode.
+            const editToolbar = (onEditTarget) => editMode && (
+              <div style={{ display: 'flex', gap: 8, borderTop: `1px solid ${C.surfaceAlt}`, padding: '8px 12px', background: C.surfaceAlt + '80' }}>
+                <button onClick={(e) => { e.stopPropagation(); onEditTarget(); }} style={toolBtn}>✎ {t('edit')}</button>
+                <button onClick={(e) => { e.stopPropagation(); onEditTarget(); }} style={toolBtn}>📷 {t('image')}</button>
+                <button onClick={(e) => { e.stopPropagation(); openEdit(TABLES.variants, 'variant', blankVariant(p.id)); }} style={toolBtn}>＋ {t('materials')}</button>
+                <button onClick={(e) => { e.stopPropagation(); delProduct(p, vs.length); }} style={{ ...toolBtn, color: C.danger, marginInlineStart: 'auto' }}>🗑</button>
               </div>
             );
             const stockPill = (v) => {
@@ -323,17 +326,17 @@ export default function Catalogue() {
             if (!isGroup && vs.length === 1) {
               const v = vs[0];
               return (
-                <div key={p.id} onClick={editMode ? () => editVariant(v) : undefined}
-                  style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 13, background: '#fff', border: `1px solid ${C.border}`, borderRadius: RADIUS, boxShadow: SHADOW, padding: 13, cursor: editMode ? 'pointer' : 'default' }}>
-                  {headBtns}
-                  <div style={{ width: 76, height: 76, borderRadius: 14, flexShrink: 0, overflow: 'hidden', background: img ? `center/cover no-repeat url(${img})` : `linear-gradient(135deg, ${(cat?.color || C.primary)}26, ${(cat?.color || C.primary)}0d)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 34 }}>{!img && (p.icon || cat?.icon || '📦')}</div>
-                  <div style={{ flex: 1, minWidth: 0, paddingInlineEnd: editMode ? 92 : 0 }}>
-                    <div style={{ fontSize: 16, fontWeight: 800, color: C.text, lineHeight: 1.3 }}>{editMode && '✎ '}{p.nameEn}</div>
-                    <div style={{ fontSize: 10, color: C.textMuted, marginTop: 2 }}>{[p.brand, v.sku].filter(Boolean).join(' · ')}</div>
-                    {editMode && !img && <div style={{ fontSize: 11, color: C.primary, marginTop: 4, fontWeight: 700 }}>＋ {t('addPhoto')}</div>}
+                <div key={p.id} style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: RADIUS, boxShadow: SHADOW, overflow: 'hidden' }}>
+                  <div onClick={editMode ? () => editVariant(v) : undefined} style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 13, cursor: editMode ? 'pointer' : 'default' }}>
+                    <div style={{ width: 76, height: 76, borderRadius: 14, flexShrink: 0, overflow: 'hidden', background: img ? `center/cover no-repeat url(${img})` : `linear-gradient(135deg, ${(cat?.color || C.primary)}26, ${(cat?.color || C.primary)}0d)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 34 }}>{!img && (p.icon || cat?.icon || '📦')}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 16, fontWeight: 800, color: C.text, lineHeight: 1.3 }}>{prettyName(p.nameEn)}</div>
+                      <div style={{ fontSize: 10, color: C.textMuted, marginTop: 2 }}>{[p.brand, v.sku].filter(Boolean).join(' · ')}</div>
+                    </div>
+                    {stockPill(v)}
+                    {priceBlock(v)}
                   </div>
-                  {stockPill(v)}
-                  {priceBlock(v)}
+                  {editToolbar(() => editVariant(v))}
                 </div>
               );
             }
@@ -343,22 +346,19 @@ export default function Catalogue() {
               <div key={p.id} style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: RADIUS, boxShadow: SHADOW, overflow: 'hidden' }}>
                 {img ? (
                   <div onClick={editMode ? editProd : undefined} style={{ position: 'relative', height: 175, background: `center/cover no-repeat url(${img})`, cursor: editMode ? 'pointer' : 'default' }}>
-                    {headBtns}
                     <span style={badgeGroup}>🗂️ {t('group')}</span>
-                    <div style={{ position: 'absolute', insetInlineStart: 0, insetInlineEnd: 0, bottom: 0, padding: '30px 16px 13px', background: 'linear-gradient(to top, rgba(0,0,0,.85), rgba(0,0,0,.15) 60%, rgba(0,0,0,0))' }}>
-                      <div style={{ fontSize: 21, fontWeight: 900, color: '#fff', lineHeight: 1.2, textShadow: '0 1px 4px rgba(0,0,0,.6)' }}>{p.nameEn}</div>
-                      <div style={{ fontSize: 12.5, fontWeight: 600, color: '#fff', marginTop: 3, textShadow: '0 1px 3px rgba(0,0,0,.6)' }}>{[p.brand, `${vs.length} ${t('variations')}`, `${t('stock')} ${fmtNum(totalStock)}`].filter(Boolean).join(' · ')}</div>
+                    <div style={{ position: 'absolute', insetInlineStart: 0, insetInlineEnd: 0, bottom: 0, padding: '38px 16px 13px', background: 'linear-gradient(to top, rgba(0,0,0,.9), rgba(0,0,0,.45) 45%, rgba(0,0,0,0))' }}>
+                      <div style={{ fontSize: 21, fontWeight: 900, color: '#fff', lineHeight: 1.2, textShadow: '0 2px 6px rgba(0,0,0,.9)' }}>{prettyName(p.nameEn)}</div>
+                      <div style={{ fontSize: 12.5, fontWeight: 700, color: '#fff', marginTop: 3, textShadow: '0 1px 4px rgba(0,0,0,.9)' }}>{[p.brand, `${vs.length} ${t('variations')}`, `${t('stock')} ${fmtNum(totalStock)}`].filter(Boolean).join(' · ')}</div>
                     </div>
                   </div>
                 ) : (
                   <div onClick={editMode ? editProd : undefined} style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 14, padding: 16, borderBottom: `1px solid ${C.surfaceAlt}`, cursor: editMode ? 'pointer' : 'default' }}>
-                    {headBtns}
-                    <div style={{ width: 72, height: 72, borderRadius: 16, flexShrink: 0, background: `linear-gradient(135deg, ${(cat?.color || C.primary)}26, ${(cat?.color || C.primary)}0d)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 38, position: 'relative' }}>{p.icon || cat?.icon || '📦'}</div>
-                    <div style={{ flex: 1, minWidth: 0, paddingInlineEnd: editMode ? 92 : 0 }}>
+                    <div style={{ width: 72, height: 72, borderRadius: 16, flexShrink: 0, background: `linear-gradient(135deg, ${(cat?.color || C.primary)}26, ${(cat?.color || C.primary)}0d)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 38 }}>{p.icon || cat?.icon || '📦'}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
                       <span style={{ ...badgeGroup, position: 'static', display: 'inline-block', marginBottom: 4 }}>🗂️ {t('group')}</span>
-                      <div style={{ fontSize: 19, fontWeight: 900, color: C.text, lineHeight: 1.2 }}>{p.nameEn}</div>
+                      <div style={{ fontSize: 19, fontWeight: 900, color: C.text, lineHeight: 1.2 }}>{prettyName(p.nameEn)}</div>
                       <div style={{ fontSize: 12, color: C.textMuted, marginTop: 3 }}>{[p.brand, `${vs.length} ${t('variations')}`].filter(Boolean).join(' · ')}</div>
-                      {editMode && <div style={{ fontSize: 11, color: C.primary, marginTop: 4, fontWeight: 700 }}>＋ {t('addPhoto')}</div>}
                     </div>
                   </div>
                 )}
@@ -369,7 +369,7 @@ export default function Catalogue() {
                       <div key={v.id} onClick={editMode ? () => editVariant(v) : undefined}
                         style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', borderTop: (i || img) ? `1px solid ${C.surfaceAlt}` : 'none', cursor: editMode ? 'pointer' : 'default' }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontWeight: 700, color: C.text, fontSize: 14 }}>{editMode && '✎ '}{v.nameEn || variantLabel(v)}</div>
+                          <div style={{ fontWeight: 700, color: C.text, fontSize: 14 }}>{editMode && '✎ '}{prettyName(v.nameEn) || variantLabel(v)}</div>
                           {attrs.length > 0 && (
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, margin: '5px 0 2px' }}>
                               {attrs.map(([k, val]) => (
@@ -384,12 +384,8 @@ export default function Catalogue() {
                       </div>
                     );
                   })}
-                  {vs.length === 0 && editMode && (
-                    <div style={{ padding: '10px 16px', borderTop: `1px solid ${C.surfaceAlt}` }}>
-                      <Btn size="sm" onClick={() => openEdit(TABLES.variants, 'variant', blankVariant(p.id))}>＋ {t('materials')}</Btn>
-                    </div>
-                  )}
                 </div>
+                {editToolbar(editProd)}
               </div>
             );
           })}
@@ -400,6 +396,7 @@ export default function Catalogue() {
   );
 }
 
+const toolBtn = { border: 'none', background: '#fff', borderRadius: 8, padding: '6px 10px', fontSize: 12, fontWeight: 800, color: C.primary, cursor: 'pointer', border: `1px solid ${C.border}` };
 const badgeGroup = { position: 'absolute', top: 10, insetInlineStart: 10, zIndex: 2, background: 'rgba(13,59,110,.92)', color: '#fff', fontSize: 11, fontWeight: 800, borderRadius: 999, padding: '3px 10px' };
 const imgBtn = { border: 'none', background: 'rgba(255,255,255,.92)', color: C.primary, borderRadius: 8, width: 30, height: 30, cursor: 'pointer', fontWeight: 800, fontSize: 14, boxShadow: '0 1px 3px rgba(0,0,0,.2)' };
 const pencilBtn = { position: 'absolute', top: 6, insetInlineEnd: 6, border: 'none', background: C.surfaceDark, color: C.primary, borderRadius: 8, width: 26, height: 26, cursor: 'pointer', fontWeight: 700 };

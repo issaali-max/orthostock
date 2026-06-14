@@ -38,3 +38,18 @@ export function fmtCur(amountAED, displayCurrency = 'AED', usdRate = 3.6725) {
 export function fmtNum(v) {
   return num(v).toLocaleString('en-US');
 }
+
+// Pretty-print a material name with sensible capitalization, preserving common
+// orthodontic acronyms/units. Display-only — does not change stored data.
+const NAME_KEEP = { niti: 'NiTi', 'ni-ti': 'Ni-Ti', ss: 'SS', 's.s': 'S.S', 'a.j': 'A.J', tma: 'TMA', mm: 'mm', co: 'Co', cr: 'Cr', oz: 'oz', uv: 'UV', led: 'LED', pvc: 'PVC' };
+const NAME_SMALL = new Set(['with', 'and', 'for', 'to', 'of', 'the', 'a', 'in', 'on']);
+export function prettyName(s) {
+  if (!s) return s || '';
+  return String(s).trim().split(/\s+/).map((w, i) => {
+    const low = w.toLowerCase();
+    if (NAME_KEEP[low]) return NAME_KEEP[low];
+    if (/[0-9]/.test(w)) return low;                 // sizes/units: 12, 0.016, 3mm
+    if (i > 0 && NAME_SMALL.has(low)) return low;     // small words stay lowercase mid-name
+    return low.charAt(0).toUpperCase() + low.slice(1);
+  }).join(' ');
+}

@@ -6,7 +6,7 @@
 // ─────────────────────────────────────────────────────────────
 import * as db from '../db/db.js';
 import { TABLES } from './constants.js';
-import { num, round2, safeDiv } from './money.js';
+import { num, round2, safeDiv, prettyName } from './money.js';
 import { newId } from './ids.js';
 import { todayISO } from './dates.js';
 
@@ -306,7 +306,7 @@ export function invoiceTotals(lines, settings) {
 // severity (3 = critical, 2 = warning, 1 = info).
 // ─────────────────────────────────────────────────────────────
 function variantLabel(v) {
-  return v.nameEn || Object.values(v.attributes || {}).filter(Boolean).join(' · ') || v.sku;
+  return prettyName(v.nameEn) || Object.values(v.attributes || {}).filter(Boolean).join(' · ') || v.sku;
 }
 
 export function buildAlerts(data, opts = {}) {
