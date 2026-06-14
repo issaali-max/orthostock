@@ -39,13 +39,15 @@ const NAV = [
 export default function Shell() {
   const { t, lang, setLang, displayCurrency, toggleCurrency, settings, logout, user } = useApp();
   const isDesktop = useIsDesktop();
-  const [active, setActive] = useState('dashboard');
+  const [active, setActive] = useState(() => {
+    try { return localStorage.getItem('orthostock_tab') || 'dashboard'; } catch { return 'dashboard'; }
+  });
   const [moreOpen, setMoreOpen] = useState(false);
 
   const Active = useMemo(() => NAV.find((n) => n.key === active)?.Comp || Dashboard, [active]);
   const primaryNav = NAV.filter((n) => n.primary);
   const overflowNav = NAV.filter((n) => !n.primary);
-  const go = (key) => { setActive(key); setMoreOpen(false); };
+  const go = (key) => { setActive(key); setMoreOpen(false); try { localStorage.setItem('orthostock_tab', key); } catch {} };
 
   const Header = (
     <header style={{ position: 'sticky', top: 0, zIndex: 50, background: C.primary, color: '#fff', padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: SHADOW, paddingTop: 'max(12px, env(safe-area-inset-top))' }}>
