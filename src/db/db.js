@@ -155,6 +155,6 @@ async function seedLocal() {
     oneDrive: { connected: false, folderPath: '', lastBackupAt: null },
   }]);
   await L.idbBulkPut(TABLES.users, [{
-    id: newId(), name: 'Admin', email: 'admin@orthostock.ae', password: 'admin123', role: 'admin', isActive: true,
+    id: 'user-admin-default', name: 'Admin', email: 'admin@orthostock.ae', password: 'admin123', role: 'admin', isActive: true,
   }]);
 }

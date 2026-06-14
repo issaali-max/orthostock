@@ -265,7 +265,12 @@ export default function Settings() {
           <Btn size="sm" onClick={() => setUserEdit({ name: '', email: '', password: '', role: 'employee', isActive: true })}>＋ {t('addUser')}</Btn>
         </div>
         <div style={{ display: 'grid', gap: 6 }}>
-          {(data[TABLES.users] || []).map((u) => (
+          {(() => {
+            const seen = new Set();
+            return (data[TABLES.users] || [])
+              .filter((u) => u.isActive !== false)
+              .filter((u) => { const k = (u.email || u.id).trim().toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; });
+          })().map((u) => (
             <div key={u.id} onClick={() => setUserEdit({ ...u })} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: `1px solid ${C.surfaceAlt}`, cursor: 'pointer' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 700, color: C.text, fontSize: 13 }}>{u.name}</div>
