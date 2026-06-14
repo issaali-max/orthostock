@@ -286,6 +286,36 @@ export async function exportExcel(data, lang = 'ar', scope = 'all') {
     ], debtRows);
   }
 
+  // ── Purchases + their items (full archive only) ──
+  if (scope === 'all') {
+    const supName = (id) => sups.find((x) => x.id === id)?.name || '';
+    buildSheet(wb, 'Purchases', [
+      { header: 'PurchaseNumber', key: 'no', width: 16 }, { header: 'Date', key: 'date', width: 14 },
+      { header: 'Supplier', key: 'sup', width: 22 }, { header: 'Total', key: 'total', width: 12, money: true },
+      { header: 'Paid', key: 'paid', width: 12, money: true }, { header: 'Status', key: 'status', width: 12 },
+    ], (data[TABLES.purchases] || []).map((p) => ({ no: p.purchaseNumber, date: p.date, sup: supName(p.supplierId), total: num(p.total), paid: num(p.paidAmount), status: p.paymentStatus || p.status })));
+
+    const purchById = {}; (data[TABLES.purchases] || []).forEach((p) => { purchById[p.id] = p.purchaseNumber; });
+    buildSheet(wb, 'PurchaseItems', [
+      { header: 'PurchaseNumber', key: 'no', width: 16 }, { header: 'SKU', key: 'sku', width: 14 },
+      { header: 'Material', key: 'mat', width: 28 }, { header: 'Qty', key: 'qty', width: 8 },
+      { header: 'UnitCost', key: 'cost', width: 12, money: true }, { header: 'LineTotal', key: 'total', width: 12, money: true },
+    ], (data[TABLES.purchaseItems] || []).map((it) => ({ no: purchById[it.purchaseId] || '', sku: varSku(it.variantId), mat: varName(vars.find((x) => x.id === it.variantId) || {}), qty: num(it.qty), cost: num(it.unitCost), total: num(it.total) })));
+
+    // Stock ledger — the source of truth for every quantity change
+    buildSheet(wb, 'StockMovements', [
+      { header: 'Date', key: 'date', width: 18 }, { header: 'SKU', key: 'sku', width: 14 },
+      { header: 'Type', key: 'type', width: 12 }, { header: 'Change', key: 'chg', width: 10 },
+      { header: 'Balance', key: 'bal', width: 10 },
+    ], (data[TABLES.stockMovements] || []).map((m) => ({ date: (m.createdAt || '').slice(0, 19).replace('T', ' '), sku: varSku(m.variantId), type: m.type, chg: num(m.qtyChange), bal: num(m.qtyAfter) })));
+
+    // Customer special prices
+    buildSheet(wb, 'CustomerPrices', [
+      { header: 'Customer', key: 'cust', width: 22 }, { header: 'SKU', key: 'sku', width: 14 },
+      { header: 'Price', key: 'price', width: 12, money: true },
+    ], (data[TABLES.customerPrices] || []).map((cp) => ({ cust: custName(cp.customerId), sku: varSku(cp.variantId), price: num(cp.price) })));
+  }
+
   const buf = await wb.xlsx.writeBuffer();
   const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   const url = URL.createObjectURL(blob);
