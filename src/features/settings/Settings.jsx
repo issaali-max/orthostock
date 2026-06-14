@@ -285,6 +285,13 @@ export default function Settings() {
       <Card style={{ marginTop: 16 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: C.textMid, marginBottom: 8 }}>Developer</div>
         <Btn variant="outline" onClick={doReset} style={{ color: C.danger }}>🗑 Delete ALL data / حذف كل البيانات</Btn>
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.surfaceAlt}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          <span style={{ fontSize: 11, color: C.textMuted }}>{t('version')}: {typeof __BUILD_ID__ !== 'undefined' ? __BUILD_ID__ : '—'}</span>
+          <button onClick={async () => {
+            try { if ('serviceWorker' in navigator) { const regs = await navigator.serviceWorker.getRegistrations(); await Promise.all(regs.map((r) => r.unregister())); } if (window.caches) { const ks = await caches.keys(); await Promise.all(ks.map((k) => caches.delete(k))); } } catch {}
+            window.location.reload(true);
+          }} style={{ border: `1px solid ${C.border}`, background: '#fff', borderRadius: 8, padding: '6px 12px', fontSize: 12, fontWeight: 800, color: C.primary, cursor: 'pointer' }}>🔄 {t('forceUpdate')}</button>
+        </div>
       </Card>
 
       <Modal open={!!importReport} onClose={() => setImportReport(null)} title={`📥 ${t('importReport')}`}>

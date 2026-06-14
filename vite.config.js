@@ -5,7 +5,10 @@ import { VitePWA } from 'vite-plugin-pwa';
 // Installable PWA: Workbox service worker precaches the app shell so it loads
 // offline and can be added to the home screen. The app's own data layer is
 // already offline-first (IndexedDB + Supabase sync); the SW covers the shell.
+const BUILD_ID = new Date().toISOString().slice(0, 16).replace('T', ' ');
+
 export default defineConfig({
+  define: { __BUILD_ID__: JSON.stringify(BUILD_ID) },
   plugins: [
     react(),
     VitePWA({
