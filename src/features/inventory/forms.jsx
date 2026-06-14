@@ -67,7 +67,7 @@ export async function saveVariant(app, rec) {
     const match = products.find((p) => p.categoryId === rec.categoryId && (p.nameEn || '').trim().toLowerCase() === pname.toLowerCase());
     if (match) productId = match.id;
     else {
-      const saved = await app.createRow(TABLES.products, { nameEn: pname, brand: rec.brand || '', categoryId: rec.categoryId, icon: '📦', image_url: '', description: '', isActive: true });
+      const saved = await app.createRow(TABLES.products, { nameAr: pname, nameEn: pname, brand: rec.brand || '', categoryId: rec.categoryId, icon: '📦', image_url: '', description: '', isActive: true });
       productId = saved?.id || null;
     }
   }
