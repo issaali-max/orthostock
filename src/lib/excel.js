@@ -272,6 +272,20 @@ export async function exportExcel(data, lang = 'ar', scope = 'all') {
     { header: 'Amount', key: 'amount', width: 12, money: true }, { header: 'Note', key: 'note', width: 28 },
   ], flows.map((f) => ({ type: f.type, date: f.date, amount: num(f.amount), note: f.notes })));
 
+  // External debts (money lent to / collected from people) — flattened, one row per transaction
+  if (scope === 'all') {
+    const debts = data[TABLES.externalDebts] || [];
+    const debtRows = [];
+    debts.forEach((d) => (d.txns || []).forEach((tx) => debtRows.push({
+      person: d.personName || '', phone: d.phone || '', type: tx.type, amount: num(tx.amount), date: tx.date || '', note: tx.note || '',
+    })));
+    buildSheet(wb, 'ExternalDebts', [
+      { header: 'Person', key: 'person', width: 22 }, { header: 'Phone', key: 'phone', width: 16 },
+      { header: 'Type', key: 'type', width: 10 }, { header: 'Amount', key: 'amount', width: 12, money: true },
+      { header: 'Date', key: 'date', width: 14 }, { header: 'Note', key: 'note', width: 28 },
+    ], debtRows);
+  }
+
   const buf = await wb.xlsx.writeBuffer();
   const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   const url = URL.createObjectURL(blob);

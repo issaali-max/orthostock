@@ -275,45 +275,75 @@ export default function Catalogue() {
           {shownProducts.map((p) => {
             const vs = (variantsByProduct[p.id] || []).filter(matchVariantArch);
             const img = p.image_url;
+            const isGroup = vs.length > 1;              // group = multiple sizes; else a standalone material
             const totalStock = vs.reduce((s, v) => s + num(v.stockQty), 0);
             const editProd = () => openEdit(TABLES.products, 'product', { ...blankProduct(catId), ...p });
             const headBtns = editMode && (
               <div style={{ position: 'absolute', top: 8, insetInlineEnd: 8, display: 'flex', gap: 6, zIndex: 2 }}>
-                <button onClick={(e) => { e.stopPropagation(); editProd(); }} style={imgBtn}>✎</button>
+                <button onClick={(e) => { e.stopPropagation(); isGroup ? editProd() : editVariant(vs[0]); }} style={imgBtn}>✎</button>
                 <button onClick={(e) => { e.stopPropagation(); openEdit(TABLES.variants, 'variant', blankVariant(p.id)); }} style={imgBtn}>＋</button>
                 <button onClick={(e) => { e.stopPropagation(); delProduct(p, vs.length); }} style={{ ...imgBtn, color: C.danger }}>🗑</button>
               </div>
             );
+            const stockPill = (v) => {
+              const stock = num(v.stockQty);
+              const low = stock <= num(v.stockMin) && num(v.stockMin) > 0; const neg = stock <= 0;
+              const col = neg ? C.danger : low ? C.warning : C.success;
+              return (<div style={{ textAlign: 'center', minWidth: 66 }}>
+                <span style={{ display: 'inline-block', minWidth: 40, padding: '4px 12px', borderRadius: 999, background: col + '18', color: col, fontSize: 18, fontWeight: 800 }}>{fmtNum(stock)}</span>
+                <div style={{ fontSize: 9, color: C.textMuted, marginTop: 2 }}>{t('stock')}{neg ? ' ⚠' : low ? ' !' : ''}</div>
+              </div>);
+            };
+            const priceBlock = (v) => (<div style={{ minWidth: 90, textAlign: 'end' }}>
+              <div style={{ fontWeight: 800, color: C.primary, fontSize: 15 }}>{fmtCur(v.sellingPriceDefault, displayCurrency, usdRate)}</div>
+              <div style={{ fontSize: 10, color: C.textMuted }}>{t('avgCost')} {fmtCur(v.purchasePriceAvg, displayCurrency, usdRate)}</div>
+            </div>);
+
+            // ── STANDALONE MATERIAL (one size): a single self-contained card ──
+            if (!isGroup && vs.length === 1) {
+              const v = vs[0];
+              return (
+                <div key={p.id} onClick={editMode ? () => editVariant(v) : undefined}
+                  style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 13, background: '#fff', border: `1px solid ${C.border}`, borderRadius: RADIUS, boxShadow: SHADOW, padding: 13, cursor: editMode ? 'pointer' : 'default' }}>
+                  {headBtns}
+                  <div style={{ width: 76, height: 76, borderRadius: 14, flexShrink: 0, overflow: 'hidden', background: img ? `center/cover no-repeat url(${img})` : `linear-gradient(135deg, ${(cat?.color || C.primary)}26, ${(cat?.color || C.primary)}0d)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 34 }}>{!img && (p.icon || cat?.icon || '📦')}</div>
+                  <div style={{ flex: 1, minWidth: 0, paddingInlineEnd: editMode ? 92 : 0 }}>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: C.text, lineHeight: 1.3 }}>{editMode && '✎ '}{p.nameEn}</div>
+                    <div style={{ fontSize: 10, color: C.textMuted, marginTop: 2 }}>{[p.brand, v.sku].filter(Boolean).join(' · ')}</div>
+                    {editMode && !img && <div style={{ fontSize: 11, color: C.primary, marginTop: 4, fontWeight: 700 }}>＋ {t('addPhoto')}</div>}
+                  </div>
+                  {stockPill(v)}
+                  {priceBlock(v)}
+                </div>
+              );
+            }
+
+            // ── GROUP (multiple sizes): hero/header + a row per size ──
             return (
               <div key={p.id} style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: RADIUS, boxShadow: SHADOW, overflow: 'hidden' }}>
                 {img ? (
-                  // image-rich: large hero photo with the name overlaid for a clean, professional look
-                  <div onClick={editMode ? editProd : undefined} style={{ position: 'relative', height: 170, background: `center/cover no-repeat url(${img})`, cursor: editMode ? 'pointer' : 'default' }}>
+                  <div onClick={editMode ? editProd : undefined} style={{ position: 'relative', height: 175, background: `center/cover no-repeat url(${img})`, cursor: editMode ? 'pointer' : 'default' }}>
                     {headBtns}
-                    <div style={{ position: 'absolute', insetInlineStart: 0, insetInlineEnd: 0, bottom: 0, padding: '26px 16px 12px', background: 'linear-gradient(to top, rgba(0,0,0,.72), rgba(0,0,0,0))' }}>
-                      <div style={{ fontSize: 19, fontWeight: 800, color: '#fff', lineHeight: 1.25 }}>{p.nameEn}</div>
-                      <div style={{ fontSize: 12, color: 'rgba(255,255,255,.85)', marginTop: 2 }}>{[p.brand, `${vs.length} ${t('variations')}`, `${t('stock')} ${fmtNum(totalStock)}`].filter(Boolean).join(' · ')}</div>
+                    <span style={badgeGroup}>🗂️ {t('group')}</span>
+                    <div style={{ position: 'absolute', insetInlineStart: 0, insetInlineEnd: 0, bottom: 0, padding: '30px 16px 13px', background: 'linear-gradient(to top, rgba(0,0,0,.85), rgba(0,0,0,.15) 60%, rgba(0,0,0,0))' }}>
+                      <div style={{ fontSize: 21, fontWeight: 900, color: '#fff', lineHeight: 1.2, textShadow: '0 1px 4px rgba(0,0,0,.6)' }}>{p.nameEn}</div>
+                      <div style={{ fontSize: 12.5, fontWeight: 600, color: '#fff', marginTop: 3, textShadow: '0 1px 3px rgba(0,0,0,.6)' }}>{[p.brand, `${vs.length} ${t('variations')}`, `${t('stock')} ${fmtNum(totalStock)}`].filter(Boolean).join(' · ')}</div>
                     </div>
                   </div>
                 ) : (
-                  // no image yet: big icon tile beside a large name (encourages adding a photo)
-                  <div onClick={editMode ? editProd : undefined} style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 14, padding: 16, borderBottom: vs.length ? `1px solid ${C.surfaceAlt}` : 'none', cursor: editMode ? 'pointer' : 'default' }}>
+                  <div onClick={editMode ? editProd : undefined} style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 14, padding: 16, borderBottom: `1px solid ${C.surfaceAlt}`, cursor: editMode ? 'pointer' : 'default' }}>
                     {headBtns}
-                    <div style={{ width: 72, height: 72, borderRadius: 16, flexShrink: 0, background: `linear-gradient(135deg, ${(cat?.color || C.primary)}26, ${(cat?.color || C.primary)}0d)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 38 }}>{p.icon || cat?.icon || '📦'}</div>
-                    <div style={{ flex: 1, minWidth: 0, paddingInlineEnd: editMode ? 88 : 0 }}>
-                      <div style={{ fontSize: 18, fontWeight: 800, color: C.text, lineHeight: 1.25 }}>{p.nameEn}</div>
+                    <div style={{ width: 72, height: 72, borderRadius: 16, flexShrink: 0, background: `linear-gradient(135deg, ${(cat?.color || C.primary)}26, ${(cat?.color || C.primary)}0d)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 38, position: 'relative' }}>{p.icon || cat?.icon || '📦'}</div>
+                    <div style={{ flex: 1, minWidth: 0, paddingInlineEnd: editMode ? 92 : 0 }}>
+                      <span style={{ ...badgeGroup, position: 'static', display: 'inline-block', marginBottom: 4 }}>🗂️ {t('group')}</span>
+                      <div style={{ fontSize: 19, fontWeight: 900, color: C.text, lineHeight: 1.2 }}>{p.nameEn}</div>
                       <div style={{ fontSize: 12, color: C.textMuted, marginTop: 3 }}>{[p.brand, `${vs.length} ${t('variations')}`].filter(Boolean).join(' · ')}</div>
-                      {editMode && !img && <div style={{ fontSize: 11, color: C.primary, marginTop: 4, fontWeight: 700 }}>＋ {t('addPhoto')}</div>}
+                      {editMode && <div style={{ fontSize: 11, color: C.primary, marginTop: 4, fontWeight: 700 }}>＋ {t('addPhoto')}</div>}
                     </div>
                   </div>
                 )}
-                {/* Materials (sizes) — tap any row in edit mode to change stock/price */}
                 <div>
                   {vs.map((v, i) => {
-                    const stock = num(v.stockQty);
-                    const low = stock <= num(v.stockMin) && num(v.stockMin) > 0;
-                    const neg = stock <= 0;
-                    const stockColor = neg ? C.danger : low ? C.warning : C.success;
                     const attrs = Object.entries(v.attributes || {}).filter(([, val]) => val);
                     return (
                       <div key={v.id} onClick={editMode ? () => editVariant(v) : undefined}
@@ -329,14 +359,8 @@ export default function Catalogue() {
                           )}
                           <div style={{ fontSize: 10, color: C.textMuted }}>{v.sku}</div>
                         </div>
-                        <div style={{ textAlign: 'center', minWidth: 66 }}>
-                          <span style={{ display: 'inline-block', minWidth: 40, padding: '3px 10px', borderRadius: 999, background: stockColor + '18', color: stockColor, fontSize: 17, fontWeight: 800 }}>{fmtNum(stock)}</span>
-                          <div style={{ fontSize: 9, color: C.textMuted, marginTop: 2 }}>{t('stock')}{neg ? ' ⚠' : low ? ' !' : ''}</div>
-                        </div>
-                        <div style={{ minWidth: 88, textAlign: 'end' }}>
-                          <div style={{ fontWeight: 800, color: C.primary, fontSize: 14 }}>{fmtCur(v.sellingPriceDefault, displayCurrency, usdRate)}</div>
-                          <div style={{ fontSize: 10, color: C.textMuted }}>{t('avgCost')} {fmtCur(v.purchasePriceAvg, displayCurrency, usdRate)}</div>
-                        </div>
+                        {stockPill(v)}
+                        {priceBlock(v)}
                       </div>
                     );
                   })}
@@ -356,6 +380,7 @@ export default function Catalogue() {
   );
 }
 
+const badgeGroup = { position: 'absolute', top: 10, insetInlineStart: 10, zIndex: 2, background: 'rgba(13,59,110,.92)', color: '#fff', fontSize: 11, fontWeight: 800, borderRadius: 999, padding: '3px 10px' };
 const imgBtn = { border: 'none', background: 'rgba(255,255,255,.92)', color: C.primary, borderRadius: 8, width: 30, height: 30, cursor: 'pointer', fontWeight: 800, fontSize: 14, boxShadow: '0 1px 3px rgba(0,0,0,.2)' };
 const pencilBtn = { position: 'absolute', top: 6, insetInlineEnd: 6, border: 'none', background: C.surfaceDark, color: C.primary, borderRadius: 8, width: 26, height: 26, cursor: 'pointer', fontWeight: 700 };
 
