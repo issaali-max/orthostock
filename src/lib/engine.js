@@ -213,7 +213,15 @@ export function dataHealth(data) {
   const dupGroups = Object.values(groups).filter((g) => g.length > 1)
     .map((g) => g.slice().sort((a, b) => b.invoices - a.invoices)); // primary (most invoices) first
   const dups = dupGroups.map((g) => g[0].name);
-  return { orphan, hiddenDebt, dupCustomers: [...new Set(dups)], dupGroups, totalDebt: round2(totalDebt) };
+  // Duplicate MATERIALS: same normalized name (size + position included) across variants
+  const vById = data[TABLES.variants] || [];
+  const matG = {};
+  vById.filter((v) => v.isActive !== false).forEach((v) => {
+    const k = (v.nameEn || '').replace(/\s+/g, ' ').trim().toLowerCase(); if (!k) return;
+    (matG[k] = matG[k] || []).push({ id: v.id, name: v.nameEn, sku: v.sku || '', stock: num(v.stockQty) });
+  });
+  const dupMaterials = Object.values(matG).filter((g) => g.length > 1);
+  return { orphan, hiddenDebt, dupCustomers: [...new Set(dups)], dupGroups, dupMaterials, totalDebt: round2(totalDebt) };
 }
 
 // Merge duplicate customers: repoint every invoice / special price from the

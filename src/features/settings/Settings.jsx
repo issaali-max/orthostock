@@ -299,7 +299,7 @@ export default function Settings() {
       <Modal open={showHealth} onClose={() => setShowHealth(false)} title={`🩺 ${t('dataHealth')}`}>
         {showHealth && (() => {
           const h = dataHealth(data);
-          const ok = h.orphan.length === 0 && h.hiddenDebt.length === 0 && h.dupCustomers.length === 0;
+          const ok = h.orphan.length === 0 && h.hiddenDebt.length === 0 && h.dupCustomers.length === 0 && (!h.dupMaterials || h.dupMaterials.length === 0);
           const Row = ({ tone, children }) => <div style={{ background: tone === 'bad' ? '#FBECEC' : C.surfaceAlt, borderRadius: 8, padding: '6px 10px', fontSize: 12, color: C.textMid }}>{children}</div>;
           return (
             <div style={{ display: 'grid', gap: 10 }}>
@@ -330,6 +330,19 @@ export default function Settings() {
                           showToast(`✓ ${r.merged} → 1 · ${r.moved} ${t('invoices')}`, 'success');
                           setShowHealth(false);
                         }}>🔗 {t('mergeInto')} ✅ {g[0].phone || g[0].name}</Btn>
+                      </div>
+                    ))}</div></div>)}
+                  {h.dupMaterials && h.dupMaterials.length > 0 && (<div style={{ marginTop: 10 }}><div style={{ fontSize: 12, fontWeight: 800, color: C.warning, marginBottom: 4 }}>⚠ {t('dupMaterials')} ({h.dupMaterials.length})</div>
+                    <div style={{ display: 'grid', gap: 8 }}>{h.dupMaterials.map((g, i) => (
+                      <div key={i} style={{ background: C.surfaceAlt, borderRadius: 10, padding: '8px 10px' }}>
+                        <div style={{ fontWeight: 800, fontSize: 13, color: C.text, marginBottom: 4 }}>{g[0].name}</div>
+                        {g.map((m) => (
+                          <div key={m.id} style={{ fontSize: 11, color: C.textMid, display: 'flex', justifyContent: 'space-between' }}>
+                            <span>{m.sku || '—'}</span>
+                            <span style={{ color: C.textMuted }}>{t('stock')}: {m.stock}</span>
+                          </div>
+                        ))}
+                        <div style={{ fontSize: 10, color: C.textMuted, marginTop: 4 }}>{t('dupMaterialsHint')}</div>
                       </div>
                     ))}</div></div>)}
                 </>
