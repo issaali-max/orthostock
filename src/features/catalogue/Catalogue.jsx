@@ -288,7 +288,12 @@ export default function Catalogue() {
           )}
         </div>
       )}
-      {editMode && <Btn size="sm" style={{ marginBottom: 10 }} onClick={() => openEdit(TABLES.products, 'product', blankProduct(catId))}>＋ {t('addGroup')}</Btn>}
+      {editMode && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+          <Btn size="sm" onClick={() => openEdit(TABLES.products, 'product', blankProduct(catId))}>🗂️ {t('addGroup')}</Btn>
+          <Btn size="sm" variant="outline" onClick={() => openEdit(TABLES.variants, 'variant', { ...blankVariant(''), categoryId: catId, groupMode: 'existing' })}>＋ {t('addMaterial')}</Btn>
+        </div>
+      )}
 
       {shownProducts.length === 0 ? <EmptyState icon="📦" text={t('noProducts')} /> : (
         <div style={{ display: 'grid', gap: 16 }}>
@@ -298,12 +303,11 @@ export default function Catalogue() {
             const isGroup = vs.length > 1;              // group = multiple sizes; else a standalone material
             const totalStock = vs.reduce((s, v) => s + num(v.stockQty), 0);
             const editProd = () => openEdit(TABLES.products, 'product', { ...blankProduct(catId), ...p });
-            // One primary action (add material). Editing the group's name/photo
-            // happens by tapping the group header itself — no separate edit button.
+            // Editing is done by tapping the card/header. The bottom toolbar only
+            // holds delete — adding materials/groups happens from the top buttons.
             const editToolbar = () => editMode && (
-              <div style={{ display: 'flex', gap: 8, borderTop: `1px solid ${C.surfaceAlt}`, padding: '8px 12px', background: C.surfaceAlt + '80' }}>
-                <button onClick={(e) => { e.stopPropagation(); openEdit(TABLES.variants, 'variant', blankVariant(p.id)); }} style={{ ...toolBtn, flex: 1, background: C.primary, color: '#fff', border: 'none' }}>＋ {t('addMaterial')}</button>
-                <button onClick={(e) => { e.stopPropagation(); delProduct(p, vs.length); }} style={{ ...toolBtn, color: C.danger }}>🗑</button>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: `1px solid ${C.surfaceAlt}`, padding: '6px 12px', background: C.surfaceAlt + '80' }}>
+                <button onClick={(e) => { e.stopPropagation(); delProduct(p, vs.length); }} style={{ ...toolBtn, color: C.danger }}>🗑 {t('delete')}</button>
               </div>
             );
             const stockPill = (v) => {
