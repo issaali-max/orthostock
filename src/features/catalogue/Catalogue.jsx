@@ -300,7 +300,7 @@ export default function Catalogue() {
       {editMode && (
         <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
           <Btn size="sm" onClick={() => openEdit(TABLES.products, 'product', blankProduct(catId))}>🗂️ {t('addGroup')}</Btn>
-          <Btn size="sm" variant="outline" onClick={() => openEdit(TABLES.variants, 'variant', { ...blankVariant(''), categoryId: catId, groupMode: 'existing' })}>＋ {t('addMaterial')}</Btn>
+          <Btn size="sm" variant="outline" onClick={() => openEdit(TABLES.variants, 'variant', { ...blankVariant(''), categoryId: catId, groupMode: 'none' })}>＋ {t('addMaterial')}</Btn>
         </div>
       )}
 
@@ -430,7 +430,7 @@ function EditModal({ edit, setEdit, app, t, products, categories, onSave, onDele
       </>}>
       {edit.type === 'category' && <CategoryForm rec={edit.rec} setRec={setRec} t={t} />}
       {edit.type === 'product' && <ProductForm rec={edit.rec} setRec={setRec} t={t} cats={categories} />}
-      {edit.type === 'variant' && <VariantForm rec={edit.rec} setRec={setRec} t={t} products={products} categories={categories}
+      {edit.type === 'variant' && <VariantForm rec={edit.rec} setRec={setRec} t={t} products={products} categories={categories} variants={variants}
         onAddOption={(catId, key, opt) => addOptionToCategory(app, categories, catId, key, opt)} />}
       {edit.type === 'variant' && edit.rec.id && <StockHistory app={app} t={t} variantId={edit.rec.id} />}
     </Modal>

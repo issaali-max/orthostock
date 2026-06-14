@@ -217,7 +217,7 @@ export function ProductForm({ rec, setRec, t, cats }) {
   );
 }
 
-export function VariantForm({ rec, setRec, t, products, categories, onAddOption }) {
+export function VariantForm({ rec, setRec, t, products, categories, variants = [], onAddOption }) {
   const set = (k, v) => setRec((r) => ({ ...r, [k]: v }));
   // 2-level UI: the material picks a CATEGORY only. For an existing material the
   // category comes from its (hidden) product; for a new one from rec.categoryId.
@@ -232,7 +232,9 @@ export function VariantForm({ rec, setRec, t, products, categories, onAddOption 
           options={categories.filter((c) => c.isActive !== false).map((c) => ({ value: c.id, label: `${c.icon} ${c.nameAr || c.nameEn}` }))} />
       </Field>
       {catId && (() => {
-        const groupsInCat = products.filter((p) => p.categoryId === catId && p.isActive !== false)
+        const vCount = (pid) => variants.filter((v) => v.productId === pid && v.isActive !== false).length;
+        const groupsInCat = products.filter((p) => p.categoryId === catId && p.isActive !== false
+            && (p.isGroup === true || vCount(p.id) > 1))   // real groups only, not standalone materials
           .slice().sort((a, b) => (a.nameEn || '').localeCompare(b.nameEn || ''));
         // current mode: existing group selected / typing a new group / standalone material
         const mode = rec.groupMode || ((rec.groupId || rec.productId) ? 'existing' : 'none');
