@@ -15,7 +15,7 @@ import { num } from '../../lib/money.js';
 export const blankCategory = () => ({ nameAr: '', nameEn: '', icon: '🦷', image_url: '', color: C.primary, attributes: [], isActive: true });
 export const blankProduct = (categoryId = '') => ({ nameEn: '', brand: '', categoryId, icon: '📦', image_url: '', description: '', isActive: true });
 export const blankVariant = (productId = '') => ({
-  productId, categoryId: '', sku: '', nameEn: '', attributes: {},
+  productId, categoryId: '', sku: '', nameEn: '', attributes: {}, image_url: '',
   purchasePriceLatest: '', purchasePriceAvg: '', purchasePriceMin: '', purchasePriceMax: '',
   sellingPriceDefault: '', stockQty: '', stockMin: '', unit: 'piece', notes: '', isActive: true,
 });
@@ -88,6 +88,12 @@ export async function saveVariant(app, rec) {
   };
   if (rec.id) await app.updateRow(TABLES.variants, rec.id, payload);
   else await app.createRow(TABLES.variants, payload);
+  // Catalogue cards show the PRODUCT image. Mirror the material's image onto its
+  // product so a photo added on a material actually appears on the card.
+  if (rec.image_url) {
+    const prod = (app.data[TABLES.products] || []).find((p) => p.id === productId);
+    if (prod && (prod.image_url || '') !== rec.image_url) await app.updateRow(TABLES.products, productId, { image_url: rec.image_url });
+  }
   return true;
 }
 
@@ -213,6 +219,9 @@ export function VariantForm({ rec, setRec, t, products, categories, onAddOption 
         <Input value={rec.sku} onChange={(v) => set('sku', v.toUpperCase())} placeholder="BRK-018-MET" />
       </Field>
       <Field label={t('nameEn')} hint="English only"><Input value={rec.nameEn} onChange={(v) => set('nameEn', v)} /></Field>
+      <Field label={t('image')} hint={t('imageOrIcon')}>
+        <ImageUpload value={rec.image_url} onChange={(v) => set('image_url', v)} fallback={cat?.icon || '📦'} />
+      </Field>
       <Field label={t('brand')}>
         <Input value={rec.brand ?? inheritedBrand} onChange={(v) => set('brand', v)} placeholder="3M, Ormco, ..." />
       </Field>

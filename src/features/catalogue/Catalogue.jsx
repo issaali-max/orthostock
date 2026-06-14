@@ -64,7 +64,7 @@ export default function Catalogue() {
   // the hidden product, so without this the form's Category/Brand look empty)
   const editVariant = (v) => {
     const prod = products.find((pp) => pp.id === v.productId);
-    openEdit(TABLES.variants, 'variant', { ...v, attributes: { ...(v.attributes || {}) }, categoryId: prod?.categoryId || '', brand: prod?.brand || '', groupId: '', groupName: '' });
+    openEdit(TABLES.variants, 'variant', { ...v, attributes: { ...(v.attributes || {}) }, categoryId: prod?.categoryId || '', brand: prod?.brand || '', image_url: v.image_url || prod?.image_url || '', groupId: '', groupName: '' });
   };
   const saveEdit = async () => {
     const fn = edit.table === TABLES.categories ? saveCategory : edit.table === TABLES.products ? saveProduct : saveVariant;
