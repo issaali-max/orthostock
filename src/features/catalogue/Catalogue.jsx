@@ -64,7 +64,16 @@ export default function Catalogue() {
   // the hidden product, so without this the form's Category/Brand look empty)
   const editVariant = (v) => {
     const prod = products.find((pp) => pp.id === v.productId);
-    openEdit(TABLES.variants, 'variant', { ...v, attributes: { ...(v.attributes || {}) }, categoryId: prod?.categoryId || '', brand: prod?.brand || '', image_url: v.image_url || prod?.image_url || '', groupId: '', groupName: '' });
+    // Is this material part of a real group (its product has >1 material) or
+    // standalone (its product is just itself)? Pre-select accordingly so the
+    // group picker opens showing the correct current state.
+    const siblings = variants.filter((x) => x.productId === v.productId && x.isActive !== false);
+    const inGroup = siblings.length > 1;
+    openEdit(TABLES.variants, 'variant', {
+      ...v, attributes: { ...(v.attributes || {}) }, categoryId: prod?.categoryId || '', brand: prod?.brand || '',
+      image_url: v.image_url || prod?.image_url || '',
+      groupId: inGroup ? v.productId : '', groupName: '', groupMode: inGroup ? 'existing' : 'none',
+    });
   };
   const saveEdit = async () => {
     const fn = edit.table === TABLES.categories ? saveCategory : edit.table === TABLES.products ? saveProduct : saveVariant;
