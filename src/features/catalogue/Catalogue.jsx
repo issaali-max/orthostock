@@ -27,7 +27,7 @@ export default function Catalogue() {
   const [archFilter, setArchFilter] = useState('');
   const [editMode, setEditMode] = useState(false);
   const [edit, setEdit] = useState(null);
-  const [flat, setFlat] = useState(true);
+  const [flat, setFlat] = useState(false); // default: browse by category (flat all-materials view removed)
   const [flatStatus, setFlatStatus] = useState('');
   const [flatBrand, setFlatBrand] = useState('');
   const [flatCat, setFlatCat] = useState(null);
@@ -230,20 +230,19 @@ export default function Catalogue() {
     return (
       <div>
         <PageHeader title={t('catalogue')} action={<div style={{ display: 'flex', gap: 6 }}>
-          <Btn size="sm" variant="light" onClick={() => { setFlat(true); setQ(''); }}>📦 {t('allMaterials')}</Btn>
           {editMode && <Btn size="sm" onClick={() => openEdit(TABLES.categories, 'category', blankCategory())}>＋</Btn>}
           {EditToggle}
         </div>} />
         <SearchBar value={q} onChange={setQ} placeholder={t('search')} />
         {list.length === 0 ? <EmptyState icon="🗂️" text={t('noData')} /> : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 14 }}>
             {list.map((c) => (
               <div key={c.id} onClick={() => { setCatId(c.id); setQ(''); }}
-                style={{ position: 'relative', background: '#fff', border: `1px solid ${C.border}`, borderRadius: RADIUS, boxShadow: SHADOW, padding: '18px 12px', cursor: 'pointer', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                style={{ position: 'relative', background: '#fff', border: `1px solid ${C.border}`, borderRadius: RADIUS, boxShadow: SHADOW, padding: '20px 12px 16px', cursor: 'pointer', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
                 {editMode && <button onClick={(e) => { e.stopPropagation(); openEdit(TABLES.categories, 'category', JSON.parse(JSON.stringify(c))); }} style={pencilBtn}>✎</button>}
-                <div style={{ width: 58, height: 58, borderRadius: 16, overflow: 'hidden', background: c.image_url ? `center/cover no-repeat url(${c.image_url})` : (c.color || C.primary) + '1f', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 30 }}>{!c.image_url && c.icon}</div>
-                <div style={{ fontWeight: 800, color: C.text, fontSize: 14 }}>{c.nameEn}</div>
-                <div style={{ fontSize: 12, color: C.textMuted }}>{c.nameAr}</div>
+                <div style={{ width: 96, height: 96, borderRadius: 20, overflow: 'hidden', background: c.image_url ? `center/cover no-repeat url(${c.image_url})` : (c.color || C.primary) + '1f', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 46 }}>{!c.image_url && c.icon}</div>
+                <div style={{ fontWeight: 900, color: C.text, fontSize: 17, lineHeight: 1.3 }}>{c.nameAr || c.nameEn}</div>
+                {c.nameAr && c.nameEn && <div style={{ fontSize: 11.5, color: C.textMuted, marginTop: -4 }}>{c.nameEn}</div>}
                 <Badge tone="info">{products.filter((p) => p.categoryId === c.id).length} {t('products')}</Badge>
               </div>
             ))}
