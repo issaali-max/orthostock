@@ -13,7 +13,7 @@ import { num } from '../../lib/money.js';
 
 // ── Blank factories ──
 export const blankCategory = () => ({ nameAr: '', nameEn: '', icon: '🦷', image_url: '', color: C.primary, attributes: [], isActive: true });
-export const blankProduct = (categoryId = '') => ({ nameEn: '', brand: '', categoryId, icon: '📦', image_url: '', description: '', isActive: true });
+export const blankProduct = (categoryId = '') => ({ nameEn: '', brand: '', categoryId, icon: '📦', image_url: '', description: '', isGroup: true, isActive: true });
 export const blankVariant = (productId = '') => ({
   productId, categoryId: '', sku: '', nameEn: '', attributes: {}, image_url: '',
   purchasePriceLatest: '', purchasePriceAvg: '', purchasePriceMin: '', purchasePriceMax: '',
@@ -60,7 +60,7 @@ export async function saveVariant(app, rec) {
     const siblings = (app.data[TABLES.variants] || []).filter((v) => v.productId === productId && v.id !== rec.id && v.isActive !== false);
     if (!productId || siblings.length > 0) {
       const pname = (rec.nameEn || rec.sku).trim();
-      const saved = await app.createRow(TABLES.products, { nameAr: pname, nameEn: pname, brand: rec.brand || '', categoryId: wantCat, icon: '📦', image_url: rec.image_url || '', description: '', isActive: true });
+      const saved = await app.createRow(TABLES.products, { nameAr: pname, nameEn: pname, brand: rec.brand || '', categoryId: wantCat, icon: '📦', image_url: rec.image_url || '', description: '', isGroup: false, isActive: true });
       productId = saved?.id || null;
     }
   } else if ((rec.groupName || '').trim() && wantCat) {
@@ -69,7 +69,7 @@ export async function saveVariant(app, rec) {
     const match = products.find((p) => p.categoryId === wantCat && (p.nameEn || '').trim().toLowerCase() === gname.toLowerCase());
     if (match) productId = match.id;
     else {
-      const saved = await app.createRow(TABLES.products, { nameEn: gname, brand: rec.brand || '', categoryId: wantCat, icon: '📦', image_url: '', description: '', isActive: true });
+      const saved = await app.createRow(TABLES.products, { nameEn: gname, brand: rec.brand || '', categoryId: wantCat, icon: '📦', image_url: '', description: '', isGroup: true, isActive: true });
       productId = saved?.id || null;
     }
   } else if (rec.categoryId && rec.categoryId !== currentCatId) {
@@ -77,7 +77,7 @@ export async function saveVariant(app, rec) {
     const match = products.find((p) => p.categoryId === rec.categoryId && (p.nameEn || '').trim().toLowerCase() === pname.toLowerCase());
     if (match) productId = match.id;
     else {
-      const saved = await app.createRow(TABLES.products, { nameAr: pname, nameEn: pname, brand: rec.brand || '', categoryId: rec.categoryId, icon: '📦', image_url: '', description: '', isActive: true });
+      const saved = await app.createRow(TABLES.products, { nameAr: pname, nameEn: pname, brand: rec.brand || '', categoryId: rec.categoryId, icon: '📦', image_url: '', description: '', isGroup: false, isActive: true });
       productId = saved?.id || null;
     }
   }

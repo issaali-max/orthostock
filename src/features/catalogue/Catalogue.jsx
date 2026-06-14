@@ -309,7 +309,7 @@ export default function Catalogue() {
           {shownProducts.map((p) => {
             const vs = (variantsByProduct[p.id] || []).filter(matchVariantArch);
             const img = p.image_url;
-            const isGroup = vs.length > 1;              // group = multiple sizes; else a standalone material
+            const isGroup = p.isGroup === true || vs.length > 1; // a group stays a group even with one size
             const totalStock = vs.reduce((s, v) => s + num(v.stockQty), 0);
             const editProd = () => openEdit(TABLES.products, 'product', { ...blankProduct(catId), ...p });
             // Editing is done by tapping the card/header. The bottom toolbar only
@@ -361,7 +361,7 @@ export default function Catalogue() {
                     {editMode && <span style={{ ...badgeGroup, insetInlineStart: 'auto', insetInlineEnd: 10, background: C.primary }}>✎ {t('edit')}</span>}
                     <div style={{ position: 'absolute', insetInlineStart: 0, insetInlineEnd: 0, bottom: 0, padding: '38px 16px 13px', background: 'linear-gradient(to top, rgba(0,0,0,.9), rgba(0,0,0,.45) 45%, rgba(0,0,0,0))' }}>
                       <div style={{ fontSize: 21, fontWeight: 900, color: '#fff', lineHeight: 1.2, textShadow: '0 2px 6px rgba(0,0,0,.9)' }}>{prettyName(p.nameEn)}</div>
-                      <div style={{ fontSize: 12.5, fontWeight: 700, color: '#fff', marginTop: 3, textShadow: '0 1px 4px rgba(0,0,0,.9)' }}>{[p.brand, `${vs.length} ${t('variations')}`, `${t('stock')} ${fmtNum(totalStock)}`].filter(Boolean).join(' · ')}</div>
+                      <div style={{ fontSize: 12.5, fontWeight: 700, color: '#fff', marginTop: 3, textShadow: '0 1px 4px rgba(0,0,0,.9)' }}>{[p.brand, (vs.length === 1 ? t('oneSize') : `${vs.length} ${t('variations')}`), `${t('stock')} ${fmtNum(totalStock)}`].filter(Boolean).join(' · ')}</div>
                     </div>
                   </div>
                 ) : (
@@ -370,7 +370,7 @@ export default function Catalogue() {
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <span style={{ ...badgeGroup, position: 'static', display: 'inline-block', marginBottom: 4 }}>🗂️ {t('group')}{editMode ? ` · ✎ ${t('edit')}` : ''}</span>
                       <div style={{ fontSize: 19, fontWeight: 900, color: C.text, lineHeight: 1.2 }}>{prettyName(p.nameEn)}</div>
-                      <div style={{ fontSize: 12, color: C.textMuted, marginTop: 3 }}>{[p.brand, `${vs.length} ${t('variations')}`].filter(Boolean).join(' · ')}</div>
+                      <div style={{ fontSize: 12, color: C.textMuted, marginTop: 3 }}>{[p.brand, (vs.length === 1 ? t('oneSize') : `${vs.length} ${t('variations')}`)].filter(Boolean).join(' · ')}</div>
                     </div>
                   </div>
                 )}
@@ -396,6 +396,11 @@ export default function Catalogue() {
                       </div>
                     );
                   })}
+                  {vs.length === 0 && (
+                    <div style={{ padding: '14px 16px', borderTop: `1px solid ${C.surfaceAlt}`, fontSize: 12.5, color: C.textMuted, textAlign: 'center' }}>
+                      {t('emptyGroupHint')}
+                    </div>
+                  )}
                 </div>
                 {editToolbar()}
               </div>
