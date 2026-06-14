@@ -48,6 +48,7 @@ export async function saveVariant(app, rec) {
   // change, otherwise find-or-create a 1:1 product in the chosen category named
   // after the material. The user never sees or manages products directly.
   let productId = rec.productId || null;
+  const prevProductId = rec.productId || null; // remember where it lived, to clean up an emptied group
   const products = app.data[TABLES.products] || [];
   const currentCatId = products.find((p) => p.id === productId)?.categoryId || '';
   const wantCat = rec.categoryId || currentCatId;
@@ -82,6 +83,16 @@ export async function saveVariant(app, rec) {
     }
   }
   if (!productId) return false; // a material must live under a category
+  // Align the product's group flag with the user's choice so a one-material group
+  // can be turned into a true standalone (and vice-versa) without leaving a shell.
+  {
+    const prod = (app.data[TABLES.products] || []).find((p) => p.id === productId);
+    if (prod) {
+      const shouldBeGroup = !!rec.groupId || rec.groupMode === 'existing' || (rec.groupName || '').trim().length > 0;
+      if (rec.groupMode === 'none' && prod.isGroup === true) await app.updateRow(TABLES.products, productId, { isGroup: false, nameEn: (rec.nameEn || prod.nameEn || '').trim() || prod.nameEn });
+      else if (shouldBeGroup && prod.isGroup !== true) await app.updateRow(TABLES.products, productId, { isGroup: true });
+    }
+  }
   // Brand lives on the hidden product; update it there when the user edited it.
   if (rec.brand !== undefined) {
     const prod = (app.data[TABLES.products] || []).find((p) => p.id === productId);
@@ -103,6 +114,12 @@ export async function saveVariant(app, rec) {
   if (rec.image_url) {
     const prod = (app.data[TABLES.products] || []).find((p) => p.id === productId);
     if (prod && (prod.image_url || '') !== rec.image_url) await app.updateRow(TABLES.products, productId, { image_url: rec.image_url });
+  }
+  // If the material moved to a different product and its old group is now empty,
+  // remove the empty group shell so no contentless groups are left behind.
+  if (prevProductId && prevProductId !== productId) {
+    const left = (app.data[TABLES.variants] || []).filter((v) => v.productId === prevProductId && v.id !== rec.id && v.isActive !== false);
+    if (left.length === 0) await app.deleteRow(TABLES.products, prevProductId);
   }
   return true;
 }
