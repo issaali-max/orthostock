@@ -29,7 +29,7 @@ export default function Settings() {
     try {
       const r = await pushAllLocal();
       await pull(() => {});
-      await Promise.all(['variants','customers','suppliers','categories','products','invoices','invoiceItems','expenses','expenseGroups','securities','tradeLots','tradeSells','cashFlows','externalDebts'].map((tb) => refresh(TABLES[tb] || tb).catch(() => {})));
+      await Promise.all(['variants','customers','suppliers','categories','products','invoices','invoiceItems','expenses','expenseGroups','securities','tradeLots','tradeSells','cashFlows','externalDebts','users','purchases','purchaseItems','customerPrices','stockMovements','otherDebts','settings'].map((tb) => refresh(TABLES[tb] || tb).catch(() => {})));
       if (r.errors && r.errors.length) { console.warn('sync errors', r.errors); showToast(`⬆ ${r.pushed} · ⚠ ${r.errors[0]}`, 'error'); }
       else showToast(`☁️ ${r.pushed} ✓`, 'success');
     } catch (e) { showToast(`${e.message || e}`, 'error'); }
