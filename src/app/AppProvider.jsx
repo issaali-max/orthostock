@@ -100,26 +100,25 @@ export function AppProvider({ children }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings?.oneDrive?.auto, settings?.oneDrive?.clientId]);
 
-  // ── Auth: try Supabase Auth first (real, server-verified, lets RLS lock the
-  // DB). Fall back to the local gate when offline or before Auth is set up, so
-  // the app never breaks during the transition. ──
+  // ── Auth: try Supabase Auth first (gives the session RLS needs). If it doesn't
+  // succeed, ALWAYS fall back to the local gate — the local gate only unlocks the
+  // UI + local data (cloud access still needs a valid Supabase session under RLS),
+  // so it is a safe recovery/offline path and can never lock the owner out. ──
   const login = useCallback(async (email, password) => {
     const mail = String(email).trim().toLowerCase();
-    // 1) Supabase Auth (only meaningful when online + configured)
+    // 1) Supabase Auth (when online + configured). On success, prefer it.
     if (authConfigured() && navigator.onLine) {
-      const res = await authSignIn(mail, password);
-      if (res.ok) {
-        // Use the app-level user record (role/name) if it exists; else a minimal admin.
-        let u = await db.findBy(TABLES.users, 'email', mail);
-        if (!u) u = { id: 'user-' + mail, name: mail.split('@')[0], email: mail, role: 'admin', isActive: true };
-        setUser(u); try { localStorage.setItem(SESSION_KEY, mail); } catch {}
-        return true;
-      }
-      // If Auth is enabled and rejected the credentials while online, don't silently
-      // fall back (that would bypass real auth). Only fall through when offline.
-      if (!navigator.onLine) { /* fall through to local gate */ } else return false;
+      try {
+        const res = await authSignIn(mail, password);
+        if (res.ok) {
+          let u = await db.findBy(TABLES.users, 'email', mail);
+          if (!u) u = { id: 'user-' + mail, name: mail.split('@')[0], email: mail, role: 'admin', isActive: true };
+          setUser(u); try { localStorage.setItem(SESSION_KEY, mail); } catch {}
+          return true;
+        }
+      } catch { /* network/auth error — fall through to local gate */ }
     }
-    // 2) Local gate (offline, or Supabase Auth not configured yet)
+    // 2) Local gate (recovery / offline / before Supabase Auth is set up)
     const u = await db.findBy(TABLES.users, 'email', mail);
     if (!u || u.isActive === false) return false;
     const { ok, needsUpgrade } = await verifyPassword(password, u.password);
