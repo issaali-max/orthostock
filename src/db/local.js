@@ -99,6 +99,15 @@ export function idbAtomicMutations(ops, outbox = []) {
 }
 export const outboxAll = () => idbGetAll('outbox');
 export const outboxDelete = (seq) => idbDelete('outbox', seq);
+// Record a failed attempt on an outbox op (so a permanently-bad row can be
+// skipped after several tries instead of blocking the whole queue forever).
+export async function outboxBumpTries(seq) {
+  const op = await idbGet('outbox', seq);
+  if (!op) return 0;
+  const tries = (op.tries || 0) + 1;
+  await idbPut('outbox', { ...op, tries });
+  return tries;
+}
 
 // ── Meta (small key/value: lastSyncAt, etc.) ──
 export const metaGet = (key) => idbGet('meta', key).then((r) => (r ? r.value : null));

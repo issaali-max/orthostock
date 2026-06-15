@@ -13,7 +13,9 @@
 // ─────────────────────────────────────────────────────────────
 import { createClient } from '@supabase/supabase-js';
 import { TABLES } from '../lib/constants.js';
-import { idbGetAll, idbBulkPut, outboxAll, outboxDelete, metaSet } from './local.js';
+import { idbGetAll, idbBulkPut, outboxAll, outboxDelete, outboxBumpTries, enqueueMutation, metaSet, metaGet } from './local.js';
+
+const MAX_OP_TRIES = 6; // after this many failed attempts, drop a stuck outbox op
 
 // Supabase connection. Reads Vercel env vars first; falls back to the project's
 // own values so sync works out-of-the-box without any Vercel configuration.
@@ -94,6 +96,7 @@ export async function flush() {
   state.syncing = true; emit();
   try {
     const ops = (await outboxAll()).sort((a, b) => a.seq - b.seq);
+    const failed = [];
     for (const op of ops) {
       try {
         if (op.type === 'remove') {
@@ -105,9 +108,24 @@ export async function flush() {
         }
         await outboxDelete(op.seq);
       } catch (e) {
-        console.warn('[sync] op failed, will retry later:', e.message || e);
-        break; // keep order; retry this op next cycle
+        // Skip this op and keep going so ONE bad row never blocks the rest of the
+        // queue (and never blocks pull forever). After several tries, drop it and
+        // record it so the user can be told instead of syncing being stuck.
+        const tries = await outboxBumpTries(op.seq);
+        if (tries >= MAX_OP_TRIES) {
+          await outboxDelete(op.seq);
+          failed.push({ table: op.table, id: op.id, error: String(e.message || e) });
+          console.warn(`[sync] dropping op after ${tries} tries:`, op.table, op.id, e.message || e);
+        } else {
+          console.warn(`[sync] op failed (try ${tries}/${MAX_OP_TRIES}), will retry:`, op.table, e.message || e);
+        }
+        // continue to next op (do NOT break)
       }
+    }
+    if (failed.length) {
+      const prev = (await metaGet('failedSync')) || [];
+      await metaSet('failedSync', [...prev, ...failed].slice(-50));
+      state.failedCount = (state.failedCount || 0) + failed.length;
     }
     state.lastSyncAt = Date.now();
     await metaSet('lastSyncAt', state.lastSyncAt);
@@ -121,13 +139,29 @@ export async function pull(onData) {
   if (!supabase || !isOnline()) return;
   const o = await outboxAll();
   if (o.length) return; // don't overwrite unsynced local writes
+  let pushedBack = 0;
   for (const table of Object.values(TABLES)) {
     try {
       const { data, error } = await supabase.from(table).select('*');
-      if (!error && Array.isArray(data) && data.length) await idbBulkPut(table, data);
+      if (error || !Array.isArray(data)) continue;
+      // Merge by updatedAt so the NEWEST edit wins, not whoever synced last:
+      //  • cloud newer (or local missing) → take cloud
+      //  • local newer → keep local AND re-queue it so the cloud converges
+      const localRows = await idbGetAll(table);
+      const localById = new Map(localRows.map((r) => [r.id, r]));
+      const toWrite = [];
+      for (const cloud of data) {
+        const local = localById.get(cloud.id);
+        const cu = Number(cloud.updatedAt || 0);
+        const lu = Number(local?.updatedAt || 0);
+        if (!local || cu >= lu) toWrite.push(cloud);          // cloud wins
+        else if (lu > cu) { await enqueueMutation({ type: 'update', table, id: local.id, row: local }); pushedBack++; } // local newer → push back
+      }
+      if (toWrite.length) await idbBulkPut(table, toWrite);
     } catch { /* table may not exist yet; ignore */ }
   }
   state.lastSyncAt = Date.now(); emit();
+  if (pushedBack > 0) { await refreshPending(); flush(); } // send corrected rows up
   if (onData) onData();
 }
 
