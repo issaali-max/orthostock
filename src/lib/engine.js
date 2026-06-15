@@ -182,27 +182,32 @@ export async function reverseInvoice(app, invoiceId) {
 export async function commitPurchase(app, purchaseData, lines) {
   const variants = app.data[TABLES.variants] || [];
   const vById = (id) => variants.find((x) => x.id === id);
-  const po = await db.insert(TABLES.purchases, purchaseData);
+  // Build every write first, then commit in ONE atomic transaction so a purchase,
+  // its items, the stock movements and the per-variant cost/stock updates are
+  // all-or-nothing — never half written if something fails mid-way.
+  const poId = newId();
+  const specs = [{ op: 'insert', table: TABLES.purchases, row: { ...purchaseData, id: poId } }];
   for (const l of lines) {
     const v = vById(l.variantId);
-    await db.insert(TABLES.purchaseItems, { purchaseId: po.id, variantId: l.variantId, qty: num(l.qty), unitCost: num(l.unitCost), total: round2(num(l.qty) * num(l.unitCost)) });
+    const qty = num(l.qty); const unitCost = num(l.unitCost);
+    specs.push({ op: 'insert', table: TABLES.purchaseItems, row: { purchaseId: poId, variantId: l.variantId, qty, unitCost, total: round2(qty * unitCost) } });
     if (v) {
-      const oldQty = num(v.stockQty); const addQty = num(l.qty); const unitCost = num(l.unitCost);
-      const newQty = oldQty + addQty;
+      const oldQty = num(v.stockQty); const newQty = oldQty + qty;
       const oldAvg = num(v.purchasePriceAvg);
-      const newAvg = oldQty > 0 ? safeDiv(oldQty * oldAvg + addQty * unitCost, newQty, unitCost) : unitCost;
+      const newAvg = oldQty > 0 ? safeDiv(oldQty * oldAvg + qty * unitCost, newQty, unitCost) : unitCost;
       const existing = [v.purchasePriceMin, v.purchasePriceMax].map(num).filter((x) => x > 0);
       const min = existing.length ? Math.min(...existing, unitCost) : unitCost;
       const max = Math.max(num(v.purchasePriceMax), unitCost);
-      await db.update(TABLES.variants, v.id, {
+      specs.push({ op: 'update', table: TABLES.variants, id: v.id, patch: {
         stockQty: round2(newQty), purchasePriceLatest: unitCost,
         purchasePriceAvg: round2(newAvg), purchasePriceMin: round2(min), purchasePriceMax: round2(max),
-      });
-      await db.insert(TABLES.stockMovements, { variantId: v.id, type: 'purchase', qtyChange: addQty, qtyAfter: round2(newQty), refType: 'purchase', refId: po.id });
+      } });
+      specs.push({ op: 'insert', table: TABLES.stockMovements, row: { variantId: v.id, type: 'purchase', qtyChange: qty, qtyAfter: round2(newQty), refType: 'purchase', refId: poId } });
     }
   }
+  const res = await db.atomicMutations(specs);
   await Promise.all([app.refresh(TABLES.purchases), app.refresh(TABLES.purchaseItems), app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements)]);
-  return po;
+  return res.find((r) => r && r.id === poId) || { id: poId };
 }
 
 // ── Customer (clinic/doctor) lifetime stats ──
