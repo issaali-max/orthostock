@@ -3,6 +3,7 @@ import { useApp } from '../../app/AppProvider.jsx';
 import { C, TABLES } from '../../lib/constants.js';
 import { Badge, Btn, Card, Field, Input, Modal, PageHeader, Select } from '../../ui/components.jsx';
 import { resetStore, dbMode } from '../../db/db.js';
+import { isHashed, makeHashedPassword } from '../../lib/auth.js';
 import { subscribeSync, pushAllLocal, pull, cloudReady, wipeCloud } from '../../db/sync.js';
 import { exportBackup, importBackup } from '../../lib/backup.js';
 import { exportExcel, importExcel } from '../../lib/excel.js';
@@ -37,8 +38,17 @@ export default function Settings() {
   const saveUser = async () => {
     const u = userEdit;
     if (!u.email?.trim() || !u.name?.trim()) return;
-    const payload = { name: u.name.trim(), email: u.email.trim().toLowerCase(), password: u.password || '', role: u.role || 'employee', isActive: true };
-    if (u.id) await updateRow(TABLES.users, u.id, payload); else await createRow(TABLES.users, payload);
+    // Hash the password before storing. On edit, only re-hash if it was changed
+    // (a value typed in the box that isn't already a stored hash).
+    const payload = { name: u.name.trim(), email: u.email.trim().toLowerCase(), role: u.role || 'employee', isActive: true };
+    if (u.password && !isHashed(u.password)) payload.password = await makeHashedPassword(u.password);
+    if (u.id) {
+      // editing: only change the password when a new one was typed; otherwise keep it
+      if (payload.password) await updateRow(TABLES.users, u.id, payload);
+      else { const { password, ...rest } = payload; await updateRow(TABLES.users, u.id, rest); }
+    } else {
+      await createRow(TABLES.users, { ...payload, password: payload.password || await makeHashedPassword('changeme') });
+    }
     setUserEdit(null);
   };
   const [form, setForm] = useState(settings);
@@ -271,7 +281,7 @@ export default function Settings() {
               .filter((u) => u.isActive !== false)
               .filter((u) => { const k = (u.email || u.id).trim().toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; });
           })().map((u) => (
-            <div key={u.id} onClick={() => setUserEdit({ ...u })} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: `1px solid ${C.surfaceAlt}`, cursor: 'pointer' }}>
+            <div key={u.id} onClick={() => setUserEdit({ ...u, password: '' })} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: `1px solid ${C.surfaceAlt}`, cursor: 'pointer' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 700, color: C.text, fontSize: 13 }}>{u.name}</div>
                 <div style={{ fontSize: 11, color: C.textMuted }}>{u.email}</div>
@@ -405,7 +415,7 @@ export default function Settings() {
           <div>
             <Field label={t('userName')} required><Input value={userEdit.name} onChange={(v) => setUserEdit((r) => ({ ...r, name: v }))} /></Field>
             <Field label={t('email')} required><Input type="email" value={userEdit.email} onChange={(v) => setUserEdit((r) => ({ ...r, email: v }))} /></Field>
-            <Field label={t('password')}><Input value={userEdit.password} onChange={(v) => setUserEdit((r) => ({ ...r, password: v }))} /></Field>
+            <Field label={t('password')} hint={userEdit.id ? t('leaveBlankKeep') : ''}><Input type="password" value={userEdit.password} onChange={(v) => setUserEdit((r) => ({ ...r, password: v }))} /></Field>
             <Field label={t('role')}><Select value={userEdit.role} onChange={(v) => setUserEdit((r) => ({ ...r, role: v }))} options={[{ value: 'admin', label: t('admin') }, { value: 'employee', label: t('employee') }]} /></Field>
             {userEdit.id && user?.id !== userEdit.id && <Btn variant="outline" onClick={() => { if (window.confirm(t('confirmDelete'))) { deleteRow(TABLES.users, userEdit.id); setUserEdit(null); } }} style={{ color: C.danger }}>{t('delete')}</Btn>}
           </div>

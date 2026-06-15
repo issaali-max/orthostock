@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import * as db from '../db/db.js';
+import { verifyPassword, makeHashedPassword } from '../lib/auth.js';
 import { startSync } from '../db/sync.js';
 import { TABLES } from '../lib/constants.js';
 import { makeT } from '../lib/i18n.js';
@@ -99,18 +100,23 @@ export function AppProvider({ children }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings?.oneDrive?.auto, settings?.oneDrive?.clientId]);
 
-  // ── Auth (simple gate; Supabase Auth can replace this transparently) ──
+  // ── Auth (gate; passwords are hashed, legacy plaintext upgraded on login) ──
   const login = useCallback(async (email, password) => {
     const u = await db.findBy(TABLES.users, 'email', String(email).trim().toLowerCase());
-    if (u && u.isActive !== false && u.password === password) { setUser(u); try { localStorage.setItem(SESSION_KEY, u.email); } catch {} return true; }
-    return false;
+    if (!u || u.isActive === false) return false;
+    const { ok, needsUpgrade } = await verifyPassword(password, u.password);
+    if (!ok) return false;
+    // Transparently upgrade a legacy plaintext password to a salted hash.
+    if (needsUpgrade) { try { await db.update(TABLES.users, u.id, { password: await makeHashedPassword(password) }); } catch { /* non-fatal */ } }
+    setUser(u); try { localStorage.setItem(SESSION_KEY, u.email); } catch {}
+    return true;
   }, []);
 
   // Local password reset (no email server — see note in the UI). Returns true if the email exists.
   const resetPassword = useCallback(async (email, newPassword) => {
     const u = await db.findBy(TABLES.users, 'email', String(email).trim().toLowerCase());
     if (!u) return false;
-    await db.update(TABLES.users, u.id, { password: newPassword });
+    await db.update(TABLES.users, u.id, { password: await makeHashedPassword(newPassword) });
     await refresh(TABLES.users);
     return true;
   }, [refresh]);
