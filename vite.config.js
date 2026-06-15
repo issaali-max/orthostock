@@ -37,4 +37,17 @@ export default defineConfig({
     }),
   ],
   server: { port: 5173 },
+  build: {
+    rollupOptions: {
+      output: {
+        // Split big third-party libs into their own long-cached chunks so a code
+        // change to the app doesn't force users to re-download React/Supabase/etc.
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom'],
+          'vendor-supabase': ['@supabase/supabase-js'],
+          'vendor-charts': ['recharts'],
+        },
+      },
+    },
+  },
 });

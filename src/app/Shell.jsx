@@ -1,17 +1,19 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, lazy, Suspense } from 'react';
 import { useApp } from './AppProvider.jsx';
 import { C, SHADOW } from '../lib/constants.js';
 import { CurrencyToggle } from '../ui/components.jsx';
 
-import Dashboard from '../features/dashboard.jsx';
-import Catalogue from '../features/catalogue/Catalogue.jsx';
-import Invoices from '../features/sales/Invoices.jsx';
-import Purchases from '../features/purchases/Purchases.jsx';
-import Customers from '../features/customers/Customers.jsx';
-import Suppliers from '../features/suppliers/Suppliers.jsx';
-import Expenses from '../features/expenses/Expenses.jsx';
-import Investments from '../features/investments/Investments.jsx';
-import Settings from '../features/settings/Settings.jsx';
+// Lazy-load each screen so a tab's code (and heavy libs like recharts, only used
+// by Dashboard/Customers) is fetched only when that tab is first opened.
+const Dashboard = lazy(() => import('../features/dashboard.jsx'));
+const Catalogue = lazy(() => import('../features/catalogue/Catalogue.jsx'));
+const Invoices = lazy(() => import('../features/sales/Invoices.jsx'));
+const Purchases = lazy(() => import('../features/purchases/Purchases.jsx'));
+const Customers = lazy(() => import('../features/customers/Customers.jsx'));
+const Suppliers = lazy(() => import('../features/suppliers/Suppliers.jsx'));
+const Expenses = lazy(() => import('../features/expenses/Expenses.jsx'));
+const Investments = lazy(() => import('../features/investments/Investments.jsx'));
+const Settings = lazy(() => import('../features/settings/Settings.jsx'));
 
 function useIsDesktop() {
   const [d, setD] = useState(typeof window !== 'undefined' ? window.innerWidth > 1024 : false);
@@ -80,7 +82,7 @@ export default function Shell() {
         </aside>
         <main style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
           {Header}
-          <div style={{ padding: 24, maxWidth: 760, width: '100%', margin: '0 auto' }}><Active /></div>
+          <div style={{ padding: 24, maxWidth: 760, width: '100%', margin: '0 auto' }}><Suspense fallback={<div style={{ padding: 40, textAlign: 'center', color: C.textMuted }}>…</div>}><Active /></Suspense></div>
         </main>
       </div>
     );
@@ -89,7 +91,7 @@ export default function Shell() {
   return (
     <div style={{ minHeight: '100vh', background: C.surfaceAlt, maxWidth: 480, margin: '0 auto', position: 'relative' }}>
       {Header}
-      <div style={{ padding: '16px 14px 96px' }}><Active /></div>
+      <div style={{ padding: '16px 14px 96px' }}><Suspense fallback={<div style={{ padding: 40, textAlign: 'center', color: C.textMuted }}>…</div>}><Active /></Suspense></div>
 
       {moreOpen && (
         <div onClick={() => setMoreOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 60 }}>
