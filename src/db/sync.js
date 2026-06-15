@@ -25,7 +25,25 @@ const FALLBACK_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const url = import.meta.env?.VITE_SUPABASE_URL || FALLBACK_URL;
 const key = import.meta.env?.VITE_SUPABASE_ANON_KEY || FALLBACK_KEY;
 export const cloudConfigured = !!(url && key);
-const supabase = cloudConfigured ? createClient(url, key) : null;
+const supabase = cloudConfigured
+  ? createClient(url, key, { auth: { persistSession: true, autoRefreshToken: true, storageKey: 'orthostock_auth' } })
+  : null;
+
+// ── Supabase Auth (real login; lets RLS lock the DB to signed-in users) ──
+export const authConfigured = () => !!supabase;
+export async function authSignIn(email, password) {
+  if (!supabase) return { ok: false, error: 'cloud_not_configured' };
+  try {
+    const { data, error } = await supabase.auth.signInWithPassword({ email: String(email).trim().toLowerCase(), password });
+    if (error) return { ok: false, error: error.message };
+    return { ok: true, email: data?.user?.email || null };
+  } catch (e) { return { ok: false, error: String(e.message || e) }; }
+}
+export async function authSignOut() { try { await supabase?.auth?.signOut(); } catch { /* ignore */ } }
+export async function authCurrentEmail() {
+  if (!supabase) return null;
+  try { const { data } = await supabase.auth.getSession(); return data?.session?.user?.email || null; } catch { return null; }
+}
 
 const isOnline = () => (typeof navigator === 'undefined' ? true : navigator.onLine);
 

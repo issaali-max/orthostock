@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import * as db from '../db/db.js';
 import { verifyPassword, makeHashedPassword } from '../lib/auth.js';
-import { startSync } from '../db/sync.js';
+import { startSync, authConfigured, authSignIn, authSignOut } from '../db/sync.js';
 import { TABLES } from '../lib/constants.js';
 import { makeT } from '../lib/i18n.js';
 
@@ -100,15 +100,32 @@ export function AppProvider({ children }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings?.oneDrive?.auto, settings?.oneDrive?.clientId]);
 
-  // ── Auth (gate; passwords are hashed, legacy plaintext upgraded on login) ──
+  // ── Auth: try Supabase Auth first (real, server-verified, lets RLS lock the
+  // DB). Fall back to the local gate when offline or before Auth is set up, so
+  // the app never breaks during the transition. ──
   const login = useCallback(async (email, password) => {
-    const u = await db.findBy(TABLES.users, 'email', String(email).trim().toLowerCase());
+    const mail = String(email).trim().toLowerCase();
+    // 1) Supabase Auth (only meaningful when online + configured)
+    if (authConfigured() && navigator.onLine) {
+      const res = await authSignIn(mail, password);
+      if (res.ok) {
+        // Use the app-level user record (role/name) if it exists; else a minimal admin.
+        let u = await db.findBy(TABLES.users, 'email', mail);
+        if (!u) u = { id: 'user-' + mail, name: mail.split('@')[0], email: mail, role: 'admin', isActive: true };
+        setUser(u); try { localStorage.setItem(SESSION_KEY, mail); } catch {}
+        return true;
+      }
+      // If Auth is enabled and rejected the credentials while online, don't silently
+      // fall back (that would bypass real auth). Only fall through when offline.
+      if (!navigator.onLine) { /* fall through to local gate */ } else return false;
+    }
+    // 2) Local gate (offline, or Supabase Auth not configured yet)
+    const u = await db.findBy(TABLES.users, 'email', mail);
     if (!u || u.isActive === false) return false;
     const { ok, needsUpgrade } = await verifyPassword(password, u.password);
     if (!ok) return false;
-    // Transparently upgrade a legacy plaintext password to a salted hash.
     if (needsUpgrade) { try { await db.update(TABLES.users, u.id, { password: await makeHashedPassword(password) }); } catch { /* non-fatal */ } }
-    setUser(u); try { localStorage.setItem(SESSION_KEY, u.email); } catch {}
+    setUser(u); try { localStorage.setItem(SESSION_KEY, mail); } catch {}
     return true;
   }, []);
 
@@ -120,7 +137,7 @@ export function AppProvider({ children }) {
     await refresh(TABLES.users);
     return true;
   }, [refresh]);
-  const logout = useCallback(() => { setUser(null); try { localStorage.removeItem(SESSION_KEY); } catch {} }, []);
+  const logout = useCallback(() => { setUser(null); authSignOut(); try { localStorage.removeItem(SESSION_KEY); } catch {} }, []);
 
   // ── Generic CRUD helpers (refresh cache + toast + friendly errors) ──
   const createRow = useCallback(async (table, row) => {
