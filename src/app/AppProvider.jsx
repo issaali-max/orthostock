@@ -112,7 +112,13 @@ export function AppProvider({ children }) {
         const res = await authSignIn(mail, password);
         if (res.ok) {
           let u = await db.findBy(TABLES.users, 'email', mail);
-          if (!u) u = { id: 'user-' + mail, name: mail.split('@')[0], email: mail, role: 'admin', isActive: true };
+          if (!u) {
+            // Persist the signed-in account locally (deterministic id = same on
+            // every device, so upsert never duplicates) so it appears in the user
+            // list and offline login works next time.
+            u = { id: 'user-' + mail, name: mail.split('@')[0], email: mail, role: 'admin', isActive: true };
+            try { await db.insert(TABLES.users, u); } catch { /* may already exist via sync */ }
+          }
           setUser(u); try { localStorage.setItem(SESSION_KEY, mail); } catch {}
           return true;
         }

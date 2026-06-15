@@ -156,7 +156,7 @@ async function seedLocal() {
     companyName: 'OrthoStock', lang: 'ar',
     oneDrive: { connected: false, folderPath: '', lastBackupAt: null },
   }]);
-  await L.idbBulkPut(TABLES.users, [{
-    id: 'user-admin-default', name: 'Admin', email: 'admin@orthostock.ae', password: 'admin123', role: 'admin', isActive: true,
-  }]);
+  // No default admin is seeded any more. Login uses Supabase Auth; the signed-in
+  // user is persisted locally on first login (see AppProvider.login), so accounts
+  // come from the real users you create — not a built-in admin/admin123.
 }
