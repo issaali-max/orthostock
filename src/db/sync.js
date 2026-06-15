@@ -155,16 +155,17 @@ export async function flush() {
 
 export async function pull(onData) {
   if (!supabase || !isOnline()) return;
-  const o = await outboxAll();
-  if (o.length) return; // don't overwrite unsynced local writes
+  // A stuck/failing outbox op must NOT block downloads forever. We still pull, and
+  // the updatedAt merge protects any unsynced local edits (local-newer rows are
+  // kept). We only re-queue push-backs when the outbox was empty, to avoid piling
+  // duplicates onto an already-pending queue.
+  const pending = await outboxAll();
+  const outboxEmpty = pending.length === 0;
   let pushedBack = 0;
   for (const table of Object.values(TABLES)) {
     try {
       const { data, error } = await supabase.from(table).select('*');
       if (error || !Array.isArray(data)) continue;
-      // Merge by updatedAt so the NEWEST edit wins, not whoever synced last:
-      //  • cloud newer (or local missing) → take cloud
-      //  • local newer → keep local AND re-queue it so the cloud converges
       const localRows = await idbGetAll(table);
       const localById = new Map(localRows.map((r) => [r.id, r]));
       const toWrite = [];
@@ -172,14 +173,15 @@ export async function pull(onData) {
         const local = localById.get(cloud.id);
         const cu = Number(cloud.updatedAt || 0);
         const lu = Number(local?.updatedAt || 0);
-        if (!local || cu >= lu) toWrite.push(cloud);          // cloud wins
-        else if (lu > cu) { await enqueueMutation({ type: 'update', table, id: local.id, row: local }); pushedBack++; } // local newer → push back
+        if (!local || cu >= lu) toWrite.push(cloud);                 // cloud wins (or new row → download)
+        else if (lu > cu && outboxEmpty) { await enqueueMutation({ type: 'update', table, id: local.id, row: local }); pushedBack++; } // local newer → correct cloud
+        // local newer but outbox not empty → keep local, don't re-queue (avoid dup)
       }
       if (toWrite.length) await idbBulkPut(table, toWrite);
-    } catch { /* table may not exist yet; ignore */ }
+    } catch { /* table may not exist / timed out; skip and try next */ }
   }
   state.lastSyncAt = Date.now(); emit();
-  if (pushedBack > 0) { await refreshPending(); flush(); } // send corrected rows up
+  if (pushedBack > 0) { await refreshPending(); flush(); }
   if (onData) onData();
 }
 
