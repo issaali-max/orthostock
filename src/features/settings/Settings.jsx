@@ -7,7 +7,7 @@ import { isHashed, makeHashedPassword } from '../../lib/auth.js';
 import { subscribeSync, pushAllLocal, pull, cloudReady, wipeCloud } from '../../db/sync.js';
 import { exportBackup, importBackup } from '../../lib/backup.js';
 import { exportExcel, importExcel } from '../../lib/excel.js';
-import { dataHealth, mergeCustomers } from '../../lib/engine.js';
+import { dataHealth, mergeCustomers, migrateImagesToStorage } from '../../lib/engine.js';
 import { connectOneDrive, disconnectOneDrive, getOneDriveAccount, backupToOneDrive } from '../../lib/onedrive.js';
 import { num, fmtCur } from '../../lib/money.js';
 
@@ -20,6 +20,22 @@ export default function Settings() {
   const [userEdit, setUserEdit] = useState(null);
   const [showAudit, setShowAudit] = useState(false);
   const [showHealth, setShowHealth] = useState(false);
+  const [imgMig, setImgMig] = useState(null);       // { done, total, failed }
+  const [imgMigBusy, setImgMigBusy] = useState(false);
+  const app = useApp();
+  const runImageMigration = async () => {
+    if (imgMigBusy) return;
+    if (!navigator.onLine) { showToast(t('imgNeedOnline'), 'error'); return; }
+    setImgMigBusy(true); setImgMig({ done: 0, total: 0, failed: 0 });
+    try {
+      const res = await migrateImagesToStorage(app, (p) => setImgMig(p));
+      if (res.total === 0) showToast(t('migrateNone'), 'success');
+      else showToast(`🖼️ ${res.done}/${res.total} ✓${res.failed ? ` · ${res.failed} ✗` : ''}`, res.failed ? 'error' : 'success');
+    } catch (e) {
+      showToast(t('migrateImagesFailed'), 'error');
+      console.warn('[migrate] error', e?.message || e);
+    } finally { setImgMigBusy(false); }
+  };
   const [importReport, setImportReport] = useState(null);
   const [exportScope, setExportScope] = useState('all');
   const [syncing, setSyncing] = useState(false);
@@ -262,10 +278,11 @@ export default function Settings() {
       </Card>
 
       <Card style={{ marginTop: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div><div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>🩺 {t('dataHealth')}</div>
-          <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>{t('dataHealthNote')}</div></div>
-          <Btn size="sm" variant="light" onClick={() => setShowHealth(true)}>{t('runCheck')}</Btn>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+          <div style={{ minWidth: 0 }}><div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>🖼️ {t('migrateImages')}</div>
+          <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>{t('migrateImagesNote')}</div>
+          {imgMig && <div style={{ fontSize: 12, fontWeight: 700, color: C.primary, marginTop: 6 }}>{imgMig.done}/{imgMig.total}{imgMig.failed ? ` · ${imgMig.failed} ✗` : ''}</div>}</div>
+          <Btn size="sm" variant="light" disabled={imgMigBusy} onClick={runImageMigration}>{imgMigBusy ? `… ${imgMig ? `${imgMig.done}/${imgMig.total}` : ''}` : t('migrateNow')}</Btn>
         </div>
       </Card>
 

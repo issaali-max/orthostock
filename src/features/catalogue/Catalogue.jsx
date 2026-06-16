@@ -414,7 +414,7 @@ export default function Catalogue() {
   );
 }
 
-const toolBtn = { border: 'none', background: '#fff', borderRadius: 8, padding: '6px 10px', fontSize: 12, fontWeight: 800, color: C.primary, cursor: 'pointer', border: `1px solid ${C.border}` };
+const toolBtn = { background: '#fff', borderRadius: 8, padding: '6px 10px', fontSize: 12, fontWeight: 800, color: C.primary, cursor: 'pointer', border: `1px solid ${C.border}` };
 const badgeGroup = { position: 'absolute', top: 10, insetInlineStart: 10, zIndex: 2, background: 'rgba(13,59,110,.92)', color: '#fff', fontSize: 11, fontWeight: 800, borderRadius: 999, padding: '3px 10px' };
 const imgBtn = { border: 'none', background: 'rgba(255,255,255,.92)', color: C.primary, borderRadius: 8, width: 30, height: 30, cursor: 'pointer', fontWeight: 800, fontSize: 14, boxShadow: '0 1px 3px rgba(0,0,0,.2)' };
 const pencilBtn = { position: 'absolute', top: 6, insetInlineEnd: 6, border: 'none', background: C.surfaceDark, color: C.primary, borderRadius: 8, width: 26, height: 26, cursor: 'pointer', fontWeight: 700 };

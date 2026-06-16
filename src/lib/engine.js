@@ -8,6 +8,7 @@ import * as db from '../db/db.js';
 import { TABLES } from './constants.js';
 import { num, round2, safeDiv, prettyName } from './money.js';
 import { newId } from './ids.js';
+import { uploadDataUrl } from './storage.js';
 import { todayISO } from './dates.js';
 
 // Record a payment against an invoice: appends to its payment history,
@@ -179,6 +180,43 @@ export async function reverseInvoice(app, invoiceId) {
 }
 
 // Commit a PURCHASE: purchase + items + stock-in + moving-average cost.
+// One-click migration: move every legacy base64 image (image_url starting with
+// "data:") in products/materials/categories into Supabase Storage, store the new
+// path in image_path and clear the old base64 — which is what removes the sync
+// statement-timeout. Requires online + cloud. Reports progress via onProgress.
+export async function migrateImagesToStorage(app, onProgress) {
+  const groups = [
+    { table: TABLES.products, folder: 'products' },
+    { table: TABLES.variants, folder: 'materials' },
+    { table: TABLES.categories, folder: 'categories' },
+  ];
+  const work = [];
+  for (const { table, folder } of groups) {
+    for (const r of (app.data[table] || [])) {
+      if (typeof r.image_url === 'string' && r.image_url.startsWith('data:')) {
+        work.push({ table, folder, id: r.id, dataUrl: r.image_url, hasPath: !!r.image_path });
+      }
+    }
+  }
+  const total = work.length;
+  let done = 0, failed = 0;
+  if (onProgress) onProgress({ done, total, failed });
+  for (const w of work) {
+    try {
+      // If a path already exists, just drop the heavy base64; else upload first.
+      const patch = w.hasPath ? { image_url: '' } : { image_path: await uploadDataUrl(w.dataUrl, w.folder), image_url: '' };
+      await app.updateRow(w.table, w.id, patch);
+      done++;
+    } catch (e) {
+      failed++;
+      console.warn('[migrate] failed', w.table, w.id, e?.message || e);
+    }
+    if (onProgress) onProgress({ done, total, failed });
+  }
+  await Promise.all([app.refresh(TABLES.products), app.refresh(TABLES.variants), app.refresh(TABLES.categories)]);
+  return { done, total, failed };
+}
+
 export async function commitPurchase(app, purchaseData, lines) {
   const variants = app.data[TABLES.variants] || [];
   const vById = (id) => variants.find((x) => x.id === id);

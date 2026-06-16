@@ -20,6 +20,25 @@ export function isStoragePath(v) {
   return typeof v === 'string' && v.length > 0 && !v.startsWith('data:') && !/^https?:\/\//.test(v);
 }
 
+// Upload a base64 data: URL (legacy inline image) to Storage; returns the path.
+// Used by the one-click migration of old images.
+export async function uploadDataUrl(dataUrl, folder = 'products') {
+  const sb = getSupabase();
+  if (!sb) throw new Error('cloud_not_configured');
+  const m = /^data:([^;]+);base64,(.*)$/s.exec(dataUrl || '');
+  if (!m) throw new Error('not_a_data_url');
+  const mime = m[1] || 'image/jpeg';
+  const bin = atob(m[2]);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const blob = new Blob([bytes], { type: mime });
+  const ext = (mime.split('/')[1] || 'jpg').replace(/[^a-z0-9]/g, '') || 'jpg';
+  const path = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const { error } = await sb.storage.from(BUCKET).upload(path, blob, { upsert: false, contentType: mime });
+  if (error) throw error;
+  return path;
+}
+
 // Upload a File to the bucket; returns the stored object path. Requires online + cloud.
 export async function uploadImage(file, folder = 'products') {
   const sb = getSupabase();
