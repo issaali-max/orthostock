@@ -12,10 +12,10 @@ import { ImageUpload } from '../../ui/ImageUpload.jsx';
 import { num } from '../../lib/money.js';
 
 // ── Blank factories ──
-export const blankCategory = () => ({ nameAr: '', nameEn: '', icon: '🦷', image_url: '', color: C.primary, attributes: [], isActive: true });
-export const blankProduct = (categoryId = '') => ({ nameEn: '', brand: '', categoryId, icon: '📦', image_url: '', description: '', isGroup: true, isActive: true });
+export const blankCategory = () => ({ nameAr: '', nameEn: '', icon: '🦷', image_path: '', image_url: '', color: C.primary, attributes: [], isActive: true });
+export const blankProduct = (categoryId = '') => ({ nameEn: '', brand: '', categoryId, icon: '📦', image_path: '', image_url: '', description: '', isGroup: true, isActive: true });
 export const blankVariant = (productId = '') => ({
-  productId, categoryId: '', sku: '', nameEn: '', attributes: {}, image_url: '',
+  productId, categoryId: '', sku: '', nameEn: '', attributes: {}, image_path: '', image_url: '',
   purchasePriceLatest: '', purchasePriceAvg: '', purchasePriceMin: '', purchasePriceMax: '',
   sellingPriceDefault: '', stockQty: '', stockMin: '', unit: 'piece', notes: '', isActive: true,
 });
@@ -25,7 +25,7 @@ export async function saveCategory(app, rec) {
   if (!rec.nameEn?.trim() && !rec.nameAr?.trim()) return false;
   const payload = {
     nameEn: rec.nameEn || rec.nameAr, nameAr: rec.nameAr || rec.nameEn,
-    icon: rec.icon, image_url: rec.image_url || '', color: rec.color, attributes: rec.attributes || [], isActive: true,
+    icon: rec.icon, image_path: rec.image_path || rec.image_url || '', color: rec.color, attributes: rec.attributes || [], isActive: true,
   };
   if (rec.id) await app.updateRow(TABLES.categories, rec.id, payload);
   else await app.createRow(TABLES.categories, payload);
@@ -35,7 +35,7 @@ export async function saveProduct(app, rec) {
   if (!rec.nameEn?.trim()) return false; // English name required, no Arabic field
   const payload = {
     nameEn: rec.nameEn.trim(), brand: rec.brand || '', categoryId: rec.categoryId || null,
-    icon: rec.icon || '📦', image_url: rec.image_url || '', description: rec.description || '', isActive: true,
+    icon: rec.icon || '📦', image_path: rec.image_path || rec.image_url || '', description: rec.description || '', isActive: true,
   };
   if (rec.id) await app.updateRow(TABLES.products, rec.id, payload);
   else await app.createRow(TABLES.products, payload);
@@ -61,7 +61,7 @@ export async function saveVariant(app, rec) {
     const siblings = (app.data[TABLES.variants] || []).filter((v) => v.productId === productId && v.id !== rec.id && v.isActive !== false);
     if (!productId || siblings.length > 0) {
       const pname = (rec.nameEn || rec.sku).trim();
-      const saved = await app.createRow(TABLES.products, { nameAr: pname, nameEn: pname, brand: rec.brand || '', categoryId: wantCat, icon: '📦', image_url: rec.image_url || '', description: '', isGroup: false, isActive: true });
+      const saved = await app.createRow(TABLES.products, { nameAr: pname, nameEn: pname, brand: rec.brand || '', categoryId: wantCat, icon: '📦', image_path: rec.image_path || rec.image_url || '', description: '', isGroup: false, isActive: true });
       productId = saved?.id || null;
     }
   } else if ((rec.groupName || '').trim() && wantCat) {
@@ -70,7 +70,7 @@ export async function saveVariant(app, rec) {
     const match = products.find((p) => p.categoryId === wantCat && (p.nameEn || '').trim().toLowerCase() === gname.toLowerCase());
     if (match) productId = match.id;
     else {
-      const saved = await app.createRow(TABLES.products, { nameEn: gname, brand: rec.brand || '', categoryId: wantCat, icon: '📦', image_url: '', description: '', isGroup: true, isActive: true });
+      const saved = await app.createRow(TABLES.products, { nameEn: gname, brand: rec.brand || '', categoryId: wantCat, icon: '📦', image_path: '', description: '', isGroup: true, isActive: true });
       productId = saved?.id || null;
     }
   } else if (rec.categoryId && rec.categoryId !== currentCatId) {
@@ -100,7 +100,7 @@ export async function saveVariant(app, rec) {
   }
   const payload = {
     productId, sku: rec.sku.trim(), nameEn: rec.nameEn || '',
-    attributes: rec.attributes || {}, image_url: rec.image_url || '',
+    attributes: rec.attributes || {}, image_path: rec.image_path || rec.image_url || '',
     sellingPriceDefault: num(rec.sellingPriceDefault), stockMin: num(rec.stockMin),
     unit: rec.unit || 'piece', notes: rec.notes || '', isActive: true,
     purchasePriceLatest: num(rec.purchasePriceLatest), purchasePriceAvg: num(rec.purchasePriceAvg),
@@ -111,9 +111,10 @@ export async function saveVariant(app, rec) {
   else await app.createRow(TABLES.variants, payload);
   // Catalogue cards show the PRODUCT image. Mirror the material's image onto its
   // product so a photo added on a material actually appears on the card.
-  if (rec.image_url) {
+  const recImg = rec.image_path || rec.image_url;
+  if (recImg) {
     const prod = (app.data[TABLES.products] || []).find((p) => p.id === productId);
-    if (prod && (prod.image_url || '') !== rec.image_url) await app.updateRow(TABLES.products, productId, { image_url: rec.image_url });
+    if (prod && (prod.image_path || prod.image_url || '') !== recImg) await app.updateRow(TABLES.products, productId, { image_path: recImg });
   }
   // If the material moved to a different product and its old group is now empty,
   // remove the empty group shell so no contentless groups are left behind.
@@ -149,7 +150,7 @@ export function CategoryForm({ rec, setRec, t }) {
         </div>
       </Field>
       <Field label={t('image')} hint={t('imageOrIcon')}>
-        <ImageUpload value={rec.image_url} onChange={(v) => set('image_url', v)} fallback={rec.icon || '🦷'} />
+        <ImageUpload value={rec.image_path || rec.image_url} onChange={(v) => set('image_path', v)} fallback={rec.icon || '🦷'} folder="categories" />
       </Field>
       <Field label={t('icon')}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -193,7 +194,7 @@ export function ProductForm({ rec, setRec, t, cats }) {
   return (
     <div>
       <Field label={t('productImage')}>
-        <ImageUpload value={rec.image_url} onChange={(v) => set('image_url', v)} fallback={rec.icon || '📦'} />
+        <ImageUpload value={rec.image_path || rec.image_url} onChange={(v) => set('image_path', v)} fallback={rec.icon || '📦'} folder="products" />
       </Field>
       <Field label={t('nameEn')} required hint="English only">
         <Input value={rec.nameEn} onChange={(v) => set('nameEn', v)} />
@@ -264,7 +265,7 @@ export function VariantForm({ rec, setRec, t, products, categories, variants = [
       </Field>
       <Field label={t('nameEn')} hint="English only"><Input value={rec.nameEn} onChange={(v) => set('nameEn', v)} /></Field>
       <Field label={t('image')} hint={t('imageOrIcon')}>
-        <ImageUpload value={rec.image_url} onChange={(v) => set('image_url', v)} fallback={cat?.icon || '📦'} />
+        <ImageUpload value={rec.image_path || rec.image_url} onChange={(v) => set('image_path', v)} fallback={cat?.icon || '📦'} folder="materials" />
       </Field>
       <Field label={t('brand')}>
         <Input value={rec.brand ?? inheritedBrand} onChange={(v) => set('brand', v)} placeholder="3M, Ormco, ..." />

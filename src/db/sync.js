@@ -31,6 +31,7 @@ const supabase = cloudConfigured
 
 // ── Supabase Auth (real login; lets RLS lock the DB to signed-in users) ──
 export const authConfigured = () => !!supabase;
+export const getSupabase = () => supabase; // exposed for Storage (image uploads/signed URLs)
 export async function authSignIn(email, password) {
   if (!supabase) return { ok: false, error: 'cloud_not_configured' };
   try {

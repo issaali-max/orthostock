@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useApp } from '../../app/AppProvider.jsx';
 import { C, RADIUS, SHADOW, TABLES } from '../../lib/constants.js';
+import { StoredImage } from '../../ui/StoredImage.jsx';
 import { fmtCur, fmtNum, num, prettyName } from '../../lib/money.js';
 import { Badge, Btn, EmptyState, Modal, PageHeader, SearchBar } from '../../ui/components.jsx';
 import { logStockMovement } from '../../lib/engine.js';
@@ -71,7 +72,7 @@ export default function Catalogue() {
     const inGroup = siblings.length > 1;
     openEdit(TABLES.variants, 'variant', {
       ...v, attributes: { ...(v.attributes || {}) }, categoryId: prod?.categoryId || '', brand: prod?.brand || '',
-      image_url: v.image_url || prod?.image_url || '',
+      image_path: v.image_path || prod?.image_path || v.image_url || prod?.image_url || '',
       groupId: inGroup ? v.productId : '', groupName: '', groupMode: inGroup ? 'existing' : 'none',
     });
   };
@@ -145,11 +146,11 @@ export default function Catalogue() {
       const margin = sell > 0 ? Math.round(((sell - avg) / sell) * 100) : 0;
       const act = lastByVar[v.id] || {};
       const prod = products.find((p) => p.id === v.productId);
-      const pimg = prod?.image_url;
+      const pimg = prod?.image_path || prod?.image_url;
       return (
         <div key={v.id} onClick={editMode ? () => editVariant(v) : undefined}
           style={{ display: 'flex', alignItems: 'center', gap: 12, background: '#fff', border: `1px solid ${C.border}`, borderRadius: RADIUS, boxShadow: SHADOW, padding: '12px 14px', cursor: editMode ? 'pointer' : 'default' }}>
-          <div style={{ width: 52, height: 52, borderRadius: 12, flexShrink: 0, overflow: 'hidden', background: pimg ? `center/cover no-repeat url(${pimg})` : C.primary + '12', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>{!pimg && (prod?.icon || '📦')}</div>
+          <StoredImage value={pimg} size={52} radius={12} emptyBg={C.primary + '12'} fontSize={24} fallback={prod?.icon || '📦'} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontWeight: 700, color: C.text, fontSize: 15 }}>{prettyName(v.nameEn) || v.sku}</div>
             {attrs.length > 0 && (
@@ -240,7 +241,7 @@ export default function Catalogue() {
               <div key={c.id} onClick={() => { setCatId(c.id); setQ(''); }}
                 style={{ position: 'relative', background: '#fff', border: `1px solid ${C.border}`, borderRadius: RADIUS, boxShadow: SHADOW, padding: '20px 12px 16px', cursor: 'pointer', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
                 {editMode && <button onClick={(e) => { e.stopPropagation(); openEdit(TABLES.categories, 'category', JSON.parse(JSON.stringify(c))); }} style={pencilBtn}>✎</button>}
-                <div style={{ width: 96, height: 96, borderRadius: 20, overflow: 'hidden', background: c.image_url ? `center/cover no-repeat url(${c.image_url})` : (c.color || C.primary) + '1f', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 46 }}>{!c.image_url && c.icon}</div>
+                <StoredImage value={c.image_path || c.image_url} size={96} radius={20} emptyBg={(c.color || C.primary) + '1f'} fontSize={46} fallback={c.icon} />
                 <div style={{ fontWeight: 900, color: C.text, fontSize: 17, lineHeight: 1.3 }}>{c.nameAr || c.nameEn}</div>
                 {c.nameAr && c.nameEn && <div style={{ fontSize: 11.5, color: C.textMuted, marginTop: -4 }}>{c.nameEn}</div>}
                 <Badge tone="info">{products.filter((p) => p.categoryId === c.id).length} {t('products')}</Badge>
@@ -307,7 +308,7 @@ export default function Catalogue() {
         <div style={{ display: 'grid', gap: 16 }}>
           {shownProducts.map((p) => {
             const vs = (variantsByProduct[p.id] || []).filter(matchVariantArch);
-            const img = p.image_url;
+            const img = p.image_path || p.image_url;
             const isGroup = p.isGroup === true || vs.length > 1; // a group stays a group even with one size
             const totalStock = vs.reduce((s, v) => s + num(v.stockQty), 0);
             const editProd = () => openEdit(TABLES.products, 'product', { ...blankProduct(catId), ...p });
@@ -338,7 +339,7 @@ export default function Catalogue() {
               return (
                 <div key={p.id} style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: RADIUS, boxShadow: SHADOW, overflow: 'hidden' }}>
                   <div onClick={editMode ? () => editVariant(v) : undefined} style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 13, cursor: editMode ? 'pointer' : 'default' }}>
-                    <div style={{ width: 76, height: 76, borderRadius: 14, flexShrink: 0, overflow: 'hidden', background: img ? `center/cover no-repeat url(${img})` : `linear-gradient(135deg, ${(cat?.color || C.primary)}26, ${(cat?.color || C.primary)}0d)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 34 }}>{!img && (p.icon || cat?.icon || '📦')}</div>
+                    <StoredImage value={img} size={76} radius={14} emptyBg={`linear-gradient(135deg, ${(cat?.color || C.primary)}26, ${(cat?.color || C.primary)}0d)`} fontSize={34} fallback={p.icon || cat?.icon || '📦'} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 16, fontWeight: 800, color: C.text, lineHeight: 1.3 }}>{editMode && <span style={{ color: C.primary }}>✎ </span>}{prettyName(p.nameEn)}</div>
                       <div style={{ fontSize: 10, color: C.textMuted, marginTop: 2 }}>{editMode ? t('tapToEdit') : [p.brand, v.sku].filter(Boolean).join(' · ')}</div>
@@ -355,7 +356,8 @@ export default function Catalogue() {
             return (
               <div key={p.id} style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: RADIUS, boxShadow: SHADOW, overflow: 'hidden' }}>
                 {img ? (
-                  <div onClick={editMode ? editProd : undefined} style={{ position: 'relative', height: 175, background: `center/cover no-repeat url(${img})`, cursor: editMode ? 'pointer' : 'default' }}>
+                  <div onClick={editMode ? editProd : undefined} style={{ position: 'relative', height: 175, cursor: editMode ? 'pointer' : 'default' }}>
+                    <StoredImage value={img} width="100%" height={175} radius={0} fallback="" style={{ position: 'absolute', inset: 0 }} />
                     <span style={badgeGroup}>🗂️ {t('group')}</span>
                     {editMode && <span style={{ ...badgeGroup, insetInlineStart: 'auto', insetInlineEnd: 10, background: C.primary }}>✎ {t('edit')}</span>}
                     <div style={{ position: 'absolute', insetInlineStart: 0, insetInlineEnd: 0, bottom: 0, padding: '38px 16px 13px', background: 'linear-gradient(to top, rgba(0,0,0,.9), rgba(0,0,0,.45) 45%, rgba(0,0,0,0))' }}>
