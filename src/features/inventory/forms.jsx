@@ -150,7 +150,7 @@ export function CategoryForm({ rec, setRec, t }) {
         </div>
       </Field>
       <Field label={t('image')} hint={t('imageOrIcon')}>
-        <ImageUpload value={rec.image_path || rec.image_url} onChange={(v) => set('image_path', v)} fallback={rec.icon || '🦷'} folder="categories" />
+        <ImageUpload value={rec.image_path || rec.image_url} onChange={(v) => set('image_path', v)} fallback={rec.icon || '🦷'} folder="categories" t={t} />
       </Field>
       <Field label={t('icon')}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -194,7 +194,7 @@ export function ProductForm({ rec, setRec, t, cats }) {
   return (
     <div>
       <Field label={t('productImage')}>
-        <ImageUpload value={rec.image_path || rec.image_url} onChange={(v) => set('image_path', v)} fallback={rec.icon || '📦'} folder="products" />
+        <ImageUpload value={rec.image_path || rec.image_url} onChange={(v) => set('image_path', v)} fallback={rec.icon || '📦'} folder="products" t={t} />
       </Field>
       <Field label={t('nameEn')} required hint="English only">
         <Input value={rec.nameEn} onChange={(v) => set('nameEn', v)} />
@@ -265,7 +265,7 @@ export function VariantForm({ rec, setRec, t, products, categories, variants = [
       </Field>
       <Field label={t('nameEn')} hint="English only"><Input value={rec.nameEn} onChange={(v) => set('nameEn', v)} /></Field>
       <Field label={t('image')} hint={t('imageOrIcon')}>
-        <ImageUpload value={rec.image_path || rec.image_url} onChange={(v) => set('image_path', v)} fallback={cat?.icon || '📦'} folder="materials" />
+        <ImageUpload value={rec.image_path || rec.image_url} onChange={(v) => set('image_path', v)} fallback={cat?.icon || '📦'} folder="materials" t={t} />
       </Field>
       <Field label={t('brand')}>
         <Input value={rec.brand ?? inheritedBrand} onChange={(v) => set('brand', v)} placeholder="3M, Ormco, ..." />
