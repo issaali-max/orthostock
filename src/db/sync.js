@@ -16,6 +16,8 @@ import { TABLES } from '../lib/constants.js';
 import { idbGetAll, idbBulkPut, outboxAll, outboxDelete, outboxBumpTries, enqueueMutation, metaSet, metaGet } from './local.js';
 
 const MAX_OP_TRIES = 6; // after this many failed attempts, drop a stuck outbox op
+const SYNC_INTERVAL_MS = 12000; // periodic flush+pull cadence
+const SKEW_BUFFER_MS = 5 * 60 * 1000; // re-fetch last 5 min each pull to survive device clock skew
 
 // Supabase connection. Reads Vercel env vars first; falls back to the project's
 // own values so sync works out-of-the-box without any Vercel configuration.
@@ -162,41 +164,73 @@ export async function pull(onData) {
   // duplicates onto an already-pending queue.
   const pending = await outboxAll();
   const outboxEmpty = pending.length === 0;
-  let pushedBack = 0;
+  // Incremental: only fetch rows changed since the last pull (cheap egress). A
+  // safety buffer re-fetches the most recent window so clock skew between devices
+  // can't make us miss a row. First pull (watermark 0) fetches everything.
+  const wm = Number((await metaGet('pullWatermark')) || 0);
+  const since = wm > 0 ? wm - SKEW_BUFFER_MS : 0;
+  let maxSeen = wm, changed = 0, pushedBack = 0;
   for (const table of Object.values(TABLES)) {
     try {
-      const { data, error } = await supabase.from(table).select('*');
-      if (error || !Array.isArray(data)) continue;
+      let q = supabase.from(table).select('*');
+      if (since > 0) q = q.gt('updatedAt', since);
+      const { data, error } = await q;
+      if (error || !Array.isArray(data) || !data.length) continue;
       const localRows = await idbGetAll(table);
       const localById = new Map(localRows.map((r) => [r.id, r]));
       const toWrite = [];
       for (const cloud of data) {
-        const local = localById.get(cloud.id);
         const cu = Number(cloud.updatedAt || 0);
+        if (cu > maxSeen) maxSeen = cu;
+        const local = localById.get(cloud.id);
         const lu = Number(local?.updatedAt || 0);
-        if (!local || cu >= lu) toWrite.push(cloud);                 // cloud wins (or new row → download)
+        if (!local || cu >= lu) { toWrite.push(cloud); changed++; }     // cloud wins (or new row → download)
         else if (lu > cu && outboxEmpty) { await enqueueMutation({ type: 'update', table, id: local.id, row: local }); pushedBack++; } // local newer → correct cloud
         // local newer but outbox not empty → keep local, don't re-queue (avoid dup)
       }
       if (toWrite.length) await idbBulkPut(table, toWrite);
     } catch { /* table may not exist / timed out; skip and try next */ }
   }
+  if (maxSeen > wm) await metaSet('pullWatermark', maxSeen);
   state.lastSyncAt = Date.now(); emit();
   if (pushedBack > 0) { await refreshPending(); flush(); }
-  if (onData) onData();
+  if (onData && changed > 0) onData(); // refresh UI only when something actually changed
 }
 
 let started = false;
+let _onData = null;
+let _nudgeTimer = null;
+
+// Full sync = push local up, then pull remote down (and refresh UI on change).
+async function cycle() {
+  if (!isOnline()) return;
+  try { await flush(); } catch { /* ignore */ }
+  try { await pull(_onData); } catch { /* ignore */ }
+}
+
+// Called after a local write: pushes the change up quickly (debounced so a burst
+// of writes — e.g. an atomic invoice — results in a single sync), then pulls.
+export function nudgeSync() {
+  if (!started || !isOnline()) return;
+  clearTimeout(_nudgeTimer);
+  _nudgeTimer = setTimeout(() => { cycle(); }, 1200);
+}
+
+export function syncNow() { return cycle(); } // manual trigger (Sync now button)
+
 export function startSync(onPulled) {
   if (started || typeof window === 'undefined') return;
   started = true;
-  const setOnline = (v) => {
-    state.online = v; emit();
-    if (v) flush().then(() => pull(onPulled));
-  };
+  _onData = onPulled;
+  const kick = () => { if (isOnline()) cycle(); };
+  const setOnline = (v) => { state.online = v; emit(); if (v) kick(); };
   window.addEventListener('online', () => setOnline(true));
   window.addEventListener('offline', () => setOnline(false));
-  setInterval(() => { if (isOnline()) flush(); }, 30000);
+  // Sync immediately when the app regains focus or becomes visible — this is what
+  // makes another device's changes appear "instantly" when you open/return to it.
+  window.addEventListener('focus', kick);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) kick(); });
+  setInterval(kick, SYNC_INTERVAL_MS); // periodic flush+pull
   refreshPending();
-  if (isOnline()) flush().then(() => pull(onPulled));
+  kick();
 }

@@ -9,6 +9,7 @@ import { TABLES } from './constants.js';
 import { num, round2, safeDiv, prettyName } from './money.js';
 import { newId } from './ids.js';
 import { uploadDataUrl } from './storage.js';
+import { nudgeSync } from '../db/sync.js';
 import { todayISO } from './dates.js';
 
 // Record a payment against an invoice: appends to its payment history,
@@ -92,6 +93,7 @@ export async function saveInvoiceAtomic(app, { editingId, invoiceData, lines, in
 
   await db.atomicMutations(specs);
   await Promise.all([app.refresh(TABLES.invoices), app.refresh(TABLES.invoiceItems), app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements)]);
+  nudgeSync();
   return invId;
 }
 
@@ -114,6 +116,7 @@ export async function deleteInvoiceAtomic(app, invoiceId) {
   specs.push({ op: 'remove', table: TABLES.invoices, id: invoiceId });
   await db.atomicMutations(specs);
   await Promise.all([app.refresh(TABLES.invoices), app.refresh(TABLES.invoiceItems), app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements)]);
+  nudgeSync();
   return true;
 }
 
@@ -152,6 +155,7 @@ export async function commitInvoice(app, invoiceData, lines, opts = {}) {
     }
   }
   await Promise.all([app.refresh(TABLES.invoices), app.refresh(TABLES.invoiceItems), app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements)]);
+  nudgeSync();
   return inv;
 }
 
@@ -177,6 +181,7 @@ export async function reverseInvoice(app, invoiceId) {
   }
   await db.remove(TABLES.invoices, invoiceId);
   await Promise.all([app.refresh(TABLES.invoices), app.refresh(TABLES.invoiceItems), app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements)]);
+  nudgeSync();
 }
 
 // Commit a PURCHASE: purchase + items + stock-in + moving-average cost.
@@ -245,6 +250,7 @@ export async function commitPurchase(app, purchaseData, lines) {
   }
   const res = await db.atomicMutations(specs);
   await Promise.all([app.refresh(TABLES.purchases), app.refresh(TABLES.purchaseItems), app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements)]);
+  nudgeSync();
   return res.find((r) => r && r.id === poId) || { id: poId };
 }
 
@@ -552,6 +558,7 @@ export async function commitSell(app, { securityId, sellDate, qty, pricePerShare
     proceeds, costBasisMatched: round2(costMatched), realizedPnL: round2(proceeds - costMatched), currency: 'AED', notes: '',
   });
   await Promise.all([app.refresh(TABLES.tradeLots), app.refresh(TABLES.tradeSells)]);
+  nudgeSync();
 }
 
 export function portfolioStats(data, priceOf) {

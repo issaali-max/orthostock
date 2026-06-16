@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import * as db from '../db/db.js';
 import { verifyPassword, makeHashedPassword } from '../lib/auth.js';
-import { startSync, authConfigured, authSignIn, authSignOut } from '../db/sync.js';
+import { startSync, nudgeSync, authConfigured, authSignIn, authSignOut } from '../db/sync.js';
 import { TABLES } from '../lib/constants.js';
 import { makeT } from '../lib/i18n.js';
 
@@ -149,6 +149,7 @@ export function AppProvider({ children }) {
     try {
       const saved = await db.insert(table, row);
       await refresh(table);
+      nudgeSync();
       showToast(t('saved'), 'success');
       return saved;
     } catch (e) {
@@ -161,6 +162,7 @@ export function AppProvider({ children }) {
     try {
       const saved = await db.update(table, id, patch);
       await refresh(table);
+      nudgeSync();
       showToast(t('saved'), 'success');
       return saved;
     } catch (e) {
@@ -173,6 +175,7 @@ export function AppProvider({ children }) {
     try {
       await db.remove(table, id);
       await refresh(table);
+      nudgeSync();
       showToast(t('deleted'), 'info');
     } catch (e) {
       showToast(friendly(e, t), 'error');
