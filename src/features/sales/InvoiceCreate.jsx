@@ -62,7 +62,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
     } else {
       setLines([]); setCatId(firstCat); setCustomerId(''); setCustEmirate(''); setCustCity(''); setDate(todayISO()); setStatus('unpaid'); setPaid(''); setInvDiscount('');
     }
-  }, [open, editing]);
+  }, [open, editing?.id]); // re-init only when the modal opens or a different invoice is edited (not on every background sync)
 
   const inCart = (id) => lines.some((l) => l.variantId === id);
   const toggle = (v) => setLines((ls) => inCart(v.id) ? ls.filter((l) => l.variantId !== v.id) : [...ls, { variantId: v.id, qty: 1, unitPrice: num(v.sellingPriceDefault) }]);

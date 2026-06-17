@@ -68,13 +68,16 @@ export default function Settings() {
     setUserEdit(null);
   };
   const [form, setForm] = useState(settings);
+  const dirtyRef = useRef(false); // true while the user is editing — block sync resets
   const [sync, setSync] = useState({ configured: false, online: true, pending: 0, syncing: false, lastSyncAt: null });
   const fileRef = useRef(null);
   const xlsxRef = useRef(null);
 
-  useEffect(() => { setForm(settings); }, [settings]);
+  // Refresh the form from settings ONLY when the user isn't mid-edit, so a
+  // background sync can't wipe what they're typing.
+  useEffect(() => { if (!dirtyRef.current) setForm(settings); }, [settings]);
   useEffect(() => subscribeSync(setSync), []);
-  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const set = (k, v) => { dirtyRef.current = true; setForm((f) => ({ ...f, [k]: v })); };
 
   const save = async () => {
     await updateSettings({
@@ -85,6 +88,7 @@ export default function Settings() {
       lang: form.lang || 'ar',
     });
     setLang(form.lang || 'ar');
+    dirtyRef.current = false; // saved — allow external refreshes again
   };
 
   const doExport = async () => { await exportBackup(); showToast(t('saved'), 'success'); };
