@@ -32,7 +32,7 @@ export default function Login() {
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: `linear-gradient(160deg, ${C.primary}, ${C.primaryLight})`, padding: 20 }}>
+    <div style={{ minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: `linear-gradient(160deg, ${C.primary}, ${C.primaryLight})`, padding: 20 }}>
       <div style={{ background: '#fff', borderRadius: 20, padding: 28, width: '100%', maxWidth: 360, boxShadow: '0 20px 50px rgba(0,0,0,0.25)' }}>
         <div style={{ textAlign: 'center', marginBottom: 20 }}>
           <div style={{ fontSize: 40 }}>🦷</div>

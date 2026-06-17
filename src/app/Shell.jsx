@@ -66,7 +66,7 @@ export default function Shell() {
 
   if (isDesktop) {
     return (
-      <div style={{ display: 'flex', minHeight: '100vh', background: C.surfaceAlt }}>
+      <div style={{ display: 'flex', minHeight: '100dvh', background: C.surfaceAlt }}>
         <aside style={{ width: 240, background: '#fff', borderInlineEnd: `1px solid ${C.border}`, display: 'flex', flexDirection: 'column', padding: 16 }}>
           <div style={{ fontWeight: 800, fontSize: 18, color: C.primary, marginBottom: 4 }}>{settings.companyName || t('appName')}</div>
           <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 20 }}>{t('appSub')}</div>
@@ -89,7 +89,7 @@ export default function Shell() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: C.surfaceAlt, maxWidth: 480, margin: '0 auto', position: 'relative' }}>
+    <div style={{ minHeight: '100dvh', background: C.surfaceAlt, maxWidth: 480, margin: '0 auto', position: 'relative' }}>
       {Header}
       <div style={{ padding: '16px 14px 96px' }}><Suspense fallback={<div style={{ padding: 40, textAlign: 'center', color: C.textMuted }}>…</div>}><Active /></Suspense></div>
 
