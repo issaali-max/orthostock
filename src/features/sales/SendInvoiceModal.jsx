@@ -66,7 +66,7 @@ export function SendInvoiceModal({ invoice, onClose }) {
   const valid = isValidPhone(phone);
 
   return (
-    <Modal title={`${t('sendWhatsApp')} · ${invoice.invoiceNumber}`} onClose={onClose}
+    <Modal open title={`${t('sendWhatsApp')} · ${invoice.invoiceNumber}`} onClose={onClose}
       footer={<>
         <Btn variant="ghost" onClick={onClose}>{t('cancel')}</Btn>
         <Btn variant="light" disabled={busy} onClick={justDownload}>⬇️ PDF</Btn>
