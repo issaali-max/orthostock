@@ -348,13 +348,46 @@ export function invoiceTotals(lines, settings) {
   return { subtotal: round2(subtotal), vat: round2(vat), total: round2(subtotal + vat) };
 }
 
+// Single source of truth for an invoice's money breakdown — used by the screen,
+// the PDF and reports so discount/tax/total/paid/remaining are always identical.
+// Works from a SAVED invoice + its items (reconstructs the same numbers).
+export function invoiceBreakdown(invoice, items, settings) {
+  const lines = (items || []).map((it) => {
+    const qty = num(it.qty);
+    const listPrice = num(it.listPrice);
+    const lineTotal = num(it.total);                 // already net of line + invoice discount
+    const unit = qty > 0 ? round2(lineTotal / qty) : round2(num(it.unitPrice));
+    return {
+      variantId: it.variantId, qty,
+      listPrice, unitPrice: unit,
+      discountAmount: round2(num(it.discountAmount)),
+      lineTotal: round2(lineTotal),
+    };
+  });
+  // netSubtotal = sum of line totals (already after all discounts), matching what was stored
+  const netSubtotal = round2(lines.reduce((s, l) => s + l.lineTotal, 0));
+  const discountTotal = round2(num(invoice.discountTotal));
+  const taxEnabled = !!settings?.taxEnabled;
+  const vatRate = taxEnabled ? num(settings.taxRate) : 0;
+  // Reuse invoiceTotals' exact formula on the net subtotal
+  const t = invoiceTotals([{ unitPrice: netSubtotal, qty: 1, discountAmount: 0 }], settings);
+  const total = round2(num(invoice.total) || t.total);
+  const paid = round2(num(invoice.paidAmount));
+  const remaining = round2(Math.max(0, total - paid));
+  return {
+    lines, subtotal: netSubtotal, discountTotal, taxEnabled, vatRate,
+    vat: t.vat, total, paid, remaining,
+    currency: invoice.currency || settings?.baseCurrency || 'AED',
+  };
+}
+
 // ─────────────────────────────────────────────────────────────
 // Smart dashboard alerts — derived purely from existing data.
 // Returns structured records (kind + fields); the UI renders the
 // localized text so logic stays language-agnostic. Sorted by
 // severity (3 = critical, 2 = warning, 1 = info).
 // ─────────────────────────────────────────────────────────────
-function variantLabel(v) {
+export function variantLabel(v) {
   return prettyName(v.nameEn) || Object.values(v.attributes || {}).filter(Boolean).join(' · ') || v.sku;
 }
 

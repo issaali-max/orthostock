@@ -78,7 +78,7 @@ export default function Settings() {
 
   const save = async () => {
     await updateSettings({
-      companyName: form.companyName || 'OrthoStock',
+      companyName: form.companyName || 'OrthoStock', companyAddress: form.companyAddress || '', companyPhone: form.companyPhone || '',
       usdRate: num(form.usdRate, 3.6725) || 3.6725,
       taxEnabled: !!form.taxEnabled,
       taxRate: num(form.taxRate, 5),
@@ -188,6 +188,12 @@ export default function Settings() {
       <Card>
         <Field label={t('companyName')} required>
           <Input value={form.companyName} onChange={(v) => set('companyName', v)} />
+        </Field>
+        <Field label={t('companyAddress')}>
+          <Input value={form.companyAddress || ''} onChange={(v) => set('companyAddress', v)} />
+        </Field>
+        <Field label={t('companyPhone')}>
+          <Input value={form.companyPhone || ''} onChange={(v) => set('companyPhone', v)} />
         </Field>
         <Field label={t('usdRate')} hint="1 USD = ? AED">
           <Input type="number" value={form.usdRate} onChange={(v) => set('usdRate', v)} />

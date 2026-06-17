@@ -5,6 +5,7 @@ import { fmtCur, num } from '../../lib/money.js';
 import { fmtDate } from '../../lib/dates.js';
 import { recordInvoicePayment, deleteInvoiceAtomic } from '../../lib/engine.js';
 import { Badge, Btn, Card, EmptyState, PageHeader, PaymentModal, SearchBar } from '../../ui/components.jsx';
+import { SendInvoiceModal } from './SendInvoiceModal.jsx';
 import InvoiceCreate from './InvoiceCreate.jsx';
 
 export default function Invoices() {
@@ -13,6 +14,7 @@ export default function Invoices() {
   const [q, setQ] = useState('');
   const [modal, setModal] = useState(null);   // null | 'new' | invoiceRow (edit)
   const [payFor, setPayFor] = useState(null);  // invoice being paid
+  const [sendFor, setSendFor] = useState(null); // invoice being sent over WhatsApp
   const customers = data[TABLES.customers] || [];
   const custName = (id) => customers.find((c) => c.id === id)?.name || '—';
   const cur = (v) => fmtCur(v, displayCurrency, usdRate);
@@ -50,7 +52,8 @@ export default function Invoices() {
                     <Btn size="sm" variant="light" onClick={() => setPayFor(inv)}>💵 {t('recordPayment')}</Btn>
                   </div>
                 )}
-                <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: `1px solid ${C.surfaceAlt}`, paddingTop: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: `1px solid ${C.surfaceAlt}`, paddingTop: 8 }}>
+                  <Btn size="sm" variant="light" onClick={() => setSendFor(inv)}>📲 {t('sendWhatsApp')}</Btn>
                   <button onClick={async () => {
                     if (!window.confirm(`${t('deleteInvoiceConfirm')}\n${inv.invoiceNumber} · ${cur(inv.total)}`)) return;
                     await deleteInvoiceAtomic(app, inv.id);
@@ -63,6 +66,7 @@ export default function Invoices() {
         </div>
       )}
       <InvoiceCreate open={!!modal} editing={modal === 'new' ? null : modal} onClose={() => setModal(null)} />
+      {sendFor && <SendInvoiceModal invoice={sendFor} onClose={() => setSendFor(null)} />}
       <PaymentModal open={!!payFor} invoice={payFor} t={t} cur={cur}
         onClose={() => setPayFor(null)}
         onRecord={(amount) => recordInvoicePayment(app, payFor.id, amount)} />
