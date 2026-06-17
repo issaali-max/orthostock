@@ -68,8 +68,8 @@ export function AppProvider({ children }) {
     return rows;
   }, []);
 
-  const loadAll = useCallback(async () => {
-    setLoading(true);
+  const loadAll = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true); // background sync refreshes silently (no full-screen reload/jump)
     try {
       const results = await Promise.allSettled(CORE_TABLES.map((tbl) => db.getAll(tbl)));
       const next = {};
@@ -79,14 +79,14 @@ export function AppProvider({ children }) {
       console.error(e);
       showToast('Failed to load data', 'error');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [showToast]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
   // Start offline<->cloud sync once; re-pull refreshes the UI caches.
-  useEffect(() => { startSync(() => loadAll()); }, [loadAll]);
+  useEffect(() => { startSync(() => loadAll(true)); }, [loadAll]); // silent refresh on background pull
 
   // Daily OneDrive auto-backup (silent; only if enabled, connected, and due).
   useEffect(() => {
