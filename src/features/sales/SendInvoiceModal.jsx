@@ -16,7 +16,7 @@ export function SendInvoiceModal({ invoice, onClose }) {
   const customer = (data[TABLES.customers] || []).find((c) => c.id === invoice.customerId);
   const items = (data[TABLES.invoiceItems] || []).filter((it) => it.invoiceId === invoice.id && it.isActive !== false);
   const variants = data[TABLES.variants] || [];
-  const variantName = (id) => { const v = variants.find((x) => x.id === id); return v ? variantLabel(v) : '—'; };
+  const variantById = (id) => variants.find((x) => x.id === id);
 
   const [phone, setPhone] = useState(customer?.phone || '');
   const [busy, setBusy] = useState(false);
@@ -28,7 +28,7 @@ export function SendInvoiceModal({ invoice, onClose }) {
     setBusy(true);
     let blob = null, filename = `${invoice.invoiceNumber || 'invoice'}.pdf`;
     try {
-      const pdf = await generateInvoicePdf({ invoice, items, settings, customer, variantName, lang });
+      const pdf = await generateInvoicePdf({ invoice, items, settings, customer, variantById, lang });
       blob = pdf.blob; filename = pdf.filename;
     } catch (e) {
       // PDF failed — don't crash; still let them send the text, and tell them.
@@ -54,7 +54,7 @@ export function SendInvoiceModal({ invoice, onClose }) {
     if (busy) return;
     setBusy(true);
     try {
-      const { blob, filename } = await generateInvoicePdf({ invoice, items, settings, customer, variantName, lang });
+      const { blob, filename } = await generateInvoicePdf({ invoice, items, settings, customer, variantById, lang });
       downloadBlob(blob, filename);
       showToast(t('pdfReady'), 'success');
     } catch (e) {

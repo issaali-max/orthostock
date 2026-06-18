@@ -1,132 +1,151 @@
 // ─────────────────────────────────────────────────────────────
-// invoicePdf.js — render a professional invoice to a PDF Blob.
-// Builds a styled HTML invoice (RTL for Arabic, LTR for English) off-screen,
-// rasterizes it with html2canvas, and places it into a jsPDF A4 page. Arabic
-// shapes correctly because the browser renders the HTML. jspdf/html2canvas are
-// imported dynamically so they don't weigh on the initial bundle.
-// Numbers come from invoiceBreakdown() — the single source of truth.
+// invoicePdf.js — official UAE-style Tax Invoice PDF.
+// Bilingual header (Arabic + English), company name/TRN/address/phone, customer
+// block with TRN, itemized table (No, Code, Description, Qty, Price, VAT%, Total,
+// Net), totals box, amount in words, and a signature line. RTL-aware. Numbers come
+// from invoiceBreakdown() — the single source of truth. jspdf/html2canvas load on demand.
 // ─────────────────────────────────────────────────────────────
-import { invoiceBreakdown } from './engine.js';
+import { invoiceBreakdown, variantLabel } from './engine.js';
 import { money } from './whatsapp.js';
+import { amountToWords } from './numberToWords.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-function buildHtml({ invoice, items, settings, customer, variantName, lang }) {
+function buildHtml({ invoice, items, settings, customer, variantById, lang }) {
   const b = invoiceBreakdown(invoice, items, settings);
   const ar = lang !== 'en';
-  const dir = ar ? 'rtl' : 'ltr';
-  const align = ar ? 'right' : 'left';
-  const T = ar ? {
-    invoice: 'فاتورة', no: 'رقم الفاتورة', date: 'التاريخ', billTo: 'العميل', phone: 'الهاتف',
-    item: 'الصنف', qty: 'الكمية', price: 'السعر', disc: 'الخصم', lineTotal: 'الإجمالي',
-    subtotal: 'المجموع الفرعي', discount: 'الخصم', vat: 'ضريبة القيمة المضافة', total: 'الإجمالي',
-    paid: 'المدفوع', remaining: 'المتبقّي', thanks: 'شكراً لتعاملكم معنا',
-  } : {
-    invoice: 'INVOICE', no: 'Invoice No', date: 'Date', billTo: 'Bill To', phone: 'Phone',
-    item: 'Item', qty: 'Qty', price: 'Price', disc: 'Disc', lineTotal: 'Total',
-    subtotal: 'Subtotal', discount: 'Discount', vat: 'VAT', total: 'Total',
-    paid: 'Paid', remaining: 'Outstanding', thanks: 'Thank you for your business',
-  };
-  const m = (v) => money(v, b.currency);
+  const taxOn = b.taxEnabled;
+  const cur = b.currency;
+  const m = (v) => money(v, cur);
+
   const company = esc(settings?.companyName || 'OrthoStock');
-  const addr = esc(settings?.companyAddress || '');
-  const cphone = esc(settings?.companyPhone || '');
+  const cAddr = esc(settings?.companyAddress || '');
+  const cPhone = esc(settings?.companyPhone || '');
+  const cTrn = esc(settings?.companyTrn || '');
 
-  const rows = b.lines.map((l) => `
-    <tr>
-      <td style="text-align:${align};padding:7px 8px;border-bottom:1px solid #eef1f5">${esc(variantName(l.variantId))}</td>
-      <td style="text-align:center;padding:7px 8px;border-bottom:1px solid #eef1f5">${l.qty}</td>
-      <td style="text-align:center;padding:7px 8px;border-bottom:1px solid #eef1f5">${m(l.listPrice || l.unitPrice)}</td>
-      <td style="text-align:center;padding:7px 8px;border-bottom:1px solid #eef1f5">${l.discountAmount > 0 ? m(l.discountAmount) : '—'}</td>
-      <td style="text-align:center;padding:7px 8px;border-bottom:1px solid #eef1f5;font-weight:700">${m(l.lineTotal)}</td>
-    </tr>`).join('');
+  const L = {
+    invoiceNo: ['رقم الفاتورة', 'Inv No.'], date: ['التاريخ', 'Date'], customer: ['العميل', 'Customer'],
+    phone: ['الهاتف', 'Phone'], no: ['رقم', 'No'], code: ['رمز المادة', 'Code'], desc: ['التفاصيل', 'Description'],
+    qty: ['الكمية', 'Qty'], price: ['السعر', 'Price'], vat: ['ضريبة', 'VAT'], total: ['المجموع', 'Total'],
+    net: ['الصافي', 'Net'], amountTotal: ['المجموع', 'Amount Total'], tax: ['ضريبة', 'Tax'],
+    discount: ['الحسم', 'Discount'], netAmount: ['الصافي', 'Net Amount'], paid: ['المدفوع', 'Paid'],
+    remaining: ['المتبقّي', 'Outstanding'], sign: ['توقيع العميل', 'Customer Sign'], thanks: ['شكراً لتعاملكم معنا', 'Thank you for your business'],
+  };
+  const lbl = (k) => `${L[k][0]} <span style="color:#64748b;font-weight:600">${L[k][1]}</span>`;
 
+  const rows = b.lines.map((l, i) => {
+    const v = variantById(l.variantId);
+    const code = esc(v?.sku || '');
+    const name = esc(v ? variantLabel(v) : '—');
+    const lineTotal = l.lineTotal;
+    const lineNet = taxOn ? Math.round(lineTotal * (1 + b.vatRate / 100) * 100) / 100 : lineTotal;
+    return `
+      <tr>
+        <td style="text-align:center;padding:6px;border:1px solid #cbd5e1">${i + 1}</td>
+        <td style="text-align:center;padding:6px;border:1px solid #cbd5e1">${code}</td>
+        <td style="text-align:${ar ? 'right' : 'left'};padding:6px 8px;border:1px solid #cbd5e1">${name}</td>
+        <td style="text-align:center;padding:6px;border:1px solid #cbd5e1">${l.qty.toFixed(2)}</td>
+        <td style="text-align:center;padding:6px;border:1px solid #cbd5e1">${m(l.qty > 0 ? lineTotal / l.qty : l.unitPrice)}</td>
+        ${taxOn ? `<td style="text-align:center;padding:6px;border:1px solid #cbd5e1">${b.vatRate.toFixed(2)}%</td>` : ''}
+        <td style="text-align:center;padding:6px;border:1px solid #cbd5e1">${m(lineTotal)}</td>
+        <td style="text-align:center;padding:6px;border:1px solid #cbd5e1;font-weight:700">${m(lineNet)}</td>
+      </tr>`;
+  }).join('');
+
+  const colCount = taxOn ? 8 : 7;
   const sumRow = (label, val, opts = {}) => `
     <tr>
-      <td style="padding:5px 8px;color:#5b6b7d;${opts.bold ? 'font-weight:800;color:#0E1D2E' : ''}">${label}</td>
-      <td style="padding:5px 8px;text-align:${ar ? 'left' : 'right'};font-weight:${opts.bold ? '800' : '700'};${opts.color ? `color:${opts.color}` : ''}">${m(val)}</td>
+      <td style="border:1px solid #cbd5e1;padding:5px 8px;font-weight:700;${opts.bg ? `background:${opts.bg};` : ''}${opts.color ? `color:${opts.color};` : ''}">${label}</td>
+      <td style="border:1px solid #cbd5e1;padding:5px 8px;text-align:${ar ? 'left' : 'right'};font-weight:800;${opts.color ? `color:${opts.color};` : ''}">${m(val)}</td>
     </tr>`;
 
   return `
-  <div dir="${dir}" style="width:760px;background:#fff;color:#0E1D2E;font-family:'Tajawal',Arial,sans-serif;padding:34px 36px;box-sizing:border-box">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1C3D5A;padding-bottom:16px;margin-bottom:18px">
-      <div>
-        <div style="font-size:26px;font-weight:900;color:#1C3D5A">${company}</div>
-        ${addr ? `<div style="font-size:12px;color:#5b6b7d;margin-top:4px">${addr}</div>` : ''}
-        ${cphone ? `<div style="font-size:12px;color:#5b6b7d;margin-top:2px">${T.phone}: ${cphone}</div>` : ''}
+  <div dir="${ar ? 'rtl' : 'ltr'}" style="width:780px;background:#fff;color:#0E1D2E;font-family:'Tajawal',Arial,sans-serif;padding:30px 32px;box-sizing:border-box;font-size:12.5px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
+      <div style="flex:1">
+        <div style="font-size:23px;font-weight:900;color:#1C3D5A;line-height:1.15">${company}</div>
+        ${cAddr ? `<div style="color:#475569;margin-top:5px">${cAddr}</div>` : ''}
+        ${cPhone ? `<div style="color:#475569">${L.phone[1]}: ${cPhone}</div>` : ''}
+        ${cTrn ? `<div style="color:#1C3D5A;font-weight:800;margin-top:3px">TRN: ${cTrn}</div>` : ''}
       </div>
-      <div style="text-align:${ar ? 'left' : 'right'}">
-        <div style="font-size:24px;font-weight:900;letter-spacing:1px;color:#1C3D5A">${T.invoice}</div>
-        <div style="font-size:13px;margin-top:6px"><b>${T.no}:</b> ${esc(invoice.invoiceNumber)}</div>
-        <div style="font-size:13px"><b>${T.date}:</b> ${esc(invoice.date || '')}</div>
+      <div style="text-align:center;padding:0 8px">
+        <div style="font-size:20px;font-weight:900;color:#1C3D5A">فاتورة ضريبية</div>
+        <div style="font-size:15px;font-weight:800;color:#1C3D5A;letter-spacing:.5px">Tax Invoice</div>
       </div>
     </div>
-
-    <div style="background:#F3F6FB;border-radius:10px;padding:12px 14px;margin-bottom:18px">
-      <div style="font-size:11px;color:#5b6b7d;margin-bottom:3px">${T.billTo}</div>
-      <div style="font-size:16px;font-weight:800">${esc(customer?.name || '—')}</div>
-      ${customer?.phone ? `<div style="font-size:12px;color:#5b6b7d;margin-top:2px">${T.phone}: ${esc(customer.phone)}</div>` : ''}
-      ${customer?.city || customer?.emirate ? `<div style="font-size:12px;color:#5b6b7d">${esc([customer.city, customer.emirate].filter(Boolean).join(', '))}</div>` : ''}
+    <div style="height:3px;background:#1C3D5A;margin:12px 0 14px"></div>
+    <div style="display:flex;gap:12px;margin-bottom:14px">
+      <div style="flex:1;border:1px solid #cbd5e1;border-radius:8px;padding:10px 12px">
+        <div style="font-weight:800;margin-bottom:4px">${lbl('customer')}</div>
+        <div style="font-size:14px;font-weight:800">${esc(customer?.name || '—')}</div>
+        ${customer?.trn ? `<div style="color:#1C3D5A;font-weight:700;margin-top:2px">TRN: ${esc(customer.trn)}</div>` : ''}
+        ${customer?.phone ? `<div style="color:#475569">${L.phone[1]}: ${esc(customer.phone)}</div>` : ''}
+        ${(customer?.city || customer?.emirate) ? `<div style="color:#475569">${esc([customer.city, customer.emirate].filter(Boolean).join(', '))}</div>` : ''}
+      </div>
+      <div style="width:230px;border:1px solid #cbd5e1;border-radius:8px;padding:10px 12px">
+        <table style="width:100%;font-size:12px">
+          <tr><td style="padding:2px 0;color:#475569">${lbl('invoiceNo')}</td><td style="padding:2px 0;text-align:${ar ? 'left' : 'right'};font-weight:800">${esc(invoice.invoiceNumber)}</td></tr>
+          <tr><td style="padding:2px 0;color:#475569">${lbl('date')}</td><td style="padding:2px 0;text-align:${ar ? 'left' : 'right'};font-weight:700">${esc(invoice.date || '')}</td></tr>
+          <tr><td style="padding:2px 0;color:#475569">${cur}</td><td style="padding:2px 0;text-align:${ar ? 'left' : 'right'};font-weight:700">${esc((invoice.paymentStatus === 'paid') ? (ar ? 'مدفوعة' : 'Paid') : (ar ? 'آجل' : 'Credit'))}</td></tr>
+        </table>
+      </div>
     </div>
-
-    <table style="width:100%;border-collapse:collapse;font-size:13px">
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
       <thead>
         <tr style="background:#1C3D5A;color:#fff">
-          <th style="text-align:${align};padding:9px 8px">${T.item}</th>
-          <th style="padding:9px 8px;width:60px">${T.qty}</th>
-          <th style="padding:9px 8px;width:90px">${T.price}</th>
-          <th style="padding:9px 8px;width:80px">${T.disc}</th>
-          <th style="padding:9px 8px;width:100px">${T.lineTotal}</th>
+          <th style="border:1px solid #1C3D5A;padding:7px 6px;width:34px">${lbl('no')}</th>
+          <th style="border:1px solid #1C3D5A;padding:7px 6px;width:80px">${lbl('code')}</th>
+          <th style="border:1px solid #1C3D5A;padding:7px 6px">${lbl('desc')}</th>
+          <th style="border:1px solid #1C3D5A;padding:7px 6px;width:54px">${lbl('qty')}</th>
+          <th style="border:1px solid #1C3D5A;padding:7px 6px;width:80px">${lbl('price')}</th>
+          ${taxOn ? `<th style="border:1px solid #1C3D5A;padding:7px 6px;width:58px">${lbl('vat')}</th>` : ''}
+          <th style="border:1px solid #1C3D5A;padding:7px 6px;width:84px">${lbl('total')}</th>
+          <th style="border:1px solid #1C3D5A;padding:7px 6px;width:88px">${lbl('net')}</th>
         </tr>
       </thead>
-      <tbody>${rows}</tbody>
+      <tbody>${rows || `<tr><td colspan="${colCount}" style="border:1px solid #cbd5e1;padding:14px;text-align:center;color:#94a3b8">—</td></tr>`}</tbody>
     </table>
-
-    <div style="display:flex;justify-content:${ar ? 'flex-start' : 'flex-end'};margin-top:18px">
-      <table style="width:300px;border-collapse:collapse;font-size:13px">
-        ${sumRow(T.subtotal, b.subtotal)}
-        ${b.discountTotal > 0 ? sumRow(T.discount, b.discountTotal, { color: '#C0392B' }) : ''}
-        ${b.taxEnabled ? sumRow(`${T.vat} (${b.vatRate}%)`, b.vat) : ''}
-        <tr><td colspan="2" style="border-top:2px solid #1C3D5A;padding-top:4px"></td></tr>
-        ${sumRow(T.total, b.total, { bold: true })}
-        ${b.paid > 0 ? sumRow(T.paid, b.paid, { color: '#1E7A46' }) : ''}
-        ${b.remaining > 0 ? sumRow(T.remaining, b.remaining, { bold: true, color: '#C0392B' }) : ''}
+    <div style="display:flex;gap:12px;margin-top:14px;align-items:flex-start">
+      <div style="flex:1;border:1px solid #cbd5e1;border-radius:8px;padding:12px 14px">
+        <div style="color:#475569;font-size:11px;margin-bottom:3px">${ar ? 'المبلغ بالحروف' : 'Amount in words'}</div>
+        <div style="font-weight:800;line-height:1.5">${esc(amountToWords(b.total, cur))}</div>
+      </div>
+      <table style="width:280px;border-collapse:collapse;font-size:12.5px">
+        ${sumRow(lbl('amountTotal'), b.subtotal)}
+        ${taxOn ? sumRow(`${lbl('tax')} ${b.vatRate}%`, b.vat) : ''}
+        ${b.discountTotal > 0 ? sumRow(lbl('discount'), b.discountTotal, { color: '#C0392B' }) : ''}
+        ${sumRow(lbl('netAmount'), b.total, { bg: '#EAF0F7' })}
+        ${b.paid > 0 ? sumRow(lbl('paid'), b.paid, { color: '#1E7A46' }) : ''}
+        ${b.remaining > 0 ? sumRow(lbl('remaining'), b.remaining, { color: '#C0392B' }) : ''}
       </table>
     </div>
-
-    <div style="margin-top:34px;text-align:center;color:#8a97a6;font-size:12px;border-top:1px solid #eef1f5;padding-top:14px">${T.thanks}</div>
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:40px">
+      <div style="font-size:11px;color:#94a3b8">${L.thanks[ar ? 0 : 1]}</div>
+      <div style="text-align:center">
+        <div style="width:160px;border-top:1px solid #475569;padding-top:4px;font-size:11px;color:#475569">${L.sign[0]} · ${L.sign[1]}</div>
+      </div>
+    </div>
   </div>`;
 }
 
-// Generate the invoice PDF as a Blob. Returns { blob, filename }. Throws on
-// failure so the caller can show a friendly message (it never crashes the app).
-export async function generateInvoicePdf({ invoice, items, settings, customer, variantName, lang = 'ar' }) {
-  const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
-    import('jspdf'), import('html2canvas'),
-  ]);
-
+export async function generateInvoicePdf({ invoice, items, settings, customer, variantById, lang = 'ar' }) {
+  const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([import('jspdf'), import('html2canvas')]);
   const host = document.createElement('div');
   host.style.cssText = 'position:fixed;left:-10000px;top:0;z-index:-1;';
-  host.innerHTML = buildHtml({ invoice, items, settings, customer, variantName, lang });
+  host.innerHTML = buildHtml({ invoice, items, settings, customer, variantById, lang });
   document.body.appendChild(host);
   try {
     const node = host.firstElementChild;
     const canvas = await html2canvas(node, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false });
     const img = canvas.toDataURL('image/jpeg', 0.92);
     const pdf = new jsPDF({ unit: 'pt', format: 'a4', compress: true });
-    const pw = pdf.internal.pageSize.getWidth();
-    const ph = pdf.internal.pageSize.getHeight();
-    const margin = 24;
-    const iw = pw - margin * 2;
-    const ih = (canvas.height / canvas.width) * iw;
-    let y = margin, remaining = ih;
-    // Paginate if the invoice is taller than one page
+    const pw = pdf.internal.pageSize.getWidth(), ph = pdf.internal.pageSize.getHeight();
+    const margin = 24, iw = pw - margin * 2, ih = (canvas.height / canvas.width) * iw;
     if (ih <= ph - margin * 2) {
-      pdf.addImage(img, 'JPEG', margin, y, iw, ih);
+      pdf.addImage(img, 'JPEG', margin, margin, iw, ih);
     } else {
-      let sy = 0;
-      const pageH = ph - margin * 2;
-      const ratio = canvas.width / iw;
+      const ratio = canvas.width / iw, pageH = ph - margin * 2;
+      let remaining = ih, sy = 0;
       while (remaining > 0) {
         const sliceH = Math.min(pageH, remaining) * ratio;
         const c2 = document.createElement('canvas');
@@ -139,7 +158,5 @@ export async function generateInvoicePdf({ invoice, items, settings, customer, v
     }
     const filename = `${(invoice.invoiceNumber || 'invoice')}.pdf`.replace(/[^\w.-]/g, '_');
     return { blob: pdf.output('blob'), filename };
-  } finally {
-    host.remove();
-  }
+  } finally { host.remove(); }
 }

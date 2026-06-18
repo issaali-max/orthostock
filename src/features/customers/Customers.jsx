@@ -7,7 +7,7 @@ import { fmtDate } from '../../lib/dates.js';
 import { customerStats, clinicRating, recordInvoicePayment } from '../../lib/engine.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, PaymentModal, SearchBar, Select, Textarea } from '../../ui/components.jsx';
 
-const blank = () => ({ name: '', type: 'doctor', phone: '', emirate: '', city: '', specialty: '', workingDays: WEEKDAYS.map((d) => d.key), notes: '', isActive: true });
+const blank = () => ({ name: '', type: 'doctor', phone: '', emirate: '', city: '', specialty: '', trn: '', workingDays: WEEKDAYS.map((d) => d.key), notes: '', isActive: true });
 
 export default function Customers() {
   const app = useApp();
@@ -49,7 +49,7 @@ export default function Customers() {
   const save = async () => {
     const r = editing;
     if (!r.name?.trim()) return;
-    const payload = { name: r.name.trim(), type: r.type || 'doctor', phone: r.phone || '',
+    const payload = { name: r.name.trim(), type: r.type || 'doctor', phone: r.phone || '', trn: r.trn || '',
       emirate: r.emirate || '', city: r.city || '', specialty: r.specialty || '', workingDays: r.workingDays || [], notes: r.notes || '', isActive: true };
     try { if (r.id) await updateRow(TABLES.customers, r.id, payload); else await createRow(TABLES.customers, payload); setEditing(null); }
     catch { /* toast shown (duplicate phone) */ }
@@ -115,6 +115,7 @@ export default function Customers() {
             </Field>
             <div style={{ display: 'flex', gap: 8 }}>
               <Field label={t('phone')}><Input value={editing.phone} onChange={(v) => setEditing((r) => ({ ...r, phone: v }))} /></Field>
+              <Field label={t('trn')}><Input value={editing.trn || ''} onChange={(v) => setEditing((r) => ({ ...r, trn: v }))} /></Field>
               <Field label={t('specialty')}><Input value={editing.specialty} onChange={(v) => setEditing((r) => ({ ...r, specialty: v }))} /></Field>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
