@@ -7,7 +7,7 @@ import { isHashed, makeHashedPassword } from '../../lib/auth.js';
 import { subscribeSync, pushAllLocal, pull, cloudReady, wipeCloud } from '../../db/sync.js';
 import { exportBackup, importBackup } from '../../lib/backup.js';
 import { exportExcel, importExcel } from '../../lib/excel.js';
-import { dataHealth, mergeCustomers, migrateImagesToStorage } from '../../lib/engine.js';
+import { dataHealth, mergeCustomers, migrateImagesToStorage, reconcileStock } from '../../lib/engine.js';
 import { connectOneDrive, disconnectOneDrive, getOneDriveAccount, backupToOneDrive } from '../../lib/onedrive.js';
 import { num, fmtCur } from '../../lib/money.js';
 
@@ -434,6 +434,13 @@ export default function Settings() {
                   <Badge tone="warning">{r.diff > 0 ? '+' : ''}{r.diff}</Badge>
                 </div>
               ))}
+              <Btn onClick={async () => {
+                if (!window.confirm(t('reconcileConfirm'))) return;
+                const res = await reconcileStock(app);
+                showToast(`${t('reconcileDone')} (${res.fixed})`, 'success');
+                setShowAudit(false);
+              }} style={{ marginTop: 6 }}>🔧 {t('reconcileStock')}</Btn>
+              <div style={{ fontSize: 11, color: C.textMuted, lineHeight: 1.5 }}>{t('reconcileNote')}</div>
             </div>
           );
         })()}

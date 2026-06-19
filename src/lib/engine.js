@@ -730,3 +730,37 @@ export async function deleteSecurityCascade(app, securityId) {
   for (const f of (app.data[TABLES.cashFlows] || []).filter((y) => y.securityId === securityId)) await db.remove(TABLES.cashFlows, f.id);
   await db.remove(TABLES.securities, securityId);
 }
+
+// ── Stock reconciliation ─────────────────────────────────────
+// Stock movements are the source of truth; variant.stockQty is a cache. With
+// offline multi-device use + last-write-wins, that cache can drift (e.g. two
+// devices sell the same item offline). This recomputes every active variant's
+// stockQty = sum of its movements and writes back the ones that differ, in ONE
+// atomic batch. Returns the list of fixes so the UI can show what changed.
+export async function reconcileStock(app) {
+  const [variants, moves] = await Promise.all([
+    db.getAll(TABLES.variants), db.getAll(TABLES.stockMovements),
+  ]);
+  const sumByVar = new Map();
+  for (const m of moves) {
+    if (m.isActive === false) continue;
+    sumByVar.set(m.variantId, round2((sumByVar.get(m.variantId) || 0) + num(m.qtyChange)));
+  }
+  const fixes = [];
+  const specs = [];
+  for (const v of variants) {
+    if (v.isActive === false) continue;
+    const expected = round2(sumByVar.get(v.id) || 0);
+    const actual = round2(num(v.stockQty));
+    if (expected !== actual) {
+      fixes.push({ id: v.id, name: v.nameEn || v.sku, from: actual, to: expected, diff: round2(expected - actual) });
+      specs.push({ op: 'update', table: TABLES.variants, id: v.id, patch: { stockQty: expected } });
+    }
+  }
+  if (specs.length) {
+    await db.atomicMutations(specs);
+    await app.refresh(TABLES.variants);
+    nudgeSync();
+  }
+  return { fixed: fixes.length, fixes };
+}
