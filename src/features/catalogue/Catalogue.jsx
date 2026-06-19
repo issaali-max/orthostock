@@ -426,6 +426,7 @@ const pencilBtn = { position: 'absolute', top: 6, insetInlineEnd: 6, border: 'no
 function EditModal({ edit, setEdit, app, t, products, categories, onSave, onDelete }) {
   if (!edit) return null;
   const variants = (app.data[TABLES.variants] || []).filter((v) => v.isActive !== false);
+  const suppliers = (app.data[TABLES.suppliers] || []).filter((s) => s.isActive !== false);
   const setRec = (updater) => setEdit((e) => ({ ...e, rec: typeof updater === 'function' ? updater(e.rec) : updater }));
   return (
     <Modal open onClose={() => setEdit(null)} title={edit.rec.id ? t('edit') : t('add')}
@@ -436,7 +437,7 @@ function EditModal({ edit, setEdit, app, t, products, categories, onSave, onDele
       </>}>
       {edit.type === 'category' && <CategoryForm rec={edit.rec} setRec={setRec} t={t} />}
       {edit.type === 'product' && <ProductForm rec={edit.rec} setRec={setRec} t={t} cats={categories} />}
-      {edit.type === 'variant' && <VariantForm rec={edit.rec} setRec={setRec} t={t} products={products} categories={categories} variants={variants}
+      {edit.type === 'variant' && <VariantForm rec={edit.rec} setRec={setRec} t={t} products={products} categories={categories} variants={variants} suppliers={suppliers}
         onAddOption={(catId, key, opt) => addOptionToCategory(app, categories, catId, key, opt)} />}
       {edit.type === 'variant' && edit.rec.id && <StockHistory app={app} t={t} variantId={edit.rec.id} />}
     </Modal>

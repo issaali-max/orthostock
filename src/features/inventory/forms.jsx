@@ -17,7 +17,7 @@ export const blankProduct = (categoryId = '') => ({ nameEn: '', brand: '', categ
 export const blankVariant = (productId = '') => ({
   productId, categoryId: '', sku: '', nameEn: '', attributes: {}, image_path: '', image_url: '',
   purchasePriceLatest: '', purchasePriceAvg: '', purchasePriceMin: '', purchasePriceMax: '',
-  sellingPriceDefault: '', stockQty: '', stockMin: '', unit: 'piece', notes: '', isActive: true,
+  sellingPriceDefault: '', stockQty: '', stockMin: '', supplierId: '', unit: 'piece', notes: '', isActive: true,
 });
 
 // ── Save helpers (app = useApp()) ──
@@ -102,7 +102,7 @@ export async function saveVariant(app, rec) {
     productId, sku: rec.sku.trim(), nameEn: rec.nameEn || '',
     attributes: rec.attributes || {}, image_path: rec.image_path || rec.image_url || '',
     sellingPriceDefault: num(rec.sellingPriceDefault), stockMin: num(rec.stockMin),
-    unit: rec.unit || 'piece', notes: rec.notes || '', isActive: true,
+    unit: rec.unit || 'piece', notes: rec.notes || '', isActive: true, supplierId: rec.supplierId || '',
     purchasePriceLatest: num(rec.purchasePriceLatest), purchasePriceAvg: num(rec.purchasePriceAvg),
     purchasePriceMin: num(rec.purchasePriceMin), purchasePriceMax: num(rec.purchasePriceMax),
     stockQty: num(rec.stockQty),
@@ -218,7 +218,7 @@ export function ProductForm({ rec, setRec, t, cats }) {
   );
 }
 
-export function VariantForm({ rec, setRec, t, products, categories, variants = [], onAddOption }) {
+export function VariantForm({ rec, setRec, t, products, categories, variants = [], suppliers = [], onAddOption }) {
   const set = (k, v) => setRec((r) => ({ ...r, [k]: v }));
   // 2-level UI: the material picks a CATEGORY only. For an existing material the
   // category comes from its (hidden) product; for a new one from rec.categoryId.
@@ -288,6 +288,10 @@ export function VariantForm({ rec, setRec, t, products, categories, variants = [
         <Field label={t('stockMin')}><Input type="number" value={rec.stockMin} onChange={(v) => set('stockMin', v)} /></Field>
       </div>
       <Field label={t('unit')}><Select value={rec.unit} onChange={(v) => set('unit', v)} options={UNITS} /></Field>
+      <Field label={t('preferredSupplier')}>
+        <Select value={rec.supplierId || ''} onChange={(v) => set('supplierId', v)}
+          options={[{ value: '', label: '—' }, ...suppliers.filter((s) => s.isActive !== false).map((s) => ({ value: s.id, label: s.name }))]} />
+      </Field>
       <Field label={t('notes')}><Textarea value={rec.notes} onChange={(v) => set('notes', v)} rows={2} /></Field>
     </div>
   );

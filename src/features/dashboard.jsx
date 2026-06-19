@@ -4,6 +4,7 @@ import { useApp } from '../app/AppProvider.jsx';
 import { C, TABLES, SHADOW } from '../lib/constants.js';
 import { fmtCur, fmtNum, num } from '../lib/money.js';
 import { todayISO } from '../lib/dates.js';
+import RestockList from './catalogue/RestockList.jsx';
 import { pnl, monthlyTrend, periodTrend, buildAlerts, emirateStats, topClinics, topProducts, topCustomers } from '../lib/engine.js';
 import { Badge, Card, EmptyState, Modal, PageHeader } from '../ui/components.jsx';
 
@@ -11,6 +12,7 @@ const monthStart = () => { const d = new Date(); return `${d.getFullYear()}-${St
 const yearStart = () => `${new Date().getFullYear()}-01-01`;
 
 export default function Dashboard() {
+  const [showRestock, setShowRestock] = useState(false);
   const { t, data, displayCurrency, usdRate } = useApp();
   const [range, setRange] = useState('month'); // day | month | year
   const [trendMode, setTrendMode] = useState('month'); // month | year
@@ -135,8 +137,9 @@ export default function Dashboard() {
         <Kpi icon="📈" label={t('profit')} value={cur(kpi.profit)} color={C.success} />
         <Kpi icon="⏳" label={t('debt')} value={cur(kpi.debt)} color={kpi.debt > 0 ? C.danger : C.success} />
         <Kpi icon="📦" label={t('inventoryValue')} value={cur(kpi.inventoryValue)} color={C.text} />
-        <Kpi icon="🔻" label={t('lowStock')} value={fmtNum(kpi.lowStock.length)} color={kpi.lowStock.length ? C.warning : C.success} />
+        <Kpi icon="🔻" label={t('lowStock')} value={fmtNum(kpi.lowStock.length)} color={kpi.lowStock.length ? C.warning : C.success} onClick={() => setShowRestock(true)} />
       </div>
+      {showRestock && <RestockList onClose={() => setShowRestock(false)} />}
 
       {/* ── P&L waterfall ── */}
       <Card className="rise" style={{ marginBottom: 14 }}>
@@ -405,12 +408,12 @@ function HeroFig({ label, value, sub, strong, neg, onClick }) {
   );
 }
 
-function Kpi({ icon, label, value, color }) {
+function Kpi({ icon, label, value, color, onClick }) {
   return (
-    <div style={{ background: C.surface, borderRadius: 16, border: `1px solid ${C.border}`, boxShadow: SHADOW, padding: 14 }}>
+    <div onClick={onClick} style={{ background: C.surface, borderRadius: 16, border: `1px solid ${C.border}`, boxShadow: SHADOW, padding: 14, cursor: onClick ? 'pointer' : 'default' }}>
       <div style={{ fontSize: 18 }}>{icon}</div>
       <div style={{ fontSize: 18, fontWeight: 800, color, marginTop: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{value}</div>
-      <div style={{ fontSize: 11, color: C.textMuted }}>{label}</div>
+      <div style={{ fontSize: 11, color: C.textMuted }}>{label}{onClick ? ' ›' : ''}</div>
     </div>
   );
 }

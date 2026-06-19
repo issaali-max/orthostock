@@ -14,8 +14,10 @@ export default function RestockList({ onClose }) {
   const { t, lang, data, settings, showToast } = app;
   const cur = settings?.baseCurrency || 'AED';
 
-  const rows = useMemo(() => {
+  const { rows, groups, totalEst } = useMemo(() => {
     const variants = (data[TABLES.variants] || []).filter((v) => v.isActive !== false);
+    const suppliers = data[TABLES.suppliers] || [];
+    const supName = (id) => suppliers.find((s) => s.id === id)?.name || t('noSupplier');
     const list = [];
     for (const v of variants) {
       const stock = num(v.stockQty);
@@ -23,30 +25,34 @@ export default function RestockList({ onClose }) {
       const out = stock <= 0;
       const low = min > 0 && stock <= min;
       if (!out && !low) continue;
-      // suggest enough to refill to the minimum (at least 1 when out with no min set)
       const suggest = min > 0 ? Math.max(0, Math.round(min - stock)) : (out ? null : 0);
       const cost = num(v.purchasePriceAvg) || num(v.purchasePriceLatest);
-      list.push({ v, stock, min, out, suggest, cost, estCost: suggest ? round2(suggest * cost) : 0 });
+      list.push({ v, stock, min, out, suggest, cost, estCost: suggest ? round2(suggest * cost) : 0, supplier: supName(v.supplierId) });
     }
-    // out-of-stock first, then by how far below the minimum
     list.sort((a, b) => (b.out - a.out) || ((b.min - b.stock) - (a.min - a.stock)));
-    return list;
-  }, [data]);
-
-  const totalEst = round2(rows.reduce((s, r) => s + (r.estCost || 0), 0));
+    // group by supplier (preserves sorted order within each group)
+    const g = {};
+    for (const r of list) (g[r.supplier] = g[r.supplier] || []).push(r);
+    const groups = Object.entries(g).map(([name, items]) => ({ name, items, est: round2(items.reduce((s, x) => s + (x.estCost || 0), 0)) }));
+    return { rows: list, groups, totalEst: round2(list.reduce((s, r) => s + (r.estCost || 0), 0)) };
+  }, [data, t]);
 
   const buildText = () => {
     const date = new Date().toLocaleDateString(lang === 'en' ? 'en-GB' : 'ar-EG');
     const head = lang === 'en' ? `🛒 Restock list — ${date}` : `🛒 قائمة إعادة الطلب — ${date}`;
-    const lines = rows.map((r) => {
-      const name = variantLabel(r.v);
-      const sku = r.v.sku ? ` (${r.v.sku})` : '';
-      const qty = r.suggest != null ? `${fmtNum(r.suggest)}` : '?';
-      return lang === 'en'
-        ? `• ${name}${sku} — have ${fmtNum(r.stock)}/${fmtNum(r.min)} → order ${qty}`
-        : `• ${name}${sku} — المتوفّر ${fmtNum(r.stock)}/${fmtNum(r.min)} ← اطلب ${qty}`;
+    const blocks = groups.map((g) => {
+      const title = `\n— ${g.name} —`;
+      const lines = g.items.map((r) => {
+        const name = variantLabel(r.v);
+        const sku = r.v.sku ? ` (${r.v.sku})` : '';
+        const qty = r.suggest != null ? `${fmtNum(r.suggest)}` : '?';
+        return lang === 'en'
+          ? `• ${name}${sku} — have ${fmtNum(r.stock)}/${fmtNum(r.min)} → order ${qty}`
+          : `• ${name}${sku} — المتوفّر ${fmtNum(r.stock)}/${fmtNum(r.min)} ← اطلب ${qty}`;
+      });
+      return [title, ...lines].join('\n');
     });
-    return [head, ...lines].join('\n');
+    return [head, ...blocks].join('\n');
   };
 
   const doShare = async () => {
@@ -77,19 +83,27 @@ export default function RestockList({ onClose }) {
             <span style={{ color: C.textMid }}>{rows.length} {t('itemsToReorder')}</span>
             <span style={{ fontWeight: 800, color: C.text }}>{t('estCost')}: {money(totalEst, cur)}</span>
           </div>
-          {rows.map((r) => (
-            <div key={r.v.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: C.surfaceAlt, borderRadius: 12, padding: '9px 11px' }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 700, color: C.text, fontSize: 13 }}>{variantLabel(r.v)}</div>
-                <div style={{ fontSize: 11, color: C.textMuted }}>
-                  {r.v.sku ? `${r.v.sku} · ` : ''}{t('stock')}: {fmtNum(r.stock)}{r.min > 0 ? ` / ${fmtNum(r.min)}` : ''}
+          {groups.map((g) => (
+            <div key={g.name} style={{ display: 'grid', gap: 6 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+                <span style={{ fontSize: 12, fontWeight: 800, color: C.primary }}>🏷️ {g.name}</span>
+                <span style={{ fontSize: 11, color: C.textMuted }}>{money(g.est, cur)}</span>
+              </div>
+              {g.items.map((r) => (
+                <div key={r.v.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: C.surfaceAlt, borderRadius: 12, padding: '9px 11px' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, color: C.text, fontSize: 13 }}>{variantLabel(r.v)}</div>
+                    <div style={{ fontSize: 11, color: C.textMuted }}>
+                      {r.v.sku ? `${r.v.sku} · ` : ''}{t('stock')}: {fmtNum(r.stock)}{r.min > 0 ? ` / ${fmtNum(r.min)}` : ''}
+                    </div>
+                  </div>
+                  {r.out ? <Badge tone="danger">{t('outOfStock')}</Badge> : <Badge tone="warning">{t('lowStock')}</Badge>}
+                  <div style={{ textAlign: 'center', minWidth: 56 }}>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: C.primary }}>{r.suggest != null ? fmtNum(r.suggest) : '—'}</div>
+                    <div style={{ fontSize: 9, color: C.textMuted }}>{t('orderQty')}</div>
+                  </div>
                 </div>
-              </div>
-              {r.out ? <Badge tone="danger">{t('outOfStock')}</Badge> : <Badge tone="warning">{t('lowStock')}</Badge>}
-              <div style={{ textAlign: 'center', minWidth: 56 }}>
-                <div style={{ fontSize: 16, fontWeight: 800, color: C.primary }}>{r.suggest != null ? fmtNum(r.suggest) : '—'}</div>
-                <div style={{ fontSize: 9, color: C.textMuted }}>{t('orderQty')}</div>
-              </div>
+              ))}
             </div>
           ))}
         </div>
