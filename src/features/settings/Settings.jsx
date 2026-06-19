@@ -4,7 +4,7 @@ import { C, TABLES } from '../../lib/constants.js';
 import { Badge, Btn, Card, Field, Input, Modal, PageHeader, Select } from '../../ui/components.jsx';
 import { resetStore, dbMode } from '../../db/db.js';
 import { isHashed, makeHashedPassword } from '../../lib/auth.js';
-import { subscribeSync, pushAllLocal, pull, cloudReady, wipeCloud } from '../../db/sync.js';
+import { subscribeSync, pushAllLocal, pull, cloudReady, wipeCloud, checkCloudSchema, missingColumnsSql } from '../../db/sync.js';
 import { exportBackup, importBackup } from '../../lib/backup.js';
 import { exportExcel, importExcel } from '../../lib/excel.js';
 import { dataHealth, mergeCustomers, migrateImagesToStorage, reconcileStock } from '../../lib/engine.js';
@@ -20,6 +20,7 @@ export default function Settings() {
   const [userEdit, setUserEdit] = useState(null);
   const [showAudit, setShowAudit] = useState(false);
   const [showHealth, setShowHealth] = useState(false);
+  const [schemaResult, setSchemaResult] = useState(null);
   const [imgMig, setImgMig] = useState(null);       // { done, total, failed }
   const [imgMigBusy, setImgMigBusy] = useState(false);
   const app = useApp();
@@ -270,6 +271,30 @@ export default function Settings() {
         <Btn onClick={doSyncNow} variant={cloudReady() ? 'primary' : 'light'} disabled={!cloudReady() || syncing}>
           {syncing ? `⏳ ${t('syncing')}` : `⟳ ${t('syncNow')}`}
         </Btn>
+        {cloudReady() && (
+          <div style={{ marginTop: 10 }}>
+            <button onClick={async () => {
+              setSchemaResult({ checking: true });
+              const r = await checkCloudSchema();
+              setSchemaResult(r);
+            }} style={{ border: `1px solid ${C.border}`, background: '#fff', borderRadius: 8, padding: '6px 12px', fontSize: 12, fontWeight: 800, color: C.primary, cursor: 'pointer' }}>🔌 {t('checkSchema')}</button>
+            {schemaResult && !schemaResult.checking && (
+              schemaResult.missing?.length || schemaResult.errors?.length ? (
+                <div style={{ marginTop: 8, background: '#FBECEC', borderRadius: 8, padding: 10, fontSize: 11.5 }}>
+                  {schemaResult.missing?.length > 0 && <>
+                    <div style={{ fontWeight: 800, color: C.danger, marginBottom: 4 }}>⚠ {t('missingColumns')} ({schemaResult.missing.length})</div>
+                    {schemaResult.missing.map((mc, i) => <div key={i} style={{ color: C.textMid }}>{mc.table}.{mc.column}</div>)}
+                    <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: '#fff', borderRadius: 6, padding: 8, marginTop: 6, fontSize: 10.5 }}>{missingColumnsSql(schemaResult.missing)}</pre>
+                    <Btn size="sm" variant="light" onClick={() => { navigator.clipboard?.writeText(missingColumnsSql(schemaResult.missing)); showToast(t('copied'), 'success'); }}>📋 {t('copySql')}</Btn>
+                  </>}
+                  {schemaResult.errors?.length > 0 && schemaResult.errors.map((e, i) => <div key={i} style={{ color: C.danger, marginTop: 4 }}>{e}</div>)}
+                </div>
+              ) : (
+                <div style={{ marginTop: 8, color: C.success, fontWeight: 700, fontSize: 12 }}>✓ {t('schemaOk')}</div>
+              )
+            )}
+          </div>
+        )}
       </Card>
 
       <Card style={{ marginTop: 16 }}>
@@ -400,7 +425,7 @@ export default function Settings() {
       <Modal open={showHealth} onClose={() => setShowHealth(false)} title={`🩺 ${t('dataHealth')}`}>
         {showHealth && (() => {
           const h = dataHealth(data);
-          const ok = h.orphan.length === 0 && h.hiddenDebt.length === 0 && h.dupCustomers.length === 0 && (!h.dupMaterials || h.dupMaterials.length === 0);
+          const ok = h.orphan.length === 0 && h.hiddenDebt.length === 0 && h.dupCustomers.length === 0 && (!h.dupMaterials || h.dupMaterials.length === 0) && (!h.dupInvoiceNumbers || h.dupInvoiceNumbers.length === 0);
           const Row = ({ tone, children }) => <div style={{ background: tone === 'bad' ? '#FBECEC' : C.surfaceAlt, borderRadius: 8, padding: '6px 10px', fontSize: 12, color: C.textMid }}>{children}</div>;
           return (
             <div style={{ display: 'grid', gap: 10 }}>
@@ -446,6 +471,15 @@ export default function Settings() {
                         <div style={{ fontSize: 10, color: C.textMuted, marginTop: 4 }}>{t('dupMaterialsHint')}</div>
                       </div>
                     ))}</div></div>)}
+                  {h.dupInvoiceNumbers && h.dupInvoiceNumbers.length > 0 && (<div style={{ marginTop: 10 }}>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: C.warning, marginBottom: 4 }}>⚠ {t('dupInvoiceNumbers')} ({h.dupInvoiceNumbers.length})</div>
+                    <div style={{ display: 'grid', gap: 4 }}>{h.dupInvoiceNumbers.map((d, i) => <Row key={i}>{d.number} · ×{d.ids.length}</Row>)}</div>
+                    <Btn size="sm" variant="light" style={{ marginTop: 6 }} onClick={async () => {
+                      const m = await import('../../lib/engine.js');
+                      const n = await m.fixDuplicateInvoiceNumbers({ refresh, data });
+                      showToast(`${t('renumbered')} (${n})`, 'success'); setShowHealth(false);
+                    }}>🔢 {t('fixDupNumbers')}</Btn>
+                  </div>)}
                 </>
               )}
             </div>

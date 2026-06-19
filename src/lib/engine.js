@@ -7,7 +7,7 @@
 import * as db from '../db/db.js';
 import { TABLES } from './constants.js';
 import { num, round2, safeDiv, prettyName } from './money.js';
-import { newId } from './ids.js';
+import { newId, nextDocNumber } from './ids.js';
 import { uploadDataUrl } from './storage.js';
 import { nudgeSync } from '../db/sync.js';
 import { todayISO } from './dates.js';
@@ -334,7 +334,12 @@ export function dataHealth(data) {
     (matG[k] = matG[k] || []).push({ id: v.id, name: v.nameEn, sku: v.sku || '', stock: num(v.stockQty) });
   });
   const dupMaterials = Object.values(matG).filter((g) => g.length > 1);
-  return { orphan, hiddenDebt, dupCustomers: [...new Set(dups)], dupGroups, dupMaterials, totalDebt: round2(totalDebt) };
+  // Duplicate INVOICE NUMBERS: two devices creating offline can mint the same
+  // number. Flag any number used by more than one active invoice.
+  const numG = {};
+  invoices.forEach((i) => { const k = (i.invoiceNumber || '').trim(); if (!k) return; (numG[k] = numG[k] || []).push(i.id); });
+  const dupInvoiceNumbers = Object.entries(numG).filter(([, ids]) => ids.length > 1).map(([number, ids]) => ({ number, ids }));
+  return { orphan, hiddenDebt, dupCustomers: [...new Set(dups)], dupGroups, dupMaterials, dupInvoiceNumbers, totalDebt: round2(totalDebt) };
 }
 
 // Merge duplicate customers: repoint every invoice / special price from the
@@ -805,4 +810,27 @@ export async function reconcileStock(app) {
     nudgeSync();
   }
   return { fixed: fixes.length, fixes };
+}
+
+// Renumber duplicate invoice numbers (keeps the oldest of each clash, assigns the
+// next free numbers to the rest). Returns how many were changed.
+export async function fixDuplicateInvoiceNumbers(app) {
+  const all = await db.getAll(TABLES.invoices);
+  const active = all.filter((i) => i.isActive !== false);
+  const groups = {};
+  active.forEach((i) => { const k = (i.invoiceNumber || '').trim(); if (!k) return; (groups[k] = groups[k] || []).push(i); });
+  let changed = 0;
+  let pool = all.slice(); // grows as we assign, so new numbers stay unique
+  for (const [, list] of Object.entries(groups)) {
+    if (list.length < 2) continue;
+    list.sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || '')); // keep the oldest
+    for (let k = 1; k < list.length; k++) {
+      const next = nextDocNumber(pool, 'INV', 'invoiceNumber');
+      await db.update(TABLES.invoices, list[k].id, { invoiceNumber: next });
+      pool.push({ invoiceNumber: next });
+      changed++;
+    }
+  }
+  if (changed) { await app.refresh(TABLES.invoices); nudgeSync(); }
+  return changed;
 }

@@ -234,3 +234,36 @@ export function startSync(onPulled) {
   refreshPending();
   kick();
 }
+
+// Schema check: for each table, take a sample local row and try to upsert it back.
+// If the cloud is missing a column, Supabase returns "Could not find the 'X'
+// column"; we parse the column name out. This catches the silent-sync failures we
+// hit before (updatedAt, image_path, companyAddress/Phone/Trn, trn) and tells the
+// user exactly which ALTER TABLE to run. Read-only-ish: upsert of an existing row
+// by id is idempotent. Returns { ok, missing: [{table, column}], errors }.
+export async function checkCloudSchema() {
+  if (!supabase) return { ok: false, missing: [], errors: ['cloud_not_configured'] };
+  if (!isOnline()) return { ok: false, missing: [], errors: ['offline'] };
+  const missing = []; const errors = [];
+  for (const table of Object.values(TABLES)) {
+    let rows = [];
+    try { rows = await idbGetAll(table); } catch { continue; }
+    if (!rows.length) continue;                       // nothing to test this table with
+    const sample = rows[0];
+    const { error } = await supabase.from(table).upsert(sample);
+    if (error) {
+      const m = /Could not find the '([^']+)' column/i.exec(error.message || '');
+      if (m) missing.push({ table, column: m[1] });
+      else errors.push(`${table}: ${error.message}`);
+    }
+  }
+  return { ok: missing.length === 0 && errors.length === 0, missing, errors };
+}
+
+// Build the SQL the user can paste to add every missing column.
+export function missingColumnsSql(missing) {
+  return (missing || []).map(({ table, column }) => {
+    const type = column === 'updatedAt' ? 'bigint' : 'text';
+    return `alter table ${table} add column if not exists "${column}" ${type};`;
+  }).join('\n');
+}
