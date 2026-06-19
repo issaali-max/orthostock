@@ -4,7 +4,7 @@ import { C, TABLES, emirateOptions, citiesOfEmirate, allCities } from '../../lib
 import { fmtCur, fmtNum, num, round2, safeDiv } from '../../lib/money.js';
 import { todayISO } from '../../lib/dates.js';
 import { nextDocNumber } from '../../lib/ids.js';
-import { saveInvoiceAtomic, invoiceTotals } from '../../lib/engine.js';
+import { saveInvoiceAtomic, invoiceTotals, deleteInvoiceAtomic } from '../../lib/engine.js';
 import { Btn, Field, Input, Modal, Select } from '../../ui/components.jsx';
 
 const variantLabel = (v) => {
@@ -108,7 +108,16 @@ export default function InvoiceCreate({ open, onClose, editing }) {
 
   return (
     <Modal open={open} onClose={onClose} title={editing ? `${t('editInvoice')} · ${editing.invoiceNumber}` : t('newInvoice')} width={520}
-      footer={<><Btn variant="ghost" onClick={onClose}>{t('cancel')}</Btn><Btn onClick={save} disabled={busy || lines.length === 0}>{t('save')}</Btn></>}>
+      footer={<>
+        {editing && <Btn variant="ghost" onClick={async () => {
+          if (!window.confirm(`${t('deleteInvoiceConfirm')}\n${editing.invoiceNumber}`)) return;
+          await deleteInvoiceAtomic(app, editing.id);
+          app.showToast(t('invoiceDeleted'), 'success');
+          onClose();
+        }} style={{ color: C.danger }}>🗑 {t('deleteInvoice')}</Btn>}
+        <Btn variant="ghost" onClick={onClose}>{t('cancel')}</Btn>
+        <Btn onClick={save} disabled={busy || lines.length === 0}>{t('save')}</Btn>
+      </>}>
       <div style={{ background: '#fff', paddingBottom: 8, marginBottom: 4, borderBottom: `1px solid ${C.surfaceAlt}` }}>
         <div style={{ display: 'flex', gap: 8 }}>
           <div style={{ flex: 1 }}>

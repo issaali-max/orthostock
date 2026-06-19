@@ -11,6 +11,8 @@ import { amountToWords } from './numberToWords.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+export function buildInvoiceHtml(args) { return buildHtml(args); }
+
 function buildHtml({ invoice, items, settings, customer, variantById, lang }) {
   const b = invoiceBreakdown(invoice, items, settings);
   const ar = lang !== 'en';
@@ -159,4 +161,29 @@ export async function generateInvoicePdf({ invoice, items, settings, customer, v
     const filename = `${(invoice.invoiceNumber || 'invoice')}.pdf`.replace(/[^\w.-]/g, '_');
     return { blob: pdf.output('blob'), filename };
   } finally { host.remove(); }
+}
+
+// Print the invoice on A4 (opens the same design in a print window and triggers
+// the browser print dialog). Crisper than the image PDF and lets the user pick a
+// real printer. Falls back gracefully if the popup is blocked.
+export function printInvoice({ invoice, items, settings, customer, variantById, lang = 'ar' }) {
+  const inner = buildHtml({ invoice, items, settings, customer, variantById, lang });
+  const ar = lang !== 'en';
+  const html = `<!doctype html><html dir="${ar ? 'rtl' : 'ltr'}" lang="${ar ? 'ar' : 'en'}"><head>
+    <meta charset="utf-8"><title>${(invoice.invoiceNumber || 'invoice')}</title>
+    <style>
+      @page { size: A4; margin: 10mm; }
+      * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      html,body { margin:0; padding:0; background:#fff; }
+      .wrap { display:flex; justify-content:center; }
+      .wrap > div { width:100% !important; }
+      @media screen { body { padding:16px; background:#eef1f5; } }
+    </style></head>
+    <body><div class="wrap">${inner}</div>
+    <script>window.onload=function(){setTimeout(function(){window.focus();window.print();},250);};</script>
+    </body></html>`;
+  const w = window.open('', '_blank');
+  if (!w) return false;             // popup blocked — caller can fall back to PDF download
+  w.document.open(); w.document.write(html); w.document.close();
+  return true;
 }
