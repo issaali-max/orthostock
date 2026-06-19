@@ -5,6 +5,7 @@ import { StoredImage } from '../../ui/StoredImage.jsx';
 import { fmtCur, fmtNum, num, prettyName } from '../../lib/money.js';
 import { Badge, Btn, EmptyState, Modal, PageHeader, SearchBar } from '../../ui/components.jsx';
 import RestockList from './RestockList.jsx';
+import StockTake from './StockTake.jsx';
 import { logStockMovement } from '../../lib/engine.js';
 import { fmtDate } from '../../lib/dates.js';
 import {
@@ -22,6 +23,7 @@ const variantLabel = (v) => {
 // Catalogue = browse + management only. Sales happen in the Invoice screen.
 export default function Catalogue() {
   const [showRestock, setShowRestock] = useState(false);
+  const [showStockTake, setShowStockTake] = useState(false);
   const app = useApp();
   const { t, lang, data, displayCurrency, usdRate, deleteRow } = app;
   const [catId, setCatId] = useState(null);
@@ -191,6 +193,7 @@ export default function Catalogue() {
           <div style={{ display: 'flex', gap: 6 }}>
             {EditToggle}
             <Btn size="sm" variant="light" onClick={() => setShowRestock(true)}>🛒 {t('restockList')}</Btn>
+            <Btn size="sm" variant="light" onClick={() => setShowStockTake(true)}>🔢 {t('stockTake')}</Btn>
             <Btn size="sm" variant="light" onClick={() => { setFlat(false); setFlatCat(null); setQ(''); }}>🗂️ {t('byCategory')}</Btn>
           </div>
         } />
@@ -202,6 +205,7 @@ export default function Catalogue() {
         )}
         <SearchBar value={q} onChange={setQ} placeholder={t('search')} />
         {showRestock && <RestockList onClose={() => setShowRestock(false)} />}
+        {showStockTake && <StockTake onClose={() => setShowStockTake(false)} />}
         <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 8 }}>
           <FilterChip active={!flatCat} onClick={() => setFlatCat(null)}>{t('allCats')} ({variants.length})</FilterChip>
           {categories.map((c) => <FilterChip key={c.id} active={flatCat === c.id} onClick={() => setFlatCat(c.id)}>{(c.nameAr || c.nameEn)} ({countFor(c.id)})</FilterChip>)}

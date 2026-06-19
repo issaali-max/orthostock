@@ -834,3 +834,31 @@ export async function fixDuplicateInvoiceNumbers(app) {
   if (changed) { await app.refresh(TABLES.invoices); nudgeSync(); }
   return changed;
 }
+
+// Apply a physical stock-take in one atomic batch. `counts` is a map of
+// variantId -> counted quantity (only the ones the user actually entered). For
+// each item whose counted qty differs from the cached stockQty, it updates the
+// cache AND records an 'adjustment' movement (so the ledger stays the source of
+// truth and reconcile keeps matching). Returns how many were adjusted.
+export async function applyStockTake(app, counts) {
+  const variants = await db.getAll(TABLES.variants);
+  const vById = new Map(variants.map((v) => [v.id, v]));
+  const specs = [];
+  let adjusted = 0;
+  for (const [variantId, raw] of Object.entries(counts || {})) {
+    const v = vById.get(variantId);
+    if (!v || raw === '' || raw == null) continue;            // skip blanks (not counted)
+    const after = round2(num(raw));
+    const before = round2(num(v.stockQty));
+    if (after === before) continue;
+    specs.push({ op: 'update', table: TABLES.variants, id: variantId, patch: { stockQty: after } });
+    specs.push({ op: 'insert', table: TABLES.stockMovements, row: { variantId, type: 'adjustment', qtyChange: round2(after - before), qtyAfter: after, refType: 'stocktake', refId: null } });
+    adjusted++;
+  }
+  if (specs.length) {
+    await db.atomicMutations(specs);
+    await Promise.all([app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements)]);
+    nudgeSync();
+  }
+  return adjusted;
+}
