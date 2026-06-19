@@ -84,6 +84,7 @@ export function AppProvider({ children }) {
   }, [showToast]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
+  useEffect(() => { import('../lib/backup.js').then((m) => m.maybeAutoBackup()).catch(() => {}); }, []); // daily local safety snapshot
 
   // Start offline<->cloud sync once; re-pull refreshes the UI caches.
   useEffect(() => { startSync(() => loadAll(true)); }, [loadAll]); // silent refresh on background pull

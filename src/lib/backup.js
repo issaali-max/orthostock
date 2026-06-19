@@ -36,3 +36,68 @@ export async function importBackup(file) {
   }
   return restored;
 }
+
+// ── Automatic daily local snapshots (rolling 7) ──────────────
+// A safety net against accidental edits/deletes: once a day the app saves a full
+// snapshot into IndexedDB (the 'meta' store). You can restore any of the last 7
+// days, or download one as a file. This is local to the device; the cloud sync is
+// the cross-device backup. Index lives under meta 'backupIndex'.
+const BK_INDEX = 'backupIndex';
+const BK_PREFIX = 'backup:';
+const KEEP = 7;
+
+export async function listBackups() {
+  return (await L.metaGet(BK_INDEX)) || [];
+}
+
+export async function createSnapshot(reason = 'auto') {
+  const snap = await collectBackup();
+  const day = new Date().toISOString().slice(0, 10);
+  const key = `${BK_PREFIX}${day}`;
+  const rows = Object.values(TABLES).reduce((n, t) => n + (Array.isArray(snap[t]) ? snap[t].length : 0), 0);
+  await L.metaSet(key, snap);
+  let index = (await L.metaGet(BK_INDEX)) || [];
+  index = index.filter((b) => b.key !== key);                 // replace today's if it exists
+  index.unshift({ key, at: Date.now(), day, rows, reason });
+  // trim to KEEP, deleting dropped snapshot data
+  const drop = index.slice(KEEP);
+  for (const d of drop) { try { await L.idbDelete('meta', d.key); } catch { /* ignore */ } }
+  index = index.slice(0, KEEP);
+  await L.metaSet(BK_INDEX, index);
+  await L.metaSet('lastAutoBackupAt', Date.now());
+  return { key, rows };
+}
+
+// Run at startup; makes a snapshot only if the last one is >~20h old.
+export async function maybeAutoBackup() {
+  try {
+    const last = await L.metaGet('lastAutoBackupAt');
+    if (last && Date.now() - last < 20 * 60 * 60 * 1000) return null;
+    return await createSnapshot('auto');
+  } catch (e) { console.warn('[autobackup]', e?.message || e); return null; }
+}
+
+export async function restoreSnapshot(key) {
+  const snap = await L.metaGet(key);
+  if (!snap) throw new Error('snapshot_not_found');
+  let restored = 0;
+  for (const t of Object.values(TABLES)) {
+    if (Array.isArray(snap[t])) {
+      await L.idbClear(t);
+      await L.idbBulkPut(t, snap[t]);
+      restored += snap[t].length;
+    }
+  }
+  return restored;
+}
+
+export async function downloadSnapshot(key) {
+  const snap = await L.metaGet(key);
+  if (!snap) throw new Error('snapshot_not_found');
+  const blob = new Blob([JSON.stringify(snap, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `${key.replace(':', '-')}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}

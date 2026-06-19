@@ -92,6 +92,24 @@ export default function Settings() {
   };
 
   const doExport = async () => { await exportBackup(); showToast(t('saved'), 'success'); };
+
+  // Local daily snapshots (rolling 7)
+  const [snaps, setSnaps] = useState([]);
+  const loadSnaps = async () => { const m = await import('../../lib/backup.js'); setSnaps(await m.listBackups()); };
+  useEffect(() => { loadSnaps(); }, []);
+  const doSnapshotNow = async () => {
+    const m = await import('../../lib/backup.js');
+    await m.createSnapshot('manual'); await loadSnaps();
+    showToast(t('backupSaved'), 'success');
+  };
+  const doRestoreSnap = async (key) => {
+    if (!window.confirm(t('restoreConfirm'))) return;
+    const m = await import('../../lib/backup.js');
+    try { const n = await m.restoreSnapshot(key); showToast(`${t('restored')} (${n})`, 'success'); setTimeout(() => window.location.reload(), 700); }
+    catch { showToast(t('restoreFailed'), 'error'); }
+  };
+  const doDownloadSnap = async (key) => { const m = await import('../../lib/backup.js'); await m.downloadSnapshot(key); };
+
   const doImport = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -288,6 +306,31 @@ export default function Settings() {
           <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>{t('stockAuditNote')}</div></div>
           <Btn size="sm" variant="light" onClick={() => setShowAudit(true)}>{t('runCheck')}</Btn>
         </div>
+      </Card>
+
+      {/* Automatic daily local backups (rolling 7) */}
+      <Card style={{ marginTop: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>🛟 {t('autoBackupTitle')}</div>
+            <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>{t('autoBackupNote')}</div>
+          </div>
+          <Btn size="sm" variant="light" onClick={doSnapshotNow}>{t('backupNow')}</Btn>
+        </div>
+        {snaps.length > 0 && (
+          <div style={{ display: 'grid', gap: 6, marginTop: 10 }}>
+            {snaps.map((b) => (
+              <div key={b.key} style={{ display: 'flex', alignItems: 'center', gap: 8, background: C.surfaceAlt, borderRadius: 10, padding: '7px 10px' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text }}>{b.day}{b.reason === 'manual' ? ' •' : ''}</div>
+                  <div style={{ fontSize: 10.5, color: C.textMuted }}>{b.rows} {t('items')}</div>
+                </div>
+                <button onClick={() => doDownloadSnap(b.key)} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 16 }} title={t('download')}>⬇️</button>
+                <Btn size="sm" variant="light" onClick={() => doRestoreSnap(b.key)}>↩ {t('restore')}</Btn>
+              </div>
+            ))}
+          </div>
+        )}
       </Card>
 
       <Card style={{ marginTop: 16 }}>
