@@ -99,26 +99,68 @@ export async function saveInvoiceAtomic(app, { editingId, invoiceData, lines, in
 
 // Permanently delete an invoice: restore the sold stock, then remove the
 // invoice, its line items and its stock movements — atomically.
-export async function deleteInvoiceAtomic(app, invoiceId) {
+// Move an invoice to the recycle bin (soft delete): restore the sold stock, mark
+// its movements inactive (so the ledger/reconcile stays consistent), and flag the
+// invoice isActive=false + deletedAt. Reversible via restoreInvoice. Stock and
+// money are fully given back; reports exclude it (loadAll filters inactive).
+export async function voidInvoice(app, invoiceId) {
   const [variants, allItems, allMoves] = await Promise.all([
     db.getAll(TABLES.variants), db.getAll(TABLES.invoiceItems), db.getAll(TABLES.stockMovements),
   ]);
   const vById = new Map(variants.map((v) => [v.id, v]));
   const items = allItems.filter((x) => x.invoiceId === invoiceId);
-  const moves = allMoves.filter((x) => x.refType === 'invoice' && x.refId === invoiceId);
+  const moves = allMoves.filter((x) => x.refType === 'invoice' && x.refId === invoiceId && x.isActive !== false);
   const stock = new Map();
   const ensure = (id) => { if (!stock.has(id)) stock.set(id, num(vById.get(id)?.stockQty)); return stock.get(id); };
   const specs = [];
-  // give back the sold quantities
-  for (const it of items) { if (vById.has(it.variantId)) stock.set(it.variantId, round2(ensure(it.variantId) + num(it.qty))); specs.push({ op: 'remove', table: TABLES.invoiceItems, id: it.id }); }
-  for (const m of moves) specs.push({ op: 'remove', table: TABLES.stockMovements, id: m.id });
+  for (const it of items) if (vById.has(it.variantId)) stock.set(it.variantId, round2(ensure(it.variantId) + num(it.qty))); // give stock back
+  for (const m of moves) specs.push({ op: 'update', table: TABLES.stockMovements, id: m.id, patch: { isActive: false } });
   for (const [vid, finalQty] of stock) specs.push({ op: 'update', table: TABLES.variants, id: vid, patch: { stockQty: round2(finalQty) } });
-  specs.push({ op: 'remove', table: TABLES.invoices, id: invoiceId });
+  specs.push({ op: 'update', table: TABLES.invoices, id: invoiceId, patch: { isActive: false, deletedAt: Date.now() } });
   await db.atomicMutations(specs);
   await Promise.all([app.refresh(TABLES.invoices), app.refresh(TABLES.invoiceItems), app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements)]);
   nudgeSync();
   return true;
 }
+
+// Restore an invoice from the recycle bin: re-deduct the stock, reactivate its
+// movements, and clear isActive/deletedAt — the inverse of voidInvoice.
+export async function restoreInvoice(app, invoiceId) {
+  const [variants, allItems, allMoves] = await Promise.all([
+    db.getAll(TABLES.variants), db.getAll(TABLES.invoiceItems), db.getAll(TABLES.stockMovements),
+  ]);
+  const vById = new Map(variants.map((v) => [v.id, v]));
+  const items = allItems.filter((x) => x.invoiceId === invoiceId);
+  const moves = allMoves.filter((x) => x.refType === 'invoice' && x.refId === invoiceId && x.isActive === false);
+  const stock = new Map();
+  const ensure = (id) => { if (!stock.has(id)) stock.set(id, num(vById.get(id)?.stockQty)); return stock.get(id); };
+  const specs = [];
+  for (const it of items) if (vById.has(it.variantId)) stock.set(it.variantId, round2(ensure(it.variantId) - num(it.qty))); // take stock again
+  for (const m of moves) specs.push({ op: 'update', table: TABLES.stockMovements, id: m.id, patch: { isActive: true } });
+  for (const [vid, finalQty] of stock) specs.push({ op: 'update', table: TABLES.variants, id: vid, patch: { stockQty: round2(finalQty) } });
+  specs.push({ op: 'update', table: TABLES.invoices, id: invoiceId, patch: { isActive: true, deletedAt: null } });
+  await db.atomicMutations(specs);
+  await Promise.all([app.refresh(TABLES.invoices), app.refresh(TABLES.invoiceItems), app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements)]);
+  nudgeSync();
+  return true;
+}
+
+// Permanently delete an invoice (only from the recycle bin — stock was already
+// restored when it was voided). Hard-removes the invoice, its items and movements.
+export async function purgeInvoice(app, invoiceId) {
+  const [allItems, allMoves] = await Promise.all([db.getAll(TABLES.invoiceItems), db.getAll(TABLES.stockMovements)]);
+  const specs = [];
+  for (const it of allItems.filter((x) => x.invoiceId === invoiceId)) specs.push({ op: 'remove', table: TABLES.invoiceItems, id: it.id });
+  for (const m of allMoves.filter((x) => x.refType === 'invoice' && x.refId === invoiceId)) specs.push({ op: 'remove', table: TABLES.stockMovements, id: m.id });
+  specs.push({ op: 'remove', table: TABLES.invoices, id: invoiceId });
+  await db.atomicMutations(specs);
+  await Promise.all([app.refresh(TABLES.invoices), app.refresh(TABLES.invoiceItems), app.refresh(TABLES.stockMovements)]);
+  nudgeSync();
+  return true;
+}
+
+// Back-compat: the old name now soft-deletes (moves to recycle bin).
+export async function deleteInvoiceAtomic(app, invoiceId) { return voidInvoice(app, invoiceId); }
 
 // Commit a SALE: invoice + items + stock-out movements.
 // opts.invoiceDiscount = amount discounted off the items subtotal

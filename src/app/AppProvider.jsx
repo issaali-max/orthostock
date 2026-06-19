@@ -74,6 +74,9 @@ export function AppProvider({ children }) {
       const results = await Promise.allSettled(CORE_TABLES.map((tbl) => db.getAll(tbl)));
       const next = {};
       CORE_TABLES.forEach((tbl, i) => { next[tbl] = results[i].status === 'fulfilled' ? results[i].value : []; });
+      // Voided invoices live only in the recycle bin — hide them everywhere else
+      // (reports, P&L, lists) by keeping them out of the shared data object.
+      if (Array.isArray(next[TABLES.invoices])) next[TABLES.invoices] = next[TABLES.invoices].filter((i) => i.isActive !== false);
       setData((d) => ({ ...d, ...next }));
     } catch (e) {
       console.error(e);

@@ -7,6 +7,7 @@ import { recordInvoicePayment } from '../../lib/engine.js';
 import { Badge, Btn, Card, EmptyState, PageHeader, PaymentModal, SearchBar } from '../../ui/components.jsx';
 import InvoiceCreate from './InvoiceCreate.jsx';
 import InvoiceDetail from './InvoiceDetail.jsx';
+import InvoiceTrash from './InvoiceTrash.jsx';
 
 export default function Invoices() {
   const app = useApp();
@@ -15,6 +16,7 @@ export default function Invoices() {
   const [modal, setModal] = useState(null);   // null | 'new' | invoiceRow (edit)
   const [payFor, setPayFor] = useState(null);  // invoice being paid
   const [detail, setDetail] = useState(null);   // invoice whose details are open
+  const [showTrash, setShowTrash] = useState(false); // recycle bin
   const customers = data[TABLES.customers] || [];
   const custName = (id) => customers.find((c) => c.id === id)?.name || '—';
   const cur = (v) => fmtCur(v, displayCurrency, usdRate);
@@ -27,7 +29,7 @@ export default function Invoices() {
 
   return (
     <div>
-      <PageHeader title={t('invoices')} action={<Btn onClick={() => setModal('new')}>＋ {t('newInvoice')}</Btn>} />
+      <PageHeader title={t('invoices')} action={<div style={{ display: 'flex', gap: 8 }}><Btn variant="light" onClick={() => setShowTrash(true)}>🗑</Btn><Btn onClick={() => setModal('new')}>＋ {t('newInvoice')}</Btn></div>} />
       <SearchBar value={q} onChange={setQ} placeholder={t('search')} />
       {list.length === 0 ? <EmptyState icon="🧾" text={t('noInvoices')} /> : (
         <div style={{ display: 'grid', gap: 10 }}>
@@ -59,6 +61,7 @@ export default function Invoices() {
       )}
       <InvoiceCreate open={!!modal} editing={modal === 'new' ? null : modal} onClose={() => setModal(null)} />
       {detail && <InvoiceDetail invoice={detail} onClose={() => setDetail(null)} onEdit={(inv) => setModal(inv)} />}
+      {showTrash && <InvoiceTrash onClose={() => setShowTrash(false)} />}
       <PaymentModal open={!!payFor} invoice={payFor} t={t} cur={cur}
         onClose={() => setPayFor(null)}
         onRecord={(amount) => recordInvoicePayment(app, payFor.id, amount)} />
