@@ -127,7 +127,7 @@ export default function Catalogue() {
       if (mv.type === 'sale' && (!e.sale || mv.createdAt > e.sale)) e.sale = mv.createdAt;
     });
     return m;
-  }, [data]);
+  }, [data[TABLES.stockMovements]]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Flat inventory: ALL materials with category / stock-status / brand filters ──
   if (flat) {

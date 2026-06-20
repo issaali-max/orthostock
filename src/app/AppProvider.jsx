@@ -36,6 +36,7 @@ export function AppProvider({ children }) {
   }, [loading]); // eslint-disable-line react-hooks/exhaustive-deps
   const [toast, setToast] = useState(null);
   const toastTimer = useRef(null);
+  const sigRef = useRef({}); // per-table change signature, for stable references (perf)
 
   const t = useMemo(() => makeT(lang), [lang]);
   const dir = lang === 'ar' ? 'rtl' : 'ltr';
@@ -72,12 +73,26 @@ export function AppProvider({ children }) {
     if (!silent) setLoading(true); // background sync refreshes silently (no full-screen reload/jump)
     try {
       const results = await Promise.allSettled(CORE_TABLES.map((tbl) => db.getAll(tbl)));
-      const next = {};
-      CORE_TABLES.forEach((tbl, i) => { next[tbl] = results[i].status === 'fulfilled' ? results[i].value : []; });
-      // Voided invoices live only in the recycle bin — hide them everywhere else
-      // (reports, P&L, lists) by keeping them out of the shared data object.
-      if (Array.isArray(next[TABLES.invoices])) next[TABLES.invoices] = next[TABLES.invoices].filter((i) => i.isActive !== false);
-      setData((d) => ({ ...d, ...next }));
+      const fresh = {};
+      CORE_TABLES.forEach((tbl, i) => { fresh[tbl] = results[i].status === 'fulfilled' ? results[i].value : []; });
+      // Voided invoices live only in the recycle bin — hide them everywhere else.
+      if (Array.isArray(fresh[TABLES.invoices])) fresh[TABLES.invoices] = fresh[TABLES.invoices].filter((i) => i.isActive !== false);
+      // PERF: keep the SAME array reference for tables that didn't actually change
+      // (cheap signature = row count + newest updatedAt). This lets per-table
+      // useMemos skip recomputing on every sync, and returns the same `data` object
+      // when nothing changed at all (zero re-render). Any write bumps updatedAt, and
+      // deletes change the count, so the signature reliably detects real changes.
+      const sig = (rows) => { let sum = 0; for (const r of rows) sum += Number(r.updatedAt) || 0; return rows.length + ':' + sum; };
+      setData((prev) => {
+        let anyChanged = false;
+        const merged = { ...prev };
+        for (const tbl of CORE_TABLES) {
+          const rows = fresh[tbl] || [];
+          const s = sig(rows);
+          if (sigRef.current[tbl] !== s) { sigRef.current[tbl] = s; merged[tbl] = rows; anyChanged = true; }
+        }
+        return anyChanged ? merged : prev;
+      });
     } catch (e) {
       console.error(e);
       showToast('Failed to load data', 'error');

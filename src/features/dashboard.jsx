@@ -21,8 +21,13 @@ export default function Dashboard() {
   const bounds = range === 'day' ? { from: todayISO(), to: todayISO() }
     : range === 'year' ? { from: yearStart() } : { from: monthStart() };
 
-  const pl = useMemo(() => pnl(data, bounds), [data, range]);
-  const today = useMemo(() => pnl(data, { from: todayISO(), to: todayISO() }), [data]);
+  // Stable per-table refs (loadAll keeps unchanged tables' references) so these
+  // heavy reports only recompute when their own inputs change — keeps the UI fast.
+  const dInv = data[TABLES.invoices], dItems = data[TABLES.invoiceItems];
+  const dExp = data[TABLES.expenses], dExpG = data[TABLES.expenseGroups];
+  const dCust = data[TABLES.customers], dVar = data[TABLES.variants];
+  const pl = useMemo(() => pnl(data, bounds), [dInv, dItems, dExp, dExpG, range]); // eslint-disable-line react-hooks/exhaustive-deps
+  const today = useMemo(() => pnl(data, { from: todayISO(), to: todayISO() }), [dInv, dItems, dExp, dExpG]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Drill-down: materials sold + buyers within the active range (active invoices only)
   const periodReport = useMemo(() => {
@@ -54,13 +59,13 @@ export default function Dashboard() {
     const buyers = Object.entries(bm).map(([cid, e]) => ({ ...e, name: customers.find((c) => c.id === cid)?.name || '—' }))
       .sort((a, b) => b.revenue - a.revenue);
     return { sold, buyers };
-  }, [data, range]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [dInv, dItems, dVar, dCust, range]); // eslint-disable-line react-hooks/exhaustive-deps
   const soldList = periodReport.sold;
-  const trend = useMemo(() => periodTrend(data, trendMode, trendMode === 'year' ? 4 : 6), [data, trendMode]);
-  const emirates = useMemo(() => emirateStats(data), [data]);
-  const clinics = useMemo(() => topClinics(data, 5), [data]);
-  const topProd = useMemo(() => topProducts(data, 10, bounds), [data, range]); // eslint-disable-line react-hooks/exhaustive-deps
-  const topCust = useMemo(() => topCustomers(data, 10, { bounds }), [data, range]); // eslint-disable-line react-hooks/exhaustive-deps
+  const trend = useMemo(() => periodTrend(data, trendMode, trendMode === 'year' ? 4 : 6), [dInv, dItems, dExp, dExpG, trendMode]); // eslint-disable-line react-hooks/exhaustive-deps
+  const emirates = useMemo(() => emirateStats(data), [dInv, dItems, dCust]); // eslint-disable-line react-hooks/exhaustive-deps
+  const clinics = useMemo(() => topClinics(data, 5), [dInv, dItems, dCust]); // eslint-disable-line react-hooks/exhaustive-deps
+  const topProd = useMemo(() => topProducts(data, 10, bounds), [dInv, dItems, dVar, range]); // eslint-disable-line react-hooks/exhaustive-deps
+  const topCust = useMemo(() => topCustomers(data, 10, { bounds }), [dInv, dItems, dCust, range]); // eslint-disable-line react-hooks/exhaustive-deps
   const topDocs = useMemo(() => topCustomers(data, 10, { type: 'doctor', bounds }), [data, range]); // eslint-disable-line react-hooks/exhaustive-deps
   const alerts = useMemo(() => buildAlerts(data), [data]);
   const cur = (v) => fmtCur(v, displayCurrency, usdRate);
