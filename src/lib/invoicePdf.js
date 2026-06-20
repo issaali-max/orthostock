@@ -1,17 +1,30 @@
 // ─────────────────────────────────────────────────────────────
-// invoicePdf.js — official UAE-style Tax Invoice PDF.
-// Bilingual header (Arabic + English), company name/TRN/address/phone, customer
-// block with TRN, itemized table (No, Code, Description, Qty, Price, VAT%, Total,
-// Net), totals box, amount in words, and a signature line. RTL-aware. Numbers come
-// from invoiceBreakdown() — the single source of truth. jspdf/html2canvas load on demand.
+// invoicePdf.js — professional UAE Tax Invoice PDF.
+// Bilingual header (AR+EN), company name/TRN/address/phone, customer block with
+// TRN, itemized table, a clean totals panel, and a dedicated PAYMENT panel
+// (method + status badge + paid + balance due). Numbers come from
+// invoiceBreakdown() (single source of truth). jspdf/html2canvas load on demand.
 // ─────────────────────────────────────────────────────────────
 import { invoiceBreakdown, variantLabel } from './engine.js';
 import { money } from './whatsapp.js';
-import { amountToWords } from './numberToWords.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-export function buildInvoiceHtml(args) { return buildHtml(args); }
+const NAVY = '#1C3D5A', INK = '#0E1D2E', MUTE = '#5b6b7d', LINE = '#cbd5e1';
+
+function payMethodLabel(method, ar) {
+  const M = {
+    cash: ['نقدي', 'Cash'], card: ['بطاقة', 'Card'], transfer: ['تحويل بنكي', 'Bank transfer'],
+    cheque: ['شيك', 'Cheque'], credit: ['آجل', 'Credit'],
+  };
+  const m = M[method] || M.cash;
+  return ar ? m[0] : m[1];
+}
+function statusInfo(status, ar) {
+  if (status === 'paid') return { label: ar ? 'مدفوعة' : 'PAID', bg: '#E7F5EC', fg: '#1E7A46' };
+  if (status === 'partial') return { label: ar ? 'مدفوعة جزئياً' : 'PARTIAL', bg: '#FCF3E2', fg: '#B7791F' };
+  return { label: ar ? 'غير مدفوعة' : 'UNPAID', bg: '#FBECEC', fg: '#C0392B' };
+}
 
 function buildHtml({ invoice, items, settings, customer, variantById, lang }) {
   const b = invoiceBreakdown(invoice, items, settings);
@@ -24,16 +37,19 @@ function buildHtml({ invoice, items, settings, customer, variantById, lang }) {
   const cAddr = esc(settings?.companyAddress || '');
   const cPhone = esc(settings?.companyPhone || '');
   const cTrn = esc(settings?.companyTrn || '');
+  const st = statusInfo(invoice.paymentStatus, ar);
 
   const L = {
-    invoiceNo: ['رقم الفاتورة', 'Inv No.'], date: ['التاريخ', 'Date'], customer: ['العميل', 'Customer'],
-    phone: ['الهاتف', 'Phone'], no: ['رقم', 'No'], code: ['رمز المادة', 'Code'], desc: ['التفاصيل', 'Description'],
-    qty: ['الكمية', 'Qty'], price: ['السعر', 'Price'], vat: ['ضريبة', 'VAT'], total: ['المجموع', 'Total'],
-    net: ['الصافي', 'Net'], amountTotal: ['المجموع', 'Amount Total'], tax: ['ضريبة', 'Tax'],
-    discount: ['الحسم', 'Discount'], netAmount: ['الصافي', 'Net Amount'], paid: ['المدفوع', 'Paid'],
-    remaining: ['المتبقّي', 'Outstanding'], sign: ['توقيع العميل', 'Customer Sign'], thanks: ['شكراً لتعاملكم معنا', 'Thank you for your business'],
+    invoiceNo: ['رقم الفاتورة', 'Invoice No'], date: ['التاريخ', 'Date'], customer: ['فاتورة إلى', 'Bill To'],
+    phone: ['الهاتف', 'Phone'], no: ['#', '#'], code: ['الرمز', 'Code'], desc: ['الوصف', 'Description'],
+    qty: ['الكمية', 'Qty'], price: ['السعر', 'Price'], vat: ['الضريبة', 'VAT'], total: ['المجموع', 'Total'],
+    net: ['الصافي', 'Net'], subtotal: ['المجموع الفرعي', 'Subtotal'], tax: ['الضريبة', 'VAT'],
+    discount: ['الحسم', 'Discount'], grand: ['الإجمالي', 'Total'], paid: ['المدفوع', 'Paid'],
+    balance: ['المبلغ المتبقّي', 'Balance Due'], method: ['طريقة الدفع', 'Payment method'],
+    payments: ['سجل الدفعات', 'Payments'], sign: ['التوقيع', 'Signature'], thanks: ['شكراً لتعاملكم معنا', 'Thank you for your business'],
   };
-  const lbl = (k) => `${L[k][0]} <span style="color:#64748b;font-weight:600">${L[k][1]}</span>`;
+  const lbl = (k) => `${L[k][ar ? 0 : 1]}`;
+  const both = (k) => `${L[k][0]} <span style="color:#8aa0b4;font-weight:600;font-size:.82em">${L[k][1]}</span>`;
 
   const rows = b.lines.map((l, i) => {
     const v = variantById(l.variantId);
@@ -41,93 +57,135 @@ function buildHtml({ invoice, items, settings, customer, variantById, lang }) {
     const name = esc(v ? variantLabel(v) : '—');
     const lineTotal = l.lineTotal;
     const lineNet = taxOn ? Math.round(lineTotal * (1 + b.vatRate / 100) * 100) / 100 : lineTotal;
+    const zebra = i % 2 ? 'background:#F7F9FC;' : '';
     return `
-      <tr>
-        <td style="text-align:center;padding:6px;border:1px solid #cbd5e1">${i + 1}</td>
-        <td style="text-align:center;padding:6px;border:1px solid #cbd5e1">${code}</td>
-        <td style="text-align:${ar ? 'right' : 'left'};padding:6px 8px;border:1px solid #cbd5e1">${name}</td>
-        <td style="text-align:center;padding:6px;border:1px solid #cbd5e1">${l.qty.toFixed(2)}</td>
-        <td style="text-align:center;padding:6px;border:1px solid #cbd5e1">${m(l.qty > 0 ? lineTotal / l.qty : l.unitPrice)}</td>
-        ${taxOn ? `<td style="text-align:center;padding:6px;border:1px solid #cbd5e1">${b.vatRate.toFixed(2)}%</td>` : ''}
-        <td style="text-align:center;padding:6px;border:1px solid #cbd5e1">${m(lineTotal)}</td>
-        <td style="text-align:center;padding:6px;border:1px solid #cbd5e1;font-weight:700">${m(lineNet)}</td>
+      <tr style="${zebra}">
+        <td style="text-align:center;padding:7px 6px;border-bottom:1px solid #eef1f5;color:${MUTE}">${i + 1}</td>
+        <td style="text-align:center;padding:7px 6px;border-bottom:1px solid #eef1f5;color:${MUTE};font-size:.92em">${code}</td>
+        <td style="text-align:${ar ? 'right' : 'left'};padding:7px 8px;border-bottom:1px solid #eef1f5;font-weight:600">${name}</td>
+        <td style="text-align:center;padding:7px 6px;border-bottom:1px solid #eef1f5">${l.qty.toFixed(2)}</td>
+        <td style="text-align:center;padding:7px 6px;border-bottom:1px solid #eef1f5">${m(l.qty > 0 ? lineTotal / l.qty : l.unitPrice)}</td>
+        ${taxOn ? `<td style="text-align:center;padding:7px 6px;border-bottom:1px solid #eef1f5;color:${MUTE}">${b.vatRate}%</td>` : ''}
+        <td style="text-align:center;padding:7px 6px;border-bottom:1px solid #eef1f5">${m(lineTotal)}</td>
+        <td style="text-align:center;padding:7px 6px;border-bottom:1px solid #eef1f5;font-weight:800">${m(lineNet)}</td>
       </tr>`;
   }).join('');
 
-  const colCount = taxOn ? 8 : 7;
   const sumRow = (label, val, opts = {}) => `
-    <tr>
-      <td style="border:1px solid #cbd5e1;padding:5px 8px;font-weight:700;${opts.bg ? `background:${opts.bg};` : ''}${opts.color ? `color:${opts.color};` : ''}">${label}</td>
-      <td style="border:1px solid #cbd5e1;padding:5px 8px;text-align:${ar ? 'left' : 'right'};font-weight:800;${opts.color ? `color:${opts.color};` : ''}">${m(val)}</td>
-    </tr>`;
+    <div style="display:flex;justify-content:space-between;padding:4px 0;${opts.border ? `border-top:1px solid ${LINE};margin-top:3px;padding-top:7px;` : ''}">
+      <span style="color:${opts.strong ? INK : MUTE};font-weight:${opts.strong ? 800 : 600};font-size:${opts.strong ? '14px' : '12.5px'}">${label}</span>
+      <span style="color:${opts.color || INK};font-weight:${opts.strong ? 900 : 700};font-size:${opts.strong ? '14px' : '12.5px'}">${m(val)}</span>
+    </div>`;
+
+  // payment history (only when there is more than a single full payment)
+  const payHist = Array.isArray(invoice.payments) && invoice.payments.length > 1
+    ? `<div style="margin-top:10px"><div style="font-size:10.5px;color:${MUTE};margin-bottom:3px">${both('payments')}</div>
+        ${invoice.payments.map((p) => `<div style="display:flex;justify-content:space-between;font-size:11px;color:${MUTE}"><span>${esc((p.date || '').slice(0, 10))}</span><span>${m(p.amount)}</span></div>`).join('')}</div>`
+    : '';
 
   return `
-  <div dir="${ar ? 'rtl' : 'ltr'}" style="width:780px;background:#fff;color:#0E1D2E;font-family:'Tajawal',Arial,sans-serif;padding:30px 32px;box-sizing:border-box;font-size:12.5px">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
+  <div dir="${ar ? 'rtl' : 'ltr'}" style="width:780px;background:#fff;color:${INK};font-family:'Tajawal',Arial,sans-serif;padding:0;box-sizing:border-box;font-size:12.5px">
+
+    <!-- Header band -->
+    <div style="background:${NAVY};color:#fff;padding:22px 30px;display:flex;justify-content:space-between;align-items:flex-start">
       <div style="flex:1">
-        <div style="font-size:23px;font-weight:900;color:#1C3D5A;line-height:1.15">${company}</div>
-        ${cAddr ? `<div style="color:#475569;margin-top:5px">${cAddr}</div>` : ''}
-        ${cPhone ? `<div style="color:#475569">${L.phone[1]}: ${cPhone}</div>` : ''}
-        ${cTrn ? `<div style="color:#1C3D5A;font-weight:800;margin-top:3px">TRN: ${cTrn}</div>` : ''}
+        <div style="font-size:24px;font-weight:900;letter-spacing:.3px">${company}</div>
+        ${cAddr ? `<div style="opacity:.85;margin-top:5px;font-size:12px">${cAddr}</div>` : ''}
+        <div style="opacity:.85;font-size:12px">${cPhone ? `${L.phone[ar ? 0 : 1]}: ${cPhone}` : ''}${cPhone && cTrn ? ' · ' : ''}${cTrn ? `TRN: ${cTrn}` : ''}</div>
       </div>
-      <div style="text-align:center;padding:0 8px">
-        <div style="font-size:20px;font-weight:900;color:#1C3D5A">فاتورة ضريبية</div>
-        <div style="font-size:15px;font-weight:800;color:#1C3D5A;letter-spacing:.5px">Tax Invoice</div>
-      </div>
-    </div>
-    <div style="height:3px;background:#1C3D5A;margin:12px 0 14px"></div>
-    <div style="display:flex;gap:12px;margin-bottom:14px">
-      <div style="flex:1;border:1px solid #cbd5e1;border-radius:8px;padding:10px 12px">
-        <div style="font-weight:800;margin-bottom:4px">${lbl('customer')}</div>
-        <div style="font-size:14px;font-weight:800">${esc(customer?.name || '—')}</div>
-        ${customer?.trn ? `<div style="color:#1C3D5A;font-weight:700;margin-top:2px">TRN: ${esc(customer.trn)}</div>` : ''}
-        ${customer?.phone ? `<div style="color:#475569">${L.phone[1]}: ${esc(customer.phone)}</div>` : ''}
-        ${(customer?.city || customer?.emirate) ? `<div style="color:#475569">${esc([customer.city, customer.emirate].filter(Boolean).join(', '))}</div>` : ''}
-      </div>
-      <div style="width:230px;border:1px solid #cbd5e1;border-radius:8px;padding:10px 12px">
-        <table style="width:100%;font-size:12px">
-          <tr><td style="padding:2px 0;color:#475569">${lbl('invoiceNo')}</td><td style="padding:2px 0;text-align:${ar ? 'left' : 'right'};font-weight:800">${esc(invoice.invoiceNumber)}</td></tr>
-          <tr><td style="padding:2px 0;color:#475569">${lbl('date')}</td><td style="padding:2px 0;text-align:${ar ? 'left' : 'right'};font-weight:700">${esc(invoice.date || '')}</td></tr>
-          <tr><td style="padding:2px 0;color:#475569">${cur}</td><td style="padding:2px 0;text-align:${ar ? 'left' : 'right'};font-weight:700">${esc((invoice.paymentStatus === 'paid') ? (ar ? 'مدفوعة' : 'Paid') : (ar ? 'آجل' : 'Credit'))}</td></tr>
-        </table>
+      <div style="text-align:${ar ? 'left' : 'right'}">
+        <div style="font-size:22px;font-weight:900">${ar ? 'فاتورة ضريبية' : 'TAX INVOICE'}</div>
+        <div style="opacity:.8;font-size:12px">${ar ? 'Tax Invoice' : 'فاتورة ضريبية'}</div>
       </div>
     </div>
-    <table style="width:100%;border-collapse:collapse;font-size:12px">
-      <thead>
-        <tr style="background:#1C3D5A;color:#fff">
-          <th style="border:1px solid #1C3D5A;padding:7px 6px;width:34px">${lbl('no')}</th>
-          <th style="border:1px solid #1C3D5A;padding:7px 6px;width:80px">${lbl('code')}</th>
-          <th style="border:1px solid #1C3D5A;padding:7px 6px">${lbl('desc')}</th>
-          <th style="border:1px solid #1C3D5A;padding:7px 6px;width:54px">${lbl('qty')}</th>
-          <th style="border:1px solid #1C3D5A;padding:7px 6px;width:80px">${lbl('price')}</th>
-          ${taxOn ? `<th style="border:1px solid #1C3D5A;padding:7px 6px;width:58px">${lbl('vat')}</th>` : ''}
-          <th style="border:1px solid #1C3D5A;padding:7px 6px;width:84px">${lbl('total')}</th>
-          <th style="border:1px solid #1C3D5A;padding:7px 6px;width:88px">${lbl('net')}</th>
-        </tr>
-      </thead>
-      <tbody>${rows || `<tr><td colspan="${colCount}" style="border:1px solid #cbd5e1;padding:14px;text-align:center;color:#94a3b8">—</td></tr>`}</tbody>
-    </table>
-    <div style="display:flex;gap:12px;margin-top:14px;align-items:flex-start">
-      <div style="flex:1;border:1px solid #cbd5e1;border-radius:8px;padding:12px 14px">
-        <div style="color:#475569;font-size:11px;margin-bottom:3px">${ar ? 'المبلغ بالحروف' : 'Amount in words'}</div>
-        <div style="font-weight:800;line-height:1.5">${esc(amountToWords(b.total, cur))}</div>
+
+    <div style="padding:22px 30px">
+      <!-- Meta row: customer + invoice info + status -->
+      <div style="display:flex;gap:14px;margin-bottom:18px">
+        <div style="flex:1;border:1px solid ${LINE};border-radius:10px;padding:11px 13px">
+          <div style="font-size:10.5px;color:${MUTE};letter-spacing:.5px;margin-bottom:4px">${both('customer')}</div>
+          <div style="font-size:15px;font-weight:800">${esc(customer?.name || '—')}</div>
+          ${customer?.trn ? `<div style="color:${NAVY};font-weight:700;margin-top:2px;font-size:11.5px">TRN: ${esc(customer.trn)}</div>` : ''}
+          ${customer?.phone ? `<div style="color:${MUTE};font-size:11.5px">${L.phone[ar ? 0 : 1]}: ${esc(customer.phone)}</div>` : ''}
+          ${(customer?.city || customer?.emirate) ? `<div style="color:${MUTE};font-size:11.5px">${esc([customer.city, customer.emirate].filter(Boolean).join(', '))}</div>` : ''}
+        </div>
+        <div style="width:240px;border:1px solid ${LINE};border-radius:10px;padding:11px 13px">
+          <div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:${MUTE}">${lbl('invoiceNo')}</span><b>${esc(invoice.invoiceNumber)}</b></div>
+          <div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:${MUTE}">${lbl('date')}</span><b>${esc(invoice.date || '')}</b></div>
+          <div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:${MUTE}">${lbl('method')}</span><b>${esc(payMethodLabel(invoice.paymentMethod, ar))}</b></div>
+          <div style="margin-top:6px;text-align:center;background:${st.bg};color:${st.fg};border-radius:6px;padding:4px;font-weight:900;font-size:12px;letter-spacing:.5px">${st.label}</div>
+        </div>
       </div>
-      <table style="width:280px;border-collapse:collapse;font-size:12.5px">
-        ${sumRow(lbl('amountTotal'), b.subtotal)}
-        ${taxOn ? sumRow(`${lbl('tax')} ${b.vatRate}%`, b.vat) : ''}
-        ${b.discountTotal > 0 ? sumRow(lbl('discount'), b.discountTotal, { color: '#C0392B' }) : ''}
-        ${sumRow(lbl('netAmount'), b.total, { bg: '#EAF0F7' })}
-        ${b.paid > 0 ? sumRow(lbl('paid'), b.paid, { color: '#1E7A46' }) : ''}
-        ${b.remaining > 0 ? sumRow(lbl('remaining'), b.remaining, { color: '#C0392B' }) : ''}
+
+      <!-- Items -->
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead>
+          <tr style="background:${NAVY};color:#fff">
+            <th style="padding:9px 6px;width:30px">${L.no[0]}</th>
+            <th style="padding:9px 6px;width:76px">${both('code')}</th>
+            <th style="padding:9px 8px;text-align:${ar ? 'right' : 'left'}">${both('desc')}</th>
+            <th style="padding:9px 6px;width:50px">${both('qty')}</th>
+            <th style="padding:9px 6px;width:78px">${both('price')}</th>
+            ${taxOn ? `<th style="padding:9px 6px;width:48px">${both('vat')}</th>` : ''}
+            <th style="padding:9px 6px;width:82px">${both('total')}</th>
+            <th style="padding:9px 6px;width:86px">${both('net')}</th>
+          </tr>
+        </thead>
+        <tbody>${rows || `<tr><td colspan="${taxOn ? 8 : 7}" style="padding:16px;text-align:center;color:#94a3b8">—</td></tr>`}</tbody>
       </table>
-    </div>
-    <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:40px">
-      <div style="font-size:11px;color:#94a3b8">${L.thanks[ar ? 0 : 1]}</div>
-      <div style="text-align:center">
-        <div style="width:160px;border-top:1px solid #475569;padding-top:4px;font-size:11px;color:#475569">${L.sign[0]} · ${L.sign[1]}</div>
+
+      <!-- Totals + payment panel -->
+      <div style="display:flex;gap:14px;margin-top:18px;align-items:stretch">
+        <!-- Payment panel -->
+        <div style="flex:1;border:1px solid ${LINE};border-radius:10px;padding:13px 15px;display:flex;flex-direction:column;justify-content:center">
+          <div style="display:flex;justify-content:space-between;padding:3px 0;font-size:13px"><span style="color:${MUTE};font-weight:600">${both('method')}</span><b>${esc(payMethodLabel(invoice.paymentMethod, ar))}</b></div>
+          <div style="display:flex;justify-content:space-between;padding:3px 0;font-size:13px"><span style="color:${MUTE};font-weight:600">${both('paid')}</span><b style="color:#1E7A46">${m(b.paid)}</b></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;background:${b.remaining > 0 ? '#FBECEC' : '#E7F5EC'};border-radius:8px;padding:9px 11px">
+            <span style="font-weight:800;color:${b.remaining > 0 ? '#C0392B' : '#1E7A46'}">${both('balance')}</span>
+            <span style="font-weight:900;font-size:16px;color:${b.remaining > 0 ? '#C0392B' : '#1E7A46'}">${m(b.remaining)}</span>
+          </div>
+          ${payHist}
+        </div>
+        <!-- Totals -->
+        <div style="width:280px;border:1px solid ${LINE};border-radius:10px;padding:13px 15px">
+          ${sumRow(both('subtotal'), b.subtotal)}
+          ${taxOn ? sumRow(`${both('tax')} (${b.vatRate}%)`, b.vat) : ''}
+          ${b.discountTotal > 0 ? sumRow(both('discount'), b.discountTotal, { color: '#C0392B' }) : ''}
+          ${sumRow(both('grand'), b.total, { strong: true, border: true })}
+        </div>
+      </div>
+
+      <!-- Signature + footer -->
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:46px">
+        <div style="font-size:11px;color:#94a3b8">${L.thanks[ar ? 0 : 1]}</div>
+        <div style="text-align:center"><div style="width:170px;border-top:1px solid ${MUTE};padding-top:5px;font-size:11px;color:${MUTE}">${both('sign')}</div></div>
       </div>
     </div>
   </div>`;
+}
+
+export function buildInvoiceHtml(args) { return buildHtml(args); }
+
+export function printInvoice({ invoice, items, settings, customer, variantById, lang = 'ar' }) {
+  const inner = buildHtml({ invoice, items, settings, customer, variantById, lang });
+  const ar = lang !== 'en';
+  const html = `<!doctype html><html dir="${ar ? 'rtl' : 'ltr'}" lang="${ar ? 'ar' : 'en'}"><head>
+    <meta charset="utf-8"><title>${(invoice.invoiceNumber || 'invoice')}</title>
+    <style>
+      @page { size: A4; margin: 8mm; }
+      * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      html,body { margin:0; padding:0; background:#fff; }
+      .wrap { display:flex; justify-content:center; }
+      .wrap > div { width:100% !important; box-shadow:0 0 0 1px #e5e9ef; }
+      @media screen { body { padding:16px; background:#eef1f5; } }
+    </style></head>
+    <body><div class="wrap">${inner}</div>
+    <script>window.onload=function(){setTimeout(function(){window.focus();window.print();},250);};</script>
+    </body></html>`;
+  const w = window.open('', '_blank');
+  if (!w) return false;
+  w.document.open(); w.document.write(html); w.document.close();
+  return true;
 }
 
 export async function generateInvoicePdf({ invoice, items, settings, customer, variantById, lang = 'ar' }) {
@@ -142,7 +200,7 @@ export async function generateInvoicePdf({ invoice, items, settings, customer, v
     const img = canvas.toDataURL('image/jpeg', 0.92);
     const pdf = new jsPDF({ unit: 'pt', format: 'a4', compress: true });
     const pw = pdf.internal.pageSize.getWidth(), ph = pdf.internal.pageSize.getHeight();
-    const margin = 24, iw = pw - margin * 2, ih = (canvas.height / canvas.width) * iw;
+    const margin = 22, iw = pw - margin * 2, ih = (canvas.height / canvas.width) * iw;
     if (ih <= ph - margin * 2) {
       pdf.addImage(img, 'JPEG', margin, margin, iw, ih);
     } else {
@@ -161,29 +219,4 @@ export async function generateInvoicePdf({ invoice, items, settings, customer, v
     const filename = `${(invoice.invoiceNumber || 'invoice')}.pdf`.replace(/[^\w.-]/g, '_');
     return { blob: pdf.output('blob'), filename };
   } finally { host.remove(); }
-}
-
-// Print the invoice on A4 (opens the same design in a print window and triggers
-// the browser print dialog). Crisper than the image PDF and lets the user pick a
-// real printer. Falls back gracefully if the popup is blocked.
-export function printInvoice({ invoice, items, settings, customer, variantById, lang = 'ar' }) {
-  const inner = buildHtml({ invoice, items, settings, customer, variantById, lang });
-  const ar = lang !== 'en';
-  const html = `<!doctype html><html dir="${ar ? 'rtl' : 'ltr'}" lang="${ar ? 'ar' : 'en'}"><head>
-    <meta charset="utf-8"><title>${(invoice.invoiceNumber || 'invoice')}</title>
-    <style>
-      @page { size: A4; margin: 10mm; }
-      * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-      html,body { margin:0; padding:0; background:#fff; }
-      .wrap { display:flex; justify-content:center; }
-      .wrap > div { width:100% !important; }
-      @media screen { body { padding:16px; background:#eef1f5; } }
-    </style></head>
-    <body><div class="wrap">${inner}</div>
-    <script>window.onload=function(){setTimeout(function(){window.focus();window.print();},250);};</script>
-    </body></html>`;
-  const w = window.open('', '_blank');
-  if (!w) return false;             // popup blocked — caller can fall back to PDF download
-  w.document.open(); w.document.write(html); w.document.close();
-  return true;
 }

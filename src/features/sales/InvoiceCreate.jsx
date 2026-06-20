@@ -41,6 +41,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
   const [date, setDate] = useState(todayISO());
   const [paymentStatus, setStatus] = useState('unpaid');
   const [paidAmount, setPaid] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('cash');
   const [invDiscount, setInvDiscount] = useState(''); // amount off the subtotal
   const [busy, setBusy] = useState(false);
 
@@ -56,11 +57,12 @@ export default function InvoiceCreate({ open, onClose, editing }) {
       { const _c = customers.find((c) => c.id === editing.customerId); setCustEmirate(_c?.emirate || ''); setCustCity(_c?.city || ''); }
       setDate(editing.date || todayISO());
       setStatus(editing.paymentStatus || 'unpaid');
+      setPaymentMethod(editing.paymentMethod || 'cash');
       setPaid(editing.paidAmount ? num(editing.paidAmount) : '');
       setInvDiscount(editing.discountTotal ? num(editing.discountTotal) : '');
       setCatId(firstCat);
     } else {
-      setLines([]); setCatId(firstCat); setCustomerId(''); setCustEmirate(''); setCustCity(''); setDate(todayISO()); setStatus('unpaid'); setPaid(''); setInvDiscount('');
+      setLines([]); setCatId(firstCat); setCustomerId(''); setCustEmirate(''); setCustCity(''); setDate(todayISO()); setStatus('unpaid'); setPaid(''); setInvDiscount(''); setPaymentMethod('cash');
     }
   }, [open, editing?.id]); // re-init only when the modal opens or a different invoice is edited (not on every background sync)
 
@@ -95,7 +97,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
         invoiceData: {
           invoiceNumber: number, customerId: customerId || null, date,
           subtotal: netSubtotal, discountTotal: round2(invDisc), total: totals.total,
-          paidAmount: paid, paymentStatus, paymentMethod: 'cash', status: 'active', currency: 'AED', notes: '', payments,
+          paidAmount: paid, paymentStatus, paymentMethod, status: 'active', currency: 'AED', notes: '', payments,
         },
         lines: lines.map((l) => ({ variantId: l.variantId, qty: num(l.qty), unitPrice: num(l.unitPrice) })),
         invoiceDiscount: invDisc,
@@ -272,6 +274,13 @@ export default function InvoiceCreate({ open, onClose, editing }) {
 
       <Field label={t('paymentStatus')}>
         <Select value={paymentStatus} onChange={setStatus} options={[{ value: 'unpaid', label: t('unpaid') }, { value: 'partial', label: t('partial') }, { value: 'paid', label: t('paid') }]} />
+      </Field>
+      <Field label={t('paymentMethod')}>
+        <Select value={paymentMethod} onChange={setPaymentMethod} options={[
+          { value: 'cash', label: t('payCash') }, { value: 'card', label: t('payCard') },
+          { value: 'transfer', label: t('payTransfer') }, { value: 'cheque', label: t('payCheque') },
+          { value: 'credit', label: t('payCredit') },
+        ]} />
       </Field>
       {paymentStatus === 'partial' && (
         <>
