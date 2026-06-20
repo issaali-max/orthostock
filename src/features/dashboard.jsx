@@ -5,7 +5,7 @@ import { C, TABLES, SHADOW } from '../lib/constants.js';
 import { fmtCur, fmtNum, num } from '../lib/money.js';
 import { todayISO } from '../lib/dates.js';
 import RestockList from './catalogue/RestockList.jsx';
-import { pnl, monthlyTrend, periodTrend, buildAlerts, emirateStats, topClinics, topProducts, topCustomers } from '../lib/engine.js';
+import { pnl, monthlyTrend, periodTrend, buildAlerts, emirateStats, topProducts, topCustomers } from '../lib/engine.js';
 import { Badge, Card, EmptyState, Modal, PageHeader } from '../ui/components.jsx';
 
 const monthStart = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`; };
@@ -63,10 +63,8 @@ export default function Dashboard() {
   const soldList = periodReport.sold;
   const trend = useMemo(() => periodTrend(data, trendMode, trendMode === 'year' ? 4 : 6), [dInv, dItems, dExp, dExpG, trendMode]); // eslint-disable-line react-hooks/exhaustive-deps
   const emirates = useMemo(() => emirateStats(data), [dInv, dItems, dCust]); // eslint-disable-line react-hooks/exhaustive-deps
-  const clinics = useMemo(() => topClinics(data, 5), [dInv, dItems, dCust]); // eslint-disable-line react-hooks/exhaustive-deps
   const topProd = useMemo(() => topProducts(data, 10, bounds), [dInv, dItems, dVar, range]); // eslint-disable-line react-hooks/exhaustive-deps
   const topCust = useMemo(() => topCustomers(data, 10, { bounds }), [dInv, dItems, dCust, range]); // eslint-disable-line react-hooks/exhaustive-deps
-  const topDocs = useMemo(() => topCustomers(data, 10, { type: 'doctor', bounds }), [data, range]); // eslint-disable-line react-hooks/exhaustive-deps
   const alerts = useMemo(() => buildAlerts(data), [data]);
   const cur = (v) => fmtCur(v, displayCurrency, usdRate);
 
@@ -219,30 +217,7 @@ export default function Dashboard() {
         )}
       </Card>
 
-      {/* ── Top centers ── */}
-      <Card className="rise" style={{ marginBottom: 14 }}>
-        <SectionTitle>🏆 {t('topCenters')}</SectionTitle>
-        {clinics.length === 0 ? <EmptyState icon="📊" text={t('noData')} /> : (
-          <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
-            {clinics.map((c, i) => (
-              <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div style={{ width: 28, height: 28, borderRadius: 999, flexShrink: 0, fontWeight: 800, fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: i === 0 ? C.primary : C.primary + '18', color: i === 0 ? '#fff' : C.primary }}>{i + 1}</div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 700, color: C.text, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.type === 'center' ? '🏥' : '🧑‍⚕️'} {c.name}</div>
-                  <div style={{ fontSize: 11, color: C.textMuted }}>{[c.emirate, c.city].filter(Boolean).join(' · ') || '—'}</div>
-                </div>
-                <div style={{ textAlign: 'end' }}>
-                  <div style={{ fontWeight: 800, color: C.primary, fontSize: 13 }}>{cur(c.revenue)}</div>
-                  <div style={{ fontSize: 11, color: C.success }}>{cur(c.profit)}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
-
-      {/* ── Top products / customers / doctors (by profit, for the selected period) ── */}
+      {/* ── Top products / customers (by profit, for the selected period) ── */}
       {(() => {
         const ppl = (data[TABLES.externalDebts] || []).filter((p) => p.isActive !== false);
         const tot = ppl.reduce((s, p) => s + (p.txns || []).reduce((a, x) => a + (x.type === 'collect' ? -num(x.amount) : num(x.amount)), 0), 0);
@@ -268,9 +243,6 @@ export default function Dashboard() {
         emptyIcon="🏆" emptyText={t('noData')}
         primary={(r) => cur(r.profit)} secondary={(r) => `${r.emirate || '—'}${r.debt > 0 ? ` · ${t('debt')} ${cur(r.debt)}` : ''}`} label={(r) => `${r.type === 'center' ? '🏥' : '🧑‍⚕️'} ${r.name}`} />
 
-      <RankCard title={`🧑‍⚕️ ${t('topDoctors')}`} rows={topDocs} cur={cur}
-        emptyIcon="🧑‍⚕️" emptyText={t('noData')}
-        primary={(r) => cur(r.profit)} secondary={(r) => `${r.emirate || '—'}${r.debt > 0 ? ` · ${t('debt')} ${cur(r.debt)}` : ''}`} label={(r) => r.name} />
       <Card className="rise" style={{ marginBottom: 14 }}>
         <SectionTitle>
           🔔 {t('alerts')}
