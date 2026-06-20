@@ -16,7 +16,7 @@ import { TABLES } from '../lib/constants.js';
 import { idbGetAll, idbBulkPut, outboxAll, outboxDelete, outboxBumpTries, enqueueMutation, metaSet, metaGet } from './local.js';
 
 const MAX_OP_TRIES = 6; // after this many failed attempts, drop a stuck outbox op
-const SYNC_INTERVAL_MS = 12000; // periodic flush+pull cadence
+const SYNC_INTERVAL_MS = 25000; // periodic flush+pull cadence (your edits still push instantly via nudgeSync ~1.2s; this only governs how often the app pulls others' changes while idle)
 const SKEW_BUFFER_MS = 5 * 60 * 1000; // re-fetch last 5 min each pull to survive device clock skew
 
 // Supabase connection. Reads Vercel env vars first; falls back to the project's
