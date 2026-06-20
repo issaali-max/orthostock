@@ -124,8 +124,23 @@ export async function flush() {
           const { error } = await supabase.from(op.table).delete().eq('id', op.id);
           if (error) throw error;
         } else {
-          const { error } = await supabase.from(op.table).upsert(op.row);
-          if (error) throw error;
+          // Resilient upsert: if the cloud is missing a column the app writes
+          // (e.g. a newly-added field whose ALTER TABLE hasn't been run yet), drop
+          // just that column and retry instead of failing the whole row. This keeps
+          // the essential fields syncing — critically, a soft-delete still
+          // propagates via isActive even if its deletedAt column is missing — so
+          // deletions converge across devices and rows never silently diverge.
+          let row = { ...op.row };
+          let lastErr = null;
+          for (let attempt = 0; attempt < 12; attempt++) {
+            const { error } = await supabase.from(op.table).upsert(row);
+            if (!error) { lastErr = null; break; }
+            lastErr = error;
+            const mm = /Could not find the '([^']+)' column/i.exec(error.message || '');
+            if (mm && mm[1] in row) { delete row[mm[1]]; continue; } // strip & retry
+            break; // a different error — stop retrying
+          }
+          if (lastErr) throw lastErr;
         }
         await outboxDelete(op.seq);
       } catch (e) {
