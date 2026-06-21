@@ -16,6 +16,7 @@ const CORE_TABLES = [
   TABLES.purchases, TABLES.purchaseItems, TABLES.stockMovements,
   TABLES.expenses, TABLES.expenseGroups,
   TABLES.securities, TABLES.tradeLots, TABLES.tradeSells, TABLES.cashFlows,
+  TABLES.auditLog, TABLES.supplierPayments,
 ];
 
 export function AppProvider({ children }) {
@@ -110,7 +111,18 @@ export function AppProvider({ children }) {
   useEffect(() => { import('../lib/backup.js').then((m) => m.maybeAutoBackup()).catch(() => {}); }, []); // daily local safety snapshot
 
   // Start offline<->cloud sync once; re-pull refreshes the UI caches.
-  useEffect(() => { startSync(() => loadAll(true)); }, [loadAll]); // silent refresh on background pull
+  const lastDupFix = useRef(0);
+  useEffect(() => {
+    startSync(async () => {
+      await loadAll(true); // silent refresh on background pull
+      // Auto-resolve any duplicate document numbers two offline devices may have
+      // minted — throttled so it costs nothing during normal use.
+      if (Date.now() - lastDupFix.current > 45000) {
+        lastDupFix.current = Date.now();
+        try { const m = await import('../lib/engine.js'); const n = await m.autoFixDuplicateNumbers({ refresh }); if (n) showToast(`🔢 ${n}`, 'success'); } catch { /* ignore */ }
+      }
+    });
+  }, [loadAll]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Daily OneDrive auto-backup (silent; only if enabled, connected, and due).
   useEffect(() => {

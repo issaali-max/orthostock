@@ -3,18 +3,24 @@ import { useApp } from '../../app/AppProvider.jsx';
 import { C, emirateOptions, emirateLabel, TABLES } from '../../lib/constants.js';
 import { fmtCur, num, round2 } from '../../lib/money.js';
 import { fmtDate } from '../../lib/dates.js';
-import { supplierStats } from '../../lib/engine.js';
+import { supplierStats, supplierDebt, recordSupplierPayment } from '../../lib/engine.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, SearchBar, Select, Textarea } from '../../ui/components.jsx';
 
 const blank = () => ({ name: '', phone: '', whatsapp: '', city: '', currency: 'AED', notes: '', isActive: true });
 
 export default function Suppliers() {
-  const { t, lang, data, displayCurrency, usdRate, createRow, updateRow, deleteRow } = useApp();
+  const app = useApp();
+  const { t, lang, data, displayCurrency, usdRate, createRow, updateRow, deleteRow, showToast } = app;
   const [q, setQ] = useState('');
   const [editing, setEditing] = useState(null);
   const [viewing, setViewing] = useState(null);
+  const [payFor, setPayFor] = useState(null); // supplier to record a payment for
+  const [payAmt, setPayAmt] = useState('');
+  const [payMethod, setPayMethod] = useState('cash');
+  const [payNote, setPayNote] = useState('');
 
   const purchases = data[TABLES.purchases] || [];
+  const debtById = useMemo(() => Object.fromEntries(supplierDebt(app).map((d) => [d.supplier.id, d])), [data]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const list = useMemo(() => {
     const rows = (data[TABLES.suppliers] || []).filter((r) => r.isActive !== false);
@@ -30,9 +36,16 @@ export default function Suppliers() {
     setEditing(null);
   };
 
+  const openPay = (sup) => { setPayFor(sup); setPayAmt(''); setPayMethod('cash'); setPayNote(''); };
+  const doPay = async () => {
+    if (!payFor || num(payAmt) <= 0) return;
+    try { await recordSupplierPayment(app, { supplierId: payFor.id, amount: num(payAmt), method: payMethod, note: payNote }); showToast(t('paymentRecorded'), 'success'); setPayFor(null); }
+    catch (e) { console.warn(e); showToast('—', 'error'); }
+  };
+
   if (viewing) {
     return <SupplierProfile supplier={viewing} onBack={() => setViewing(null)} onEdit={() => { setEditing({ ...viewing }); setViewing(null); }}
-      {...{ data, t, lang, displayCurrency, usdRate, purchases }} />;
+      {...{ data, t, lang, displayCurrency, usdRate, purchases }} debt={debtById[viewing.id]} onPay={() => openPay(viewing)} />;
   }
 
   return (
@@ -49,7 +62,9 @@ export default function Suppliers() {
                   <div style={{ fontWeight: 700, color: C.text, display: 'flex', gap: 8, alignItems: 'center' }}>{s.name} <Badge tone={s.currency === 'USD' ? 'warning' : 'neutral'}>{s.currency}</Badge></div>
                   <div style={{ fontSize: 11, color: C.textMuted }}>{[s.phone, emirateLabel(s.city, lang)].filter(Boolean).join(' · ') || '—'}</div>
                 </div>
-                {st.totalSpent > 0 && <span style={{ fontSize: 12, color: C.primary, fontWeight: 700 }}>{fmtCur(st.totalSpent, displayCurrency, usdRate)}</span>}
+                {(() => { const d = debtById[s.id]; return d && d.balance > 0
+                  ? <span style={{ fontSize: 12, color: C.danger, fontWeight: 800 }}>{t('owed')}: {fmtCur(d.balance, displayCurrency, usdRate)}</span>
+                  : (st.totalSpent > 0 ? <span style={{ fontSize: 12, color: C.success, fontWeight: 700 }}>{t('settled')}</span> : null); })()}
                 <span style={{ color: C.textMuted }}>›</span>
               </Card>
             );
@@ -73,21 +88,44 @@ export default function Suppliers() {
           </div>
         )}
       </Modal>
+
+      <Modal open={!!payFor} onClose={() => setPayFor(null)} title={`💰 ${t('recordPayment')}`}
+        footer={<><Btn variant="ghost" onClick={() => setPayFor(null)}>{t('cancel')}</Btn><Btn onClick={doPay} disabled={num(payAmt) <= 0}>{t('save')}</Btn></>}>
+        {payFor && (
+          <div>
+            <div style={{ fontSize: 13, color: C.textMuted, marginBottom: 8 }}>{payFor.name}{debtById[payFor.id] ? ` · ${t('owed')}: ${fmtCur(debtById[payFor.id].balance, displayCurrency, usdRate)}` : ''}</div>
+            <Field label={t('paymentAmount')} required><Input type="number" value={payAmt} onChange={setPayAmt} placeholder={debtById[payFor.id] ? String(debtById[payFor.id].balance) : '0'} /></Field>
+            <Field label={t('paymentMethod')}>
+              <Select value={payMethod} onChange={setPayMethod} options={[
+                { value: 'cash', label: t('payCash') }, { value: 'card', label: t('payCard') },
+                { value: 'transfer', label: t('payTransfer') }, { value: 'cheque', label: t('payCheque') },
+              ]} />
+            </Field>
+            <Field label={t('notes')}><Input value={payNote} onChange={setPayNote} /></Field>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }
 
-function SupplierProfile({ supplier, onBack, onEdit, data, t, displayCurrency, usdRate, purchases }) {
+function SupplierProfile({ supplier, onBack, onEdit, data, t, displayCurrency, usdRate, purchases, debt, onPay }) {
   const st = supplierStats(purchases, supplier.id);
   const items = data[TABLES.purchaseItems] || [];
   const variants = data[TABLES.variants] || [];
   const skuOf = (id) => variants.find((v) => v.id === id)?.sku || '—';
+  // Accurate figures (include later supplier payments) come from `debt`; fall back
+  // to purchase-time stats if not provided.
+  const paid = debt ? debt.paid : st.totalPaid;
+  const balance = debt ? debt.balance : st.balance;
+  const myPayments = (data[TABLES.supplierPayments] || []).filter((p) => p.supplierId === supplier.id).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
         <button onClick={onBack} style={{ border: `1px solid ${C.border}`, background: '#fff', borderRadius: 10, padding: '6px 12px', fontWeight: 700, color: C.primary, cursor: 'pointer' }}>← {t('suppliers')}</button>
         <h2 style={{ fontSize: 16, fontWeight: 800, color: C.text, margin: 0, flex: 1 }}>🚚 {supplier.name}</h2>
+        {balance > 0 && <Btn size="sm" onClick={onPay}>💰 {t('recordPayment')}</Btn>}
         <Btn size="sm" variant="light" onClick={onEdit}>{t('edit')}</Btn>
       </div>
 
@@ -97,14 +135,28 @@ function SupplierProfile({ supplier, onBack, onEdit, data, t, displayCurrency, u
           <div style={{ fontSize: 10, color: C.textMuted, marginTop: 2 }}>{t('totalSpent')}</div>
         </div>
         <div style={{ background: '#E9F6EF', borderRadius: 12, padding: 10, textAlign: 'center' }}>
-          <div style={{ fontSize: 15, fontWeight: 800, color: C.success }}>{fmtCur(st.totalPaid, displayCurrency, usdRate)}</div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: C.success }}>{fmtCur(paid, displayCurrency, usdRate)}</div>
           <div style={{ fontSize: 10, color: C.textMuted, marginTop: 2 }}>{t('totalPaid')}</div>
         </div>
-        <div style={{ background: st.balance > 0 ? '#FBECEC' : '#E9F6EF', borderRadius: 12, padding: 10, textAlign: 'center' }}>
-          <div style={{ fontSize: 15, fontWeight: 800, color: st.balance > 0 ? C.danger : C.success }}>{fmtCur(st.balance, displayCurrency, usdRate)}</div>
+        <div style={{ background: balance > 0 ? '#FBECEC' : '#E9F6EF', borderRadius: 12, padding: 10, textAlign: 'center' }}>
+          <div style={{ fontSize: 15, fontWeight: 800, color: balance > 0 ? C.danger : C.success }}>{fmtCur(balance, displayCurrency, usdRate)}</div>
           <div style={{ fontSize: 10, color: C.textMuted, marginTop: 2 }}>{t('balanceOwed')}</div>
         </div>
       </div>
+
+      {myPayments.length > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: C.text, marginBottom: 8 }}>💰 {t('payments')}</div>
+          <div style={{ display: 'grid', gap: 6 }}>
+            {myPayments.map((p) => (
+              <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: C.surfaceAlt, borderRadius: 10, padding: '7px 10px', fontSize: 12 }}>
+                <span style={{ color: C.textMuted }}>{fmtDate(p.date)} · {t('pay' + (p.method || 'cash').charAt(0).toUpperCase() + (p.method || 'cash').slice(1)) || p.method}{p.note ? ` · ${p.note}` : ''}</span>
+                <b style={{ color: C.success }}>{fmtCur(p.amount, displayCurrency, usdRate)}</b>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div style={{ fontSize: 13, fontWeight: 800, color: C.text, marginBottom: 8 }}>{t('history')}</div>
       {st.purchases.length === 0 ? <EmptyState icon="📥" text={t('noPurchases')} /> : (

@@ -88,6 +88,8 @@ export const TABLES = {
   settings: 'settings',
   users: 'users',
   externalDebts: 'externalDebts',
+  auditLog: 'auditLog',
+  supplierPayments: 'supplierPayments',
 };
 
 // A small set of icon glyphs offered for categories (kept simple — emoji,

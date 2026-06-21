@@ -94,6 +94,7 @@ export async function saveInvoiceAtomic(app, { editingId, invoiceData, lines, in
   await db.atomicMutations(specs);
   await Promise.all([app.refresh(TABLES.invoices), app.refresh(TABLES.invoiceItems), app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements)]);
   nudgeSync();
+  await logAudit(app, editingId ? 'edit' : 'create', 'invoice', invoiceData.invoiceNumber || invId);
   return invId;
 }
 
@@ -120,6 +121,7 @@ export async function voidInvoice(app, invoiceId) {
   await db.atomicMutations(specs);
   await Promise.all([app.refresh(TABLES.invoices), app.refresh(TABLES.invoiceItems), app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements)]);
   nudgeSync();
+  await logAudit(app, 'delete', 'invoice', (await db.findBy(TABLES.invoices, 'id', invoiceId))?.invoiceNumber || invoiceId);
   return true;
 }
 
@@ -142,6 +144,7 @@ export async function restoreInvoice(app, invoiceId) {
   await db.atomicMutations(specs);
   await Promise.all([app.refresh(TABLES.invoices), app.refresh(TABLES.invoiceItems), app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements)]);
   nudgeSync();
+  await logAudit(app, 'restore', 'invoice', (await db.findBy(TABLES.invoices, 'id', invoiceId))?.invoiceNumber || invoiceId);
   return true;
 }
 
@@ -293,6 +296,7 @@ export async function commitPurchase(app, purchaseData, lines) {
   const res = await db.atomicMutations(specs);
   await Promise.all([app.refresh(TABLES.purchases), app.refresh(TABLES.purchaseItems), app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements)]);
   nudgeSync();
+  await logAudit(app, 'create', 'purchase', purchaseData.purchaseNumber || poId);
   return res.find((r) => r && r.id === poId) || { id: poId };
 }
 
@@ -885,5 +889,96 @@ export async function voidPurchase(app, purchaseId) {
   await db.atomicMutations(specs);
   await Promise.all([app.refresh(TABLES.purchases), app.refresh(TABLES.purchaseItems), app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements)]);
   nudgeSync();
+  await logAudit(app, 'delete', 'purchase', (await db.findBy(TABLES.purchases, 'id', purchaseId))?.purchaseNumber || purchaseId);
   return true;
+}
+
+// ── Audit log ───────────────────────────────────────────────────────────────
+// Append a "who did what, when" entry. Best-effort: a logging failure must never
+// block the real operation. Synced like any table (via the data envelope).
+export async function logAudit(app, action, entity, ref, note = '') {
+  try {
+    const u = app?.user || {};
+    await db.insert(TABLES.auditLog, {
+      at: Date.now(), userId: u.id || '', userName: u.name || u.email || '—',
+      action, entity, ref: String(ref || ''), note: String(note || ''),
+    });
+    if (app?.refresh) app.refresh(TABLES.auditLog);
+  } catch (e) { console.warn('[audit] skipped', e?.message || e); }
+}
+
+// ── Supplier payments / accounts payable ─────────────────────────────────────
+// Record a payment made to a supplier AFTER (or separately from) a purchase. The
+// amount paid at purchase time lives on the purchase itself; these are the later
+// (full or partial) settlements.
+export async function recordSupplierPayment(app, { supplierId, amount, date, method = 'cash', note = '' }) {
+  const amt = round2(num(amount));
+  if (!supplierId || amt <= 0) return null;
+  const row = await db.insert(TABLES.supplierPayments, {
+    supplierId, amount: amt, date: date || todayISO(), method, note,
+  });
+  await app.refresh(TABLES.supplierPayments);
+  await logAudit(app, 'payment', 'supplier', supplierId, `${amt}`);
+  nudgeSync();
+  return row;
+}
+
+export async function deleteSupplierPayment(app, id) {
+  await db.remove(TABLES.supplierPayments, id);
+  await app.refresh(TABLES.supplierPayments);
+  nudgeSync();
+  return true;
+}
+
+// Per-supplier accounts payable: what each supplier was billed (active purchases),
+// what was paid at purchase time, what was paid later, and the remaining balance.
+export function supplierDebt(app) {
+  const purchases = (app.data[TABLES.purchases] || []).filter((p) => p.isActive !== false);
+  const payments = app.data[TABLES.supplierPayments] || [];
+  const suppliers = (app.data[TABLES.suppliers] || []).filter((s) => s.isActive !== false);
+  const byId = {};
+  const ensure = (id) => (byId[id] = byId[id] || { supplierId: id, purchased: 0, paidAtPurchase: 0, paidLater: 0 });
+  for (const p of purchases) {
+    if (!p.supplierId) continue;
+    const e = ensure(p.supplierId);
+    e.purchased = round2(e.purchased + num(p.totalAED));
+    e.paidAtPurchase = round2(e.paidAtPurchase + num(p.paidAmount));
+  }
+  for (const pay of payments) {
+    if (!pay.supplierId) continue;
+    ensure(pay.supplierId).paidLater = round2(ensure(pay.supplierId).paidLater + num(pay.amount));
+  }
+  return suppliers.map((s) => {
+    const e = byId[s.id] || { purchased: 0, paidAtPurchase: 0, paidLater: 0 };
+    const paid = round2(e.paidAtPurchase + e.paidLater);
+    return { supplier: s, purchased: round2(e.purchased), paid, balance: round2(e.purchased - paid) };
+  }).filter((r) => r.purchased > 0 || r.paid > 0).sort((a, b) => b.balance - a.balance);
+}
+
+// Generic duplicate document-number resolver (works for invoices and purchases).
+// Two devices creating offline can mint the same number; this keeps the oldest of
+// each clash and renumbers the rest to the next free number. Safe to run after every
+// sync — it only touches genuine duplicates. Returns how many were renumbered.
+export async function autoFixDuplicateNumbers(app) {
+  let total = 0;
+  for (const [table, prefix, field] of [[TABLES.invoices, 'INV', 'invoiceNumber'], [TABLES.purchases, 'PO', 'purchaseNumber']]) {
+    const all = await db.getAll(table);
+    const active = all.filter((r) => r.isActive !== false);
+    const groups = {};
+    active.forEach((r) => { const k = (r[field] || '').trim(); if (!k) return; (groups[k] = groups[k] || []).push(r); });
+    let pool = all.slice();
+    for (const list of Object.values(groups)) {
+      if (list.length < 2) continue;
+      list.sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || '')); // keep oldest
+      for (let k = 1; k < list.length; k++) {
+        const next = nextDocNumber(pool, prefix, field);
+        await db.update(table, list[k].id, { [field]: next });
+        pool.push({ [field]: next });
+        total++;
+      }
+    }
+    if (total) await app.refresh(table);
+  }
+  if (total) nudgeSync();
+  return total;
 }
