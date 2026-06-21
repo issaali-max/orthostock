@@ -36,13 +36,30 @@ export async function saveProduct(app, rec) {
   const payload = {
     nameEn: rec.nameEn.trim(), brand: rec.brand || '', categoryId: rec.categoryId || null,
     icon: rec.icon || '📦', image_path: rec.image_path || rec.image_url || '', description: rec.description || '', isActive: true,
+    isGroup: rec.isGroup === true, // preserve the group flag so groups made from a category show in the material's group picker
   };
   if (rec.id) await app.updateRow(TABLES.products, rec.id, payload);
   else await app.createRow(TABLES.products, payload);
   return true;
 }
+// Auto-SKU: the program assigns the code so the user never types one (no typos, no
+// clashes). It fills the LOWEST free number among ACTIVE materials, so deleting a
+// material frees its code for reuse.
+export function nextFreeSku(app, prefix = 'ITM') {
+  const re = new RegExp('^' + prefix + '-(\\d+)$');
+  const used = new Set();
+  for (const v of (app.data[TABLES.variants] || [])) {
+    if (v.isActive === false) continue;
+    const m = re.exec((v.sku || '').trim());
+    if (m) used.add(parseInt(m[1], 10));
+  }
+  let n = 1; while (used.has(n)) n++;
+  return `${prefix}-${String(n).padStart(5, '0')}`;
+}
+
 export async function saveVariant(app, rec) {
-  if (!rec.sku?.trim()) return false;
+  // SKU is assigned automatically (reusing freed codes); existing materials keep theirs.
+  const sku = (rec.id && (rec.sku || '').trim()) ? rec.sku.trim() : nextFreeSku(app);
   // The UI is 2 levels (Category -> Material); the schema keeps a product row in
   // between. Resolve it here: keep the existing product if the category didn't
   // change, otherwise find-or-create a 1:1 product in the chosen category named
@@ -60,7 +77,7 @@ export async function saveVariant(app, rec) {
     // and re-creating a product on every save of an already-standalone item).
     const siblings = (app.data[TABLES.variants] || []).filter((v) => v.productId === productId && v.id !== rec.id && v.isActive !== false);
     if (!productId || siblings.length > 0) {
-      const pname = (rec.nameEn || rec.sku).trim();
+      const pname = (rec.nameEn || sku).trim();
       const saved = await app.createRow(TABLES.products, { nameAr: pname, nameEn: pname, brand: rec.brand || '', categoryId: wantCat, icon: '📦', image_path: rec.image_path || rec.image_url || '', description: '', isGroup: false, isActive: true });
       productId = saved?.id || null;
     }
@@ -74,7 +91,7 @@ export async function saveVariant(app, rec) {
       productId = saved?.id || null;
     }
   } else if (rec.categoryId && rec.categoryId !== currentCatId) {
-    const pname = (rec.nameEn || rec.sku).trim();
+    const pname = (rec.nameEn || sku).trim();
     const match = products.find((p) => p.categoryId === rec.categoryId && (p.nameEn || '').trim().toLowerCase() === pname.toLowerCase());
     if (match) productId = match.id;
     else {
@@ -99,7 +116,7 @@ export async function saveVariant(app, rec) {
     if (prod && (prod.brand || '') !== (rec.brand || '')) await app.updateRow(TABLES.products, productId, { brand: rec.brand || '' });
   }
   const payload = {
-    productId, sku: rec.sku.trim(), nameEn: rec.nameEn || '',
+    productId, sku, nameEn: rec.nameEn || '',
     attributes: rec.attributes || {}, image_path: rec.image_path || rec.image_url || '',
     sellingPriceDefault: num(rec.sellingPriceDefault), stockMin: num(rec.stockMin),
     unit: rec.unit || 'piece', notes: rec.notes || '', isActive: true, supplierId: rec.supplierId || '',
@@ -241,32 +258,29 @@ export function VariantForm({ rec, setRec, t, products, categories, variants = [
         const mode = rec.groupMode || ((rec.groupId || rec.productId) ? 'existing' : 'none');
         const pickMode = (m) => {
           if (m === 'existing') setRec((r) => ({ ...r, groupMode: 'existing', groupName: '', groupId: r.groupId || r.productId || (groupsInCat[0]?.id || '') }));
-          else if (m === 'new') setRec((r) => ({ ...r, groupMode: 'new', groupId: '', groupName: r.groupName || '' }));
           else setRec((r) => ({ ...r, groupMode: 'none', groupId: '', groupName: '' }));
         };
         const tab = (m, label) => (
-          <button type="button" onClick={() => pickMode(m)} style={{ flex: 1, padding: '9px 4px', borderRadius: 10, border: `1.5px solid ${mode === m ? C.primary : C.border}`, background: mode === m ? C.primary : '#fff', color: mode === m ? '#fff' : C.textMid, fontSize: 11.5, fontWeight: 800, cursor: 'pointer' }}>{label}</button>
+          <button type="button" onClick={() => pickMode(m)} style={{ flex: 1, padding: '9px 6px', borderRadius: 10, border: `1.5px solid ${mode === m ? C.primary : C.border}`, background: mode === m ? C.primary : '#fff', color: mode === m ? '#fff' : C.textMid, fontSize: 12.5, fontWeight: 800, cursor: 'pointer' }}>{label}</button>
         );
         return (
           <Field label={t('group')}>
             <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
               {tab('existing', `🗂️ ${t('existingGroup')}`)}
-              {tab('new', `➕ ${t('newGroup')}`)}
               {tab('none', `▫️ ${t('standalone')}`)}
             </div>
             {mode === 'existing' && (groupsInCat.length > 0
               ? <Select value={rec.groupId ?? rec.productId ?? ''} onChange={(v) => set('groupId', v)} placeholder="—"
                   options={groupsInCat.map((p) => ({ value: p.id, label: p.nameEn }))} />
               : <div style={{ fontSize: 12, color: C.textMuted, padding: '8px 0' }}>{t('noGroupsYet')}</div>)}
-            {mode === 'new' && (
-              <Input value={rec.groupName || ''} onChange={(v) => set('groupName', v)} placeholder={t('newGroupName')} />
-            )}
             {mode === 'none' && <div style={{ fontSize: 12, color: C.textMuted, padding: '8px 0' }}>{t('standaloneHint')}</div>}
           </Field>
         );
       })()}
-      <Field label={t('sku')} required>
-        <Input value={rec.sku} onChange={(v) => set('sku', v.toUpperCase())} placeholder="BRK-018-MET" />
+      <Field label={t('sku')} hint={t('skuAuto')}>
+        <div style={{ padding: '11px 13px', borderRadius: 10, border: `1px solid ${C.border}`, background: C.surfaceAlt, color: rec.sku ? C.text : C.textMuted, fontWeight: 700, fontSize: 14, letterSpacing: 0.5 }}>
+          {rec.sku || t('skuWillGenerate')}
+        </div>
       </Field>
       <Field label={t('nameEn')} hint="English only"><Input value={rec.nameEn} onChange={(v) => set('nameEn', v)} /></Field>
       <Field label={t('image')} hint={t('imageOrIcon')}>

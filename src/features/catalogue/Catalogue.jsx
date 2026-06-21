@@ -55,8 +55,12 @@ export default function Catalogue() {
     return { base, size, pos };
   };
   const sortVariants = (arr) => arr.slice().sort((a, b) => {
+    // Alphabetical by the material's real name first (what the user asked for),
+    // then size/position as a tiebreaker for same-named variants.
+    const na = (a.nameEn || a.sku || '').toLowerCase(), nb = (b.nameEn || b.sku || '').toLowerCase();
+    const c = na.localeCompare(nb, 'en'); if (c) return c;
     const ka = variantSortKey(a), kb = variantSortKey(b);
-    return ka.base.localeCompare(kb.base, 'en') || ka.size - kb.size || ka.pos - kb.pos;
+    return ka.size - kb.size || ka.pos - kb.pos;
   });
   const variantsByProduct = useMemo(() => {
     const m = {}; variants.forEach((v) => { (m[v.productId] = m[v.productId] || []).push(v); });
@@ -275,7 +279,8 @@ export default function Catalogue() {
   const shownProducts = catProducts
     .filter((p) => editMode || (variantsByProduct[p.id] || []).some(matchVariantArch))
     .filter((p) => !brandFilter || (p.brand || '') === brandFilter)
-    .filter((p) => !archFilter || (variantsByProduct[p.id] || []).some(matchVariantArch));
+    .filter((p) => !archFilter || (variantsByProduct[p.id] || []).some(matchVariantArch))
+    .sort((a, b) => (a.nameEn || '').toLowerCase().localeCompare((b.nameEn || '').toLowerCase(), 'en')); // alphabetical groups within the category
 
   return (
     <div>
