@@ -990,3 +990,166 @@ export async function nextNumber(table, prefix, field) {
   const all = await db.getAll(table);
   return nextDocNumber(all, prefix, field);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FINANCIAL POSITION — single source of truth for cash, debts, investments,
+// inventory and expenses. Currency-aware: AED and USD are tracked SEPARATELY and
+// never summed into one mixed number (a converted "info" total is offered apart).
+// Accounting rules enforced here:
+//   • A debt is NOT cash until received (only paid amounts move cash).
+//   • Material cost is never deducted twice (purchases are cash-out when paid;
+//     COGS is NOT subtracted from cash again at sale).
+//   • Original currency is preserved on every record.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const CURRENCIES = ['AED', 'USD'];
+const blankCur = () => ({ AED: 0, USD: 0 });
+const addCur = (bucket, currency, amount) => { const c = currency === 'USD' ? 'USD' : 'AED'; bucket[c] = round2(bucket[c] + num(amount)); };
+
+// A flat, dated list of every cash movement, each tagged with its ORIGINAL currency.
+// direction: 'in' (money received) or 'out' (money paid).
+export function cashEvents(app) {
+  const data = app.data || app;
+  const ev = [];
+  const push = (date, currency, amount, direction, source, label) => {
+    const a = num(amount); if (a === 0) return;
+    ev.push({ date: date || '', currency: currency === 'USD' ? 'USD' : 'AED', amount: round2(a), direction, source, label });
+  };
+
+  // 1) Invoice payments RECEIVED → cash IN (in the invoice's currency). Use the dated
+  //    payments[] log when present, else fall back to paidAmount on the invoice date.
+  for (const inv of (data[TABLES.invoices] || [])) {
+    if (inv.isActive === false || inv.status === 'returned') continue;
+    const cur = inv.currency || 'AED';
+    if (Array.isArray(inv.payments) && inv.payments.length) {
+      for (const p of inv.payments) push(p.date || inv.date, cur, p.amount, 'in', 'invoice', inv.invoiceNumber);
+    } else if (num(inv.paidAmount) > 0) {
+      push(inv.date, cur, inv.paidAmount, 'in', 'invoice', inv.invoiceNumber);
+    }
+  }
+
+  // 2) Purchases → cash OUT for the amount actually PAID at purchase time (the rest is
+  //    supplier debt, not cash). Purchases are AED.
+  for (const po of (data[TABLES.purchases] || [])) {
+    if (po.isActive === false) continue;
+    push(po.date, 'AED', po.paidAmount, 'out', 'purchase', po.purchaseNumber);
+  }
+  // 2b) Later supplier payments → cash OUT.
+  for (const sp of (data[TABLES.supplierPayments] || [])) {
+    push(sp.date, sp.currency || 'AED', sp.amount, 'out', 'supplierPayment', '');
+  }
+
+  // 3) Expenses → cash OUT (in the expense's currency; default AED).
+  for (const e of (data[TABLES.expenses] || [])) {
+    if (e.isActive === false) continue;
+    push(e.date, e.currency || 'AED', e.amount, 'out', 'expense', e.note || '');
+  }
+
+  // 4) Personal debts (externalDebts): lending money OUT, collecting it back IN.
+  for (const person of (data[TABLES.externalDebts] || [])) {
+    if (person.isActive === false) continue;
+    const cur = person.currency || 'AED';
+    for (const tx of (person.txns || [])) {
+      if (tx.type === 'collect') push(tx.date, cur, tx.amount, 'in', 'debtCollect', person.name);
+      else push(tx.date, cur, tx.amount, 'out', 'debtLend', person.name);
+    }
+  }
+
+  return ev.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+}
+
+// Doctor/centre receivables: unpaid balance across active invoices, per customer.
+export function receivables(app) {
+  const data = app.data || app;
+  const customers = data[TABLES.customers] || [];
+  const nameOf = (id) => customers.find((c) => c.id === id)?.name || '—';
+  const byId = {}; const totals = blankCur();
+  for (const inv of (data[TABLES.invoices] || [])) {
+    if (inv.isActive === false || inv.status === 'returned') continue;
+    const bal = round2(num(inv.total) - num(inv.paidAmount));
+    if (bal <= 0) continue;
+    const cur = inv.currency || 'AED';
+    const k = inv.customerId || '—';
+    byId[k] = byId[k] || { customerId: k, name: nameOf(k), AED: 0, USD: 0, invoices: 0 };
+    addCur(byId[k], cur, bal); byId[k].invoices++;
+    addCur(totals, cur, bal);
+  }
+  const list = Object.values(byId).sort((a, b) => (b.AED + b.USD) - (a.AED + a.USD));
+  return { totals, byCustomer: list };
+}
+
+// Investments: current market value per currency (qty × current price), from the
+// existing securities — logic unchanged, just read.
+export function investmentValue(app) {
+  const data = app.data || app;
+  const val = blankCur();
+  for (const s of (data[TABLES.securities] || [])) {
+    if (s.isActive === false) continue;
+    addCur(val, s.currency || 'USD', num(s.qty) * num(s.currentPrice));
+  }
+  return val;
+}
+
+// Inventory value at average cost (AED): Σ stockQty × purchasePriceAvg.
+export function inventoryValue(app) {
+  const data = app.data || app;
+  let v = 0;
+  for (const variant of (data[TABLES.variants] || [])) {
+    if (variant.isActive === false) continue;
+    v = round2(v + num(variant.stockQty) * num(variant.purchasePriceAvg));
+  }
+  return v;
+}
+
+// The whole financial picture, currency-separated.
+export function financialPosition(app, today = todayISO()) {
+  const month = today.slice(0, 7);
+  const year = today.slice(0, 4);
+  const ev = cashEvents(app);
+
+  const cash = { AED: { balance: 0, in: 0, out: 0, today: 0, month: 0, year: 0 }, USD: { balance: 0, in: 0, out: 0, today: 0, month: 0, year: 0 } };
+  for (const e of ev) {
+    const b = cash[e.currency]; const signed = e.direction === 'in' ? e.amount : -e.amount;
+    b.balance = round2(b.balance + signed);
+    if (e.direction === 'in') b.in = round2(b.in + e.amount); else b.out = round2(b.out + e.amount);
+    if ((e.date || '') === today) b.today = round2(b.today + signed);
+    if ((e.date || '').slice(0, 7) === month) b.month = round2(b.month + signed);
+    if ((e.date || '').slice(0, 4) === year) b.year = round2(b.year + signed);
+  }
+
+  const recv = receivables(app);
+  const inv = investmentValue(app);
+  const stockVal = inventoryValue(app);
+
+  // Personal debts: money owed TO me (net positive lent) vs money I owe.
+  const owedToMe = blankCur(); const iOwe = blankCur();
+  for (const person of (app.data || app)[TABLES.externalDebts] || []) {
+    if (person.isActive === false) continue;
+    const cur = person.currency || 'AED';
+    const net = (person.txns || []).reduce((s, tx) => s + (tx.type === 'collect' ? -num(tx.amount) : num(tx.amount)), 0);
+    if (net > 0) addCur(owedToMe, cur, net); else if (net < 0) addCur(iOwe, cur, -net);
+  }
+
+  // Expenses split business/personal, per currency.
+  const data = app.data || app;
+  const groups = data[TABLES.expenseGroups] || [];
+  const typeOf = (gid) => groups.find((g) => g.id === gid)?.type || 'business';
+  const expBusiness = blankCur(); const expPersonal = blankCur();
+  for (const e of (data[TABLES.expenses] || [])) {
+    if (e.isActive === false) continue;
+    addCur(typeOf(e.groupId) === 'personal' ? expPersonal : expBusiness, e.currency || 'AED', e.amount);
+  }
+
+  return {
+    cash, receivables: recv, investments: inv, inventoryValue: stockVal,
+    owedToMe, iOwe, expBusiness, expPersonal,
+  };
+}
+
+// Convert a per-currency bucket to a single INFO-ONLY figure in the chosen display
+// currency, using the current rate. Clearly labelled as approximate by callers —
+// the original currency amounts are never overwritten.
+export function combineForInfo(bucket, displayCurrency = 'AED', usdRate = 3.6725) {
+  const aed = num(bucket.AED) + num(bucket.USD) * usdRate;          // everything → AED
+  return displayCurrency === 'USD' ? round2(aed / usdRate) : round2(aed);
+}
