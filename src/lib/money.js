@@ -43,6 +43,14 @@ export function fmtNum(v) {
 // orthodontic acronyms/units. Display-only — does not change stored data.
 const NAME_KEEP = { niti: 'NiTi', 'ni-ti': 'Ni-Ti', ss: 'SS', 's.s': 'S.S', 'a.j': 'A.J', tma: 'TMA', mm: 'mm', co: 'Co', cr: 'Cr', oz: 'oz', uv: 'UV', led: 'LED', pvc: 'PVC' };
 const NAME_SMALL = new Set(['with', 'and', 'for', 'to', 'of', 'the', 'a', 'in', 'on']);
+// Capitalise the first letter of every word, keeping the rest of each word exactly
+// as typed (so "coated niti rect" -> "Coated Niti Rect", and an intentional "NiTi"
+// stays "NiTi"). Used to STORE names capitalised, not just display them so.
+export function titleCase(s) {
+  if (!s) return s || '';
+  return String(s).replace(/\S+/g, (w) => w.charAt(0).toUpperCase() + w.slice(1));
+}
+
 export function prettyName(s) {
   if (!s) return s || '';
   return String(s).trim().split(/\s+/).map((w, i) => {

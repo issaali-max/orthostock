@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useApp } from '../../app/AppProvider.jsx';
 import { C, RADIUS, SHADOW, TABLES } from '../../lib/constants.js';
 import { StoredImage } from '../../ui/StoredImage.jsx';
-import { fmtCur, fmtNum, num, prettyName } from '../../lib/money.js';
+import { fmtCur, fmtNum, num } from '../../lib/money.js';
 import { Badge, Btn, EmptyState, Modal, PageHeader, SearchBar } from '../../ui/components.jsx';
 import RestockList from './RestockList.jsx';
 import StockTake from './StockTake.jsx';
@@ -354,7 +354,7 @@ export default function Catalogue() {
                   <div onClick={editMode ? () => editVariant(v) : undefined} style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 13, cursor: editMode ? 'pointer' : 'default' }}>
                     <StoredImage value={img} size={76} radius={14} emptyBg={`linear-gradient(135deg, ${(cat?.color || C.primary)}26, ${(cat?.color || C.primary)}0d)`} fontSize={34} fallback={p.icon || cat?.icon || '📦'} />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 16, fontWeight: 800, color: C.text, lineHeight: 1.3 }}>{editMode && <span style={{ color: C.primary }}>✎ </span>}{prettyName(p.nameEn)}</div>
+                      <div style={{ fontSize: 16, fontWeight: 800, color: C.text, lineHeight: 1.3 }}>{editMode && <span style={{ color: C.primary }}>✎ </span>}{p.nameEn}</div>
                       <div style={{ fontSize: 10, color: C.textMuted, marginTop: 2 }}>{editMode ? t('tapToEdit') : [p.brand, v.sku].filter(Boolean).join(' · ')}</div>
                     </div>
                     {stockPill(v)}
@@ -374,7 +374,7 @@ export default function Catalogue() {
                     <span style={badgeGroup}>🗂️ {t('group')}</span>
                     {editMode && <span style={{ ...badgeGroup, insetInlineStart: 'auto', insetInlineEnd: 10, background: C.primary }}>✎ {t('edit')}</span>}
                     <div style={{ position: 'absolute', insetInlineStart: 0, insetInlineEnd: 0, bottom: 0, padding: '38px 16px 13px', background: 'linear-gradient(to top, rgba(0,0,0,.9), rgba(0,0,0,.45) 45%, rgba(0,0,0,0))' }}>
-                      <div style={{ fontSize: 21, fontWeight: 900, color: '#fff', lineHeight: 1.2, textShadow: '0 2px 6px rgba(0,0,0,.9)' }}>{prettyName(p.nameEn)}</div>
+                      <div style={{ fontSize: 21, fontWeight: 900, color: '#fff', lineHeight: 1.2, textShadow: '0 2px 6px rgba(0,0,0,.9)' }}>{p.nameEn}</div>
                       <div style={{ fontSize: 12.5, fontWeight: 700, color: '#fff', marginTop: 3, textShadow: '0 1px 4px rgba(0,0,0,.9)' }}>{[p.brand, (vs.length === 1 ? t('oneSize') : `${vs.length} ${t('variations')}`), `${t('stock')} ${fmtNum(totalStock)}`].filter(Boolean).join(' · ')}</div>
                     </div>
                   </div>
@@ -383,7 +383,7 @@ export default function Catalogue() {
                     <div style={{ width: 72, height: 72, borderRadius: 16, flexShrink: 0, background: `linear-gradient(135deg, ${(cat?.color || C.primary)}26, ${(cat?.color || C.primary)}0d)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 38 }}>{p.icon || cat?.icon || '📦'}</div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <span style={{ ...badgeGroup, position: 'static', display: 'inline-block', marginBottom: 4 }}>🗂️ {t('group')}{editMode ? ` · ✎ ${t('edit')}` : ''}</span>
-                      <div style={{ fontSize: 19, fontWeight: 900, color: C.text, lineHeight: 1.2 }}>{prettyName(p.nameEn)}</div>
+                      <div style={{ fontSize: 19, fontWeight: 900, color: C.text, lineHeight: 1.2 }}>{p.nameEn}</div>
                       <div style={{ fontSize: 12, color: C.textMuted, marginTop: 3 }}>{[p.brand, (vs.length === 1 ? t('oneSize') : `${vs.length} ${t('variations')}`)].filter(Boolean).join(' · ')}</div>
                     </div>
                   </div>

@@ -9,7 +9,7 @@ import { useState } from 'react';
 import { C, CATEGORY_ICONS, CATEGORY_COLORS, TABLES, UNITS } from '../../lib/constants.js';
 import { AttributePicker, Btn, Field, Input, Select, Textarea } from '../../ui/components.jsx';
 import { ImageUpload } from '../../ui/ImageUpload.jsx';
-import { num } from '../../lib/money.js';
+import { num, titleCase } from '../../lib/money.js';
 
 // ── Blank factories ──
 export const blankCategory = () => ({ nameAr: '', nameEn: '', icon: '🦷', image_path: '', image_url: '', color: C.primary, attributes: [], isActive: true });
@@ -34,7 +34,7 @@ export async function saveCategory(app, rec) {
 export async function saveProduct(app, rec) {
   if (!rec.nameEn?.trim()) return false; // English name required, no Arabic field
   const payload = {
-    nameEn: rec.nameEn.trim(), brand: rec.brand || '', categoryId: rec.categoryId || null,
+    nameEn: titleCase(rec.nameEn.trim()), brand: rec.brand || '', categoryId: rec.categoryId || null,
     icon: rec.icon || '📦', image_path: rec.image_path || rec.image_url || '', description: rec.description || '', isActive: true,
     isGroup: rec.isGroup === true, // preserve the group flag so groups made from a category show in the material's group picker
   };
@@ -100,13 +100,13 @@ export async function saveVariant(app, rec) {
     // and re-creating a product on every save of an already-standalone item).
     const siblings = (app.data[TABLES.variants] || []).filter((v) => v.productId === productId && v.id !== rec.id && v.isActive !== false);
     if (!productId || siblings.length > 0) {
-      const pname = (rec.nameEn || sku).trim();
+      const pname = titleCase((rec.nameEn || sku).trim());
       const saved = await app.createRow(TABLES.products, { nameAr: pname, nameEn: pname, brand: rec.brand || '', categoryId: wantCat, icon: '📦', image_path: rec.image_path || rec.image_url || '', description: '', isGroup: false, isActive: true });
       productId = saved?.id || null;
     }
   } else if ((rec.groupName || '').trim() && wantCat) {
     // user typed a new group name: find-or-create it inside the category
-    const gname = rec.groupName.trim();
+    const gname = titleCase(rec.groupName.trim());
     const match = products.find((p) => p.categoryId === wantCat && (p.nameEn || '').trim().toLowerCase() === gname.toLowerCase());
     if (match) productId = match.id;
     else {
@@ -114,7 +114,7 @@ export async function saveVariant(app, rec) {
       productId = saved?.id || null;
     }
   } else if (rec.categoryId && rec.categoryId !== currentCatId) {
-    const pname = (rec.nameEn || sku).trim();
+    const pname = titleCase((rec.nameEn || sku).trim());
     const match = products.find((p) => p.categoryId === rec.categoryId && (p.nameEn || '').trim().toLowerCase() === pname.toLowerCase());
     if (match) productId = match.id;
     else {
@@ -139,7 +139,7 @@ export async function saveVariant(app, rec) {
     if (prod && (prod.brand || '') !== (rec.brand || '')) await app.updateRow(TABLES.products, productId, { brand: rec.brand || '' });
   }
   const payload = {
-    productId, sku, nameEn: rec.nameEn || '',
+    productId, sku, nameEn: titleCase((rec.nameEn || '').trim()),
     attributes: rec.attributes || {}, image_path: rec.image_path || rec.image_url || '',
     sellingPriceDefault: num(rec.sellingPriceDefault), stockMin: num(rec.stockMin),
     unit: rec.unit || 'piece', notes: rec.notes || '', isActive: true, supplierId: rec.supplierId || '',
