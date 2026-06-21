@@ -163,16 +163,25 @@ export async function flush() {
         }
         await outboxDelete(op.seq);
       } catch (e) {
-        // Skip this op and keep going so ONE bad row never blocks the rest of the
-        // queue (and never blocks pull forever). After several tries, drop it and
-        // record it so the user can be told instead of syncing being stuck.
+        const msg = String(e?.message || e);
+        // A permission / row-level-security failure won't be fixed by retrying the
+        // same row — it needs a cloud-side policy change. Drop it immediately and
+        // QUIETLY (don't count it as a user-facing failure, don't retry 6×). Once the
+        // policy is in place, pull's push-back re-queues the local row and it syncs.
+        if (/row-level security|violates|permission denied|not authorized|RLS/i.test(msg)) {
+          await outboxDelete(op.seq);
+          console.warn('[sync] dropping policy-blocked op (will re-sync once policy is set):', op.table, op.id);
+          continue;
+        }
+        // Otherwise: skip this op and keep going so ONE bad row never blocks the rest
+        // of the queue. After several tries, drop it and record it for the user.
         const tries = await outboxBumpTries(op.seq);
         if (tries >= MAX_OP_TRIES) {
           await outboxDelete(op.seq);
-          failed.push({ table: op.table, id: op.id, error: String(e.message || e) });
-          console.warn(`[sync] dropping op after ${tries} tries:`, op.table, op.id, e.message || e);
+          failed.push({ table: op.table, id: op.id, error: msg });
+          console.warn(`[sync] dropping op after ${tries} tries:`, op.table, op.id, msg);
         } else {
-          console.warn(`[sync] op failed (try ${tries}/${MAX_OP_TRIES}), will retry:`, op.table, e.message || e);
+          console.warn(`[sync] op failed (try ${tries}/${MAX_OP_TRIES}), will retry:`, op.table, msg);
         }
         // continue to next op (do NOT break)
       }
