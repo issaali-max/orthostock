@@ -33,14 +33,17 @@ export default function Customers() {
     const withStats = rows.map((c) => {
       const st = customerStats(invoices, items, c.id);
       const margin = st.revenue > 0 ? (st.profit / st.revenue) * 100 : 0;
-      return { ...c, _st: st, _margin: margin };
+      const lastOrder = (st.invoices || []).reduce((m, i) => ((i.date || '') > m ? (i.date || '') : m), '');
+      return { ...c, _st: st, _margin: margin, _lastOrder: lastOrder };
     });
     const cmp = {
       name: (a, b) => (a.name || '').localeCompare(b.name || '', 'ar'),
-      revenue: (a, b) => b._st.revenue - a._st.revenue,
-      profit: (a, b) => b._st.profit - a._st.profit,
-      margin: (a, b) => b._margin - a._margin,
-      debt: (a, b) => b._st.debt - a._st.debt,
+      debt: (a, b) => b._st.debt - a._st.debt,                       // highest outstanding first
+      revenue: (a, b) => b._st.revenue - a._st.revenue,             // most purchases first
+      profit: (a, b) => b._st.profit - a._st.profit,                // most profit first
+      margin: (a, b) => b._margin - a._margin,                      // highest margin first
+      marginLow: (a, b) => (a._st.revenue ? a._margin : 1e9) - (b._st.revenue ? b._margin : 1e9), // lowest margin first (buyers only)
+      inactive: (a, b) => (a._lastOrder || '').localeCompare(b._lastOrder || ''), // longest since last order first
       city: (a, b) => (a.emirate || '').localeCompare(b.emirate || '') || (a.name || '').localeCompare(b.name || ''),
     }[sortBy] || (() => 0);
     return withStats.sort(cmp);
@@ -76,8 +79,16 @@ export default function Customers() {
             options={[{ value: '', label: t('allCities') }, ...(emirateFilter ? citiesOfEmirate(emirateFilter) : allCities()).map((c) => ({ value: c, label: c }))]} />
         </div>
         <div style={{ flex: '1 1 45%' }}>
-          <Select value={typeFilter} onChange={setTypeFilter} placeholder={t('allTypes')}
-            options={[{ value: '', label: t('allTypes') }, { value: 'doctor', label: t('doctor') }, { value: 'center', label: t('center') }]} />
+          <Select value={sortBy} onChange={setSortBy} placeholder={t('sortBy')}
+            options={[
+              { value: 'name', label: t('sortName') },
+              { value: 'debt', label: t('sortDebt') },
+              { value: 'revenue', label: t('sortRevenue') },
+              { value: 'profit', label: t('sortProfit') },
+              { value: 'margin', label: t('sortMarginHigh') },
+              { value: 'marginLow', label: t('sortMarginLow') },
+              { value: 'inactive', label: t('sortInactive') },
+            ]} />
         </div>
       </div>
 

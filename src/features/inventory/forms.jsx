@@ -42,11 +42,31 @@ export async function saveProduct(app, rec) {
   else await app.createRow(TABLES.products, payload);
   return true;
 }
+// The prefix a category uses for its material codes (e.g. ARW, TUB, BRK). Detected
+// from the codes already in that category so the OLD scheme is reused automatically;
+// falls back to the first letters of the category name, then 'ITM'.
+export function categorySkuPrefix(app, categoryId) {
+  const products = app.data[TABLES.products] || [];
+  const inCat = new Set(products.filter((p) => p.categoryId === categoryId).map((p) => p.id));
+  const counts = {};
+  for (const v of (app.data[TABLES.variants] || [])) {
+    if (v.isActive === false || !inCat.has(v.productId)) continue;
+    const m = /^([A-Za-z]+)/.exec((v.sku || '').trim());
+    if (m) { const pfx = m[1].toUpperCase(); counts[pfx] = (counts[pfx] || 0) + 1; }
+  }
+  const best = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+  if (best) return best[0];
+  const cat = (app.data[TABLES.categories] || []).find((c) => c.id === categoryId);
+  const letters = (cat?.nameEn || '').replace(/[^A-Za-z]/g, '').slice(0, 3).toUpperCase();
+  return letters.length >= 2 ? letters : 'ITM';
+}
+
 // Auto-SKU: the program assigns the code so the user never types one (no typos, no
-// clashes). It fills the LOWEST free number among ACTIVE materials, so deleting a
-// material frees its code for reuse.
+// clashes). Within a prefix it fills the LOWEST free number among ACTIVE materials, so
+// deleting a material frees its code for reuse. Pads to 3 digits to match the existing
+// codes (TUB-001, ARW-001 …).
 export function nextFreeSku(app, prefix = 'ITM') {
-  const re = new RegExp('^' + prefix + '-(\\d+)$');
+  const re = new RegExp('^' + prefix + '-0*(\\d+)', 'i');
   const used = new Set();
   for (const v of (app.data[TABLES.variants] || [])) {
     if (v.isActive === false) continue;
@@ -54,12 +74,10 @@ export function nextFreeSku(app, prefix = 'ITM') {
     if (m) used.add(parseInt(m[1], 10));
   }
   let n = 1; while (used.has(n)) n++;
-  return `${prefix}-${String(n).padStart(5, '0')}`;
+  return `${prefix}-${String(n).padStart(3, '0')}`;
 }
 
 export async function saveVariant(app, rec) {
-  // SKU is assigned automatically (reusing freed codes); existing materials keep theirs.
-  const sku = (rec.id && (rec.sku || '').trim()) ? rec.sku.trim() : nextFreeSku(app);
   // The UI is 2 levels (Category -> Material); the schema keeps a product row in
   // between. Resolve it here: keep the existing product if the category didn't
   // change, otherwise find-or-create a 1:1 product in the chosen category named
@@ -69,6 +87,11 @@ export async function saveVariant(app, rec) {
   const products = app.data[TABLES.products] || [];
   const currentCatId = products.find((p) => p.id === productId)?.categoryId || '';
   const wantCat = rec.categoryId || currentCatId;
+  // SKU is assigned automatically using THIS category's prefix (reusing freed codes);
+  // existing materials keep their code.
+  const sku = (rec.id && (rec.sku || '').trim())
+    ? rec.sku.trim()
+    : nextFreeSku(app, categorySkuPrefix(app, wantCat));
   if (rec.groupId) {
     productId = rec.groupId; // user picked an existing group inside the category
   } else if (rec.groupMode === 'none') {

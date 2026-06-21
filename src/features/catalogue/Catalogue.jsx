@@ -256,7 +256,7 @@ export default function Catalogue() {
                 <StoredImage value={c.image_path || c.image_url} size={96} radius={20} emptyBg={(c.color || C.primary) + '1f'} fontSize={46} fallback={c.icon} />
                 <div style={{ fontWeight: 900, color: C.text, fontSize: 17, lineHeight: 1.3 }}>{c.nameAr || c.nameEn}</div>
                 {c.nameAr && c.nameEn && <div style={{ fontSize: 11.5, color: C.textMuted, marginTop: -4 }}>{c.nameEn}</div>}
-                <Badge tone="info">{products.filter((p) => p.categoryId === c.id).length} {t('products')}</Badge>
+                <Badge tone="info">{variants.filter((v) => catIdByProduct[v.productId] === c.id).length} {t('materials')}</Badge>
               </div>
             ))}
           </div>
