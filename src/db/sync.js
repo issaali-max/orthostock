@@ -124,12 +124,14 @@ export async function flush() {
           const { error } = await supabase.from(op.table).delete().eq('id', op.id);
           if (error) throw error;
         } else {
-          // Resilient upsert: if the cloud is missing a column the app writes
-          // (e.g. a newly-added field whose ALTER TABLE hasn't been run yet), drop
-          // just that column and retry instead of failing the whole row. This keeps
-          // the essential fields syncing — critically, a soft-delete still
-          // propagates via isActive even if its deletedAt column is missing — so
-          // deletions converge across devices and rows never silently diverge.
+          // Resilient upsert: if the cloud is missing a NON-critical column the app
+          // writes, drop just that column and retry instead of failing the whole
+          // row. BUT never strip the soft-delete flags (isActive/deletedAt): if those
+          // columns are missing, stripping them would push a row WITHOUT the deletion
+          // marker, and the next pull would resurrect the "deleted" record. In that
+          // case we let the push fail loudly (the op stays queued, the schema checker
+          // tells the user which column to add) so a delete never silently undoes.
+          const PROTECTED = new Set(['isActive', 'deletedAt']);
           let row = { ...op.row };
           let lastErr = null;
           for (let attempt = 0; attempt < 12; attempt++) {
@@ -137,8 +139,8 @@ export async function flush() {
             if (!error) { lastErr = null; break; }
             lastErr = error;
             const mm = /Could not find the '([^']+)' column/i.exec(error.message || '');
-            if (mm && mm[1] in row) { delete row[mm[1]]; continue; } // strip & retry
-            break; // a different error — stop retrying
+            if (mm && mm[1] in row && !PROTECTED.has(mm[1])) { delete row[mm[1]]; continue; } // strip & retry
+            break; // missing a protected column, or a different error — stop (fail loudly)
           }
           if (lastErr) throw lastErr;
         }
@@ -199,9 +201,11 @@ export async function pull(onData) {
         if (cu > maxSeen) maxSeen = cu;
         const local = localById.get(cloud.id);
         const lu = Number(local?.updatedAt || 0);
-        if (!local || cu >= lu) { toWrite.push(cloud); changed++; }     // cloud wins (or new row → download)
+        if (!local) { toWrite.push(cloud); changed++; }                    // brand-new row → download
+        else if (cu > lu) { toWrite.push(cloud); changed++; }              // cloud strictly newer → cloud wins
         else if (lu > cu && outboxEmpty) { await enqueueMutation({ type: 'update', table, id: local.id, row: local }); pushedBack++; } // local newer → correct cloud
-        // local newer but outbox not empty → keep local, don't re-queue (avoid dup)
+        // equal timestamps (cu === lu) → keep local: this is usually the echo of our
+        // own push; overwriting here is what used to resurrect a just-deleted row.
       }
       if (toWrite.length) await idbBulkPut(table, toWrite);
     } catch { /* table may not exist / timed out; skip and try next */ }
