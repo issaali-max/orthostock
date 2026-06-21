@@ -32,7 +32,10 @@ async function assertUnique(table, rec, ignoreId) {
   const key = UNIQUE[table];
   if (!key || rec[key] === undefined || rec[key] === null || rec[key] === '') return;
   const all = await L.idbGetAll(table);
-  if (all.some((r) => r.id !== ignoreId && r[key] === rec[key])) throw dupError(key, rec[key]);
+  // Ignore soft-deleted rows: a deleted invoice/customer/material must not block
+  // reusing its number/phone/sku. (Document numbers are also generated from the
+  // full set including deleted rows, so a restored record never silently clashes.)
+  if (all.some((r) => r.id !== ignoreId && r.isActive !== false && r[key] === rec[key])) throw dupError(key, rec[key]);
 }
 
 // Seed IndexedDB once, on first run (when settings is empty).

@@ -982,3 +982,11 @@ export async function autoFixDuplicateNumbers(app) {
   if (total) nudgeSync();
   return total;
 }
+
+// Generate the next document number from ALL rows in the table (including voided/
+// soft-deleted ones), so a number that a deleted invoice/purchase still holds is
+// never reused — preventing the "Duplicate number" clash on save.
+export async function nextNumber(table, prefix, field) {
+  const all = await db.getAll(table);
+  return nextDocNumber(all, prefix, field);
+}

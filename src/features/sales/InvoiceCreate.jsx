@@ -4,7 +4,7 @@ import { C, TABLES, emirateOptions, citiesOfEmirate, allCities } from '../../lib
 import { fmtCur, fmtNum, num, round2, safeDiv } from '../../lib/money.js';
 import { todayISO } from '../../lib/dates.js';
 import { nextDocNumber } from '../../lib/ids.js';
-import { saveInvoiceAtomic, invoiceTotals, deleteInvoiceAtomic } from '../../lib/engine.js';
+import { saveInvoiceAtomic, invoiceTotals, deleteInvoiceAtomic, nextNumber } from '../../lib/engine.js';
 import { Btn, Field, Input, Modal, Select } from '../../ui/components.jsx';
 
 const variantLabel = (v) => {
@@ -89,7 +89,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
     if (lines.some((l) => !(num(l.qty) > 0))) { showToast(t('qty') + ' > 0', 'error'); return; }
     setBusy(true);
     try {
-      const number = editing ? editing.invoiceNumber : nextDocNumber(data[TABLES.invoices] || [], 'INV', 'invoiceNumber');
+      const number = editing ? editing.invoiceNumber : await nextNumber(TABLES.invoices, 'INV', 'invoiceNumber');
       const paid = paymentStatus === 'paid' ? totals.total : paymentStatus === 'partial' ? num(paidAmount) : 0;
       const payments = editing?.payments?.length ? editing.payments : (paid > 0 ? [{ date, amount: round2(paid) }] : []);
       await saveInvoiceAtomic(app, {

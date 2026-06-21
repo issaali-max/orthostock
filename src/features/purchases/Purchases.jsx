@@ -4,7 +4,7 @@ import { C, TABLES } from '../../lib/constants.js';
 import { fmtCur, fmtNum, num, round2 } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
 import { nextDocNumber } from '../../lib/ids.js';
-import { commitPurchase, voidPurchase } from '../../lib/engine.js';
+import { commitPurchase, voidPurchase, nextNumber } from '../../lib/engine.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, SearchBar, Select } from '../../ui/components.jsx';
 
 const variantLabel = (v) => {
@@ -84,10 +84,10 @@ export default function Purchases() {
       let number;
       if (editingId) {
         const old = (data[TABLES.purchases] || []).find((x) => x.id === editingId);
-        number = old?.purchaseNumber || nextDocNumber(data[TABLES.purchases] || [], 'PO', 'purchaseNumber');
+        number = old?.purchaseNumber || await nextNumber(TABLES.purchases, 'PO', 'purchaseNumber');
         await voidPurchase(app, editingId); // reverse old stock, then re-apply the edited values
       } else {
-        number = nextDocNumber(data[TABLES.purchases] || [], 'PO', 'purchaseNumber');
+        number = await nextNumber(TABLES.purchases, 'PO', 'purchaseNumber');
       }
       await commitPurchase(app, {
         purchaseNumber: number, supplierId: supplierId || null, date, currency: 'AED', exchangeRate: 1,
