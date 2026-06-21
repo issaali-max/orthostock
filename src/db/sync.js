@@ -50,6 +50,17 @@ export async function authCurrentEmail() {
 
 const isOnline = () => (typeof navigator === 'undefined' ? true : navigator.onLine);
 
+// ── Future-proof cloud shape ────────────────────────────────────────────────
+// Every row is stored with the whole record inside a single jsonb `data` column
+// (id + updatedAt stay as top-level columns for the primary key and incremental
+// pull). Because every field lives inside `data`, ADDING A NEW FIELD NEVER NEEDS
+// AN ALTER TABLE AGAIN — this permanently removes the "missing column breaks sync"
+// class of bug. We still send the flat fields alongside for backward-readability;
+// the resilient upsert drops any flat column the cloud lacks, while `data` always
+// carries the complete record (including the isActive/deletedAt delete markers).
+const toCloud = (row) => ({ ...row, data: row });
+const fromCloud = (c) => (c && c.data && typeof c.data === 'object' ? { ...c.data } : c);
+
 let state = {
   configured: cloudConfigured,
   online: isOnline(),
@@ -82,7 +93,7 @@ export async function pushAllLocal(onProgress) {
     try { rows = await idbGetAll(table); } catch { continue; }
     if (!rows || !rows.length) continue;
     for (let i = 0; i < rows.length; i += 200) {
-      const chunk = rows.slice(i, i + 200);
+      const chunk = rows.slice(i, i + 200).map(toCloud);
       try {
         const { error } = await supabase.from(table).upsert(chunk);
         if (error) errors.push(`${table}: ${error.message}`);
@@ -124,23 +135,19 @@ export async function flush() {
           const { error } = await supabase.from(op.table).delete().eq('id', op.id);
           if (error) throw error;
         } else {
-          // Resilient upsert: if the cloud is missing a NON-critical column the app
-          // writes, drop just that column and retry instead of failing the whole
-          // row. BUT never strip the soft-delete flags (isActive/deletedAt): if those
-          // columns are missing, stripping them would push a row WITHOUT the deletion
-          // marker, and the next pull would resurrect the "deleted" record. In that
-          // case we let the push fail loudly (the op stays queued, the schema checker
-          // tells the user which column to add) so a delete never silently undoes.
-          const PROTECTED = new Set(['isActive', 'deletedAt']);
-          let row = { ...op.row };
+          // Push the row inside the future-proof envelope. The resilient loop drops
+          // any flat column the cloud happens to lack — harmless now, because `data`
+          // carries every field (including isActive/deletedAt), so deletions and new
+          // fields always sync even with zero matching flat columns.
+          let row = toCloud(op.row);
           let lastErr = null;
-          for (let attempt = 0; attempt < 12; attempt++) {
+          for (let attempt = 0; attempt < 14; attempt++) {
             const { error } = await supabase.from(op.table).upsert(row);
             if (!error) { lastErr = null; break; }
             lastErr = error;
             const mm = /Could not find the '([^']+)' column/i.exec(error.message || '');
-            if (mm && mm[1] in row && !PROTECTED.has(mm[1])) { delete row[mm[1]]; continue; } // strip & retry
-            break; // missing a protected column, or a different error — stop (fail loudly)
+            if (mm && mm[1] in row && mm[1] !== 'data') { delete row[mm[1]]; continue; } // strip a missing flat column & retry
+            break; // a different error (or the data column itself is missing) — stop
           }
           if (lastErr) throw lastErr;
         }
@@ -197,12 +204,13 @@ export async function pull(onData) {
       const localById = new Map(localRows.map((r) => [r.id, r]));
       const toWrite = [];
       for (const cloud of data) {
-        const cu = Number(cloud.updatedAt || 0);
+        const rec = fromCloud(cloud);                          // unwrap the envelope (or legacy flat row)
+        const cu = Number(rec.updatedAt || cloud.updatedAt || 0);
         if (cu > maxSeen) maxSeen = cu;
-        const local = localById.get(cloud.id);
+        const local = localById.get(rec.id);
         const lu = Number(local?.updatedAt || 0);
-        if (!local) { toWrite.push(cloud); changed++; }                    // brand-new row → download
-        else if (cu > lu) { toWrite.push(cloud); changed++; }              // cloud strictly newer → cloud wins
+        if (!local) { toWrite.push(rec); changed++; }                    // brand-new row → download
+        else if (cu > lu) { toWrite.push(rec); changed++; }              // cloud strictly newer → cloud wins
         else if (lu > cu && outboxEmpty) { await enqueueMutation({ type: 'update', table, id: local.id, row: local }); pushedBack++; } // local newer → correct cloud
         // equal timestamps (cu === lu) → keep local: this is usually the echo of our
         // own push; overwriting here is what used to resurrect a just-deleted row.
@@ -275,12 +283,9 @@ export function startSync(onPulled) {
   kick();
 }
 
-// Schema check: for each table, take a sample local row and try to upsert it back.
-// If the cloud is missing a column, Supabase returns "Could not find the 'X'
-// column"; we parse the column name out. This catches the silent-sync failures we
-// hit before (updatedAt, image_path, companyAddress/Phone/Trn, trn) and tells the
-// user exactly which ALTER TABLE to run. Read-only-ish: upsert of an existing row
-// by id is idempotent. Returns { ok, missing: [{table, column}], errors }.
+// Schema check: with the jsonb `data` envelope, the ONLY column that matters for
+// future-proofing is `data` itself (plus id + updatedAt, which already exist). This
+// verifies each table has a usable `data` column by upserting a sample envelope.
 export async function checkCloudSchema() {
   if (!supabase) return { ok: false, missing: [], errors: ['cloud_not_configured'] };
   if (!isOnline()) return { ok: false, missing: [], errors: ['offline'] };
@@ -288,22 +293,20 @@ export async function checkCloudSchema() {
   for (const table of Object.values(TABLES)) {
     let rows = [];
     try { rows = await idbGetAll(table); } catch { continue; }
-    if (!rows.length) continue;                       // nothing to test this table with
-    const sample = rows[0];
-    const { error } = await supabase.from(table).upsert(sample);
+    if (!rows.length) continue;
+    const { error } = await supabase.from(table).upsert(toCloud(rows[0]));
     if (error) {
       const m = /Could not find the '([^']+)' column/i.exec(error.message || '');
-      if (m) missing.push({ table, column: m[1] });
+      if (m && m[1] === 'data') missing.push({ table, column: 'data' });
+      else if (m) { /* a legacy flat column is missing — harmless, data carries it */ }
       else errors.push(`${table}: ${error.message}`);
     }
   }
   return { ok: missing.length === 0 && errors.length === 0, missing, errors };
 }
 
-// Build the SQL the user can paste to add every missing column.
+// SQL to add the single future-proof column to any table still missing it.
 export function missingColumnsSql(missing) {
-  return (missing || []).map(({ table, column }) => {
-    const type = column === 'updatedAt' ? 'bigint' : 'text';
-    return `alter table ${table} add column if not exists "${column}" ${type};`;
-  }).join('\n');
+  const tables = [...new Set((missing || []).map((m) => m.table))];
+  return tables.map((t) => `alter table "${t}" add column if not exists "data" jsonb;`).join('\n');
 }
