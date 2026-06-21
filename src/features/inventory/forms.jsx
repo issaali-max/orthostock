@@ -241,21 +241,26 @@ export function VariantForm({ rec, setRec, t, products, categories, variants = [
         const mode = rec.groupMode || ((rec.groupId || rec.productId) ? 'existing' : 'none');
         const pickMode = (m) => {
           if (m === 'existing') setRec((r) => ({ ...r, groupMode: 'existing', groupName: '', groupId: r.groupId || r.productId || (groupsInCat[0]?.id || '') }));
+          else if (m === 'new') setRec((r) => ({ ...r, groupMode: 'new', groupId: '', groupName: r.groupName || '' }));
           else setRec((r) => ({ ...r, groupMode: 'none', groupId: '', groupName: '' }));
         };
         const tab = (m, label) => (
-          <button type="button" onClick={() => pickMode(m)} style={{ flex: 1, padding: '9px 6px', borderRadius: 10, border: `1.5px solid ${mode === m ? C.primary : C.border}`, background: mode === m ? C.primary : '#fff', color: mode === m ? '#fff' : C.textMid, fontSize: 12.5, fontWeight: 800, cursor: 'pointer' }}>{label}</button>
+          <button type="button" onClick={() => pickMode(m)} style={{ flex: 1, padding: '9px 4px', borderRadius: 10, border: `1.5px solid ${mode === m ? C.primary : C.border}`, background: mode === m ? C.primary : '#fff', color: mode === m ? '#fff' : C.textMid, fontSize: 11.5, fontWeight: 800, cursor: 'pointer' }}>{label}</button>
         );
         return (
           <Field label={t('group')}>
             <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
               {tab('existing', `🗂️ ${t('existingGroup')}`)}
+              {tab('new', `➕ ${t('newGroup')}`)}
               {tab('none', `▫️ ${t('standalone')}`)}
             </div>
             {mode === 'existing' && (groupsInCat.length > 0
               ? <Select value={rec.groupId ?? rec.productId ?? ''} onChange={(v) => set('groupId', v)} placeholder="—"
                   options={groupsInCat.map((p) => ({ value: p.id, label: p.nameEn }))} />
               : <div style={{ fontSize: 12, color: C.textMuted, padding: '8px 0' }}>{t('noGroupsYet')}</div>)}
+            {mode === 'new' && (
+              <Input value={rec.groupName || ''} onChange={(v) => set('groupName', v)} placeholder={t('newGroupName')} />
+            )}
             {mode === 'none' && <div style={{ fontSize: 12, color: C.textMuted, padding: '8px 0' }}>{t('standaloneHint')}</div>}
           </Field>
         );

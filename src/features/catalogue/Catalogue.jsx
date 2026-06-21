@@ -156,7 +156,7 @@ export default function Catalogue() {
           style={{ display: 'flex', alignItems: 'center', gap: 12, background: '#fff', border: `1px solid ${C.border}`, borderRadius: RADIUS, boxShadow: SHADOW, padding: '12px 14px', cursor: editMode ? 'pointer' : 'default' }}>
           <StoredImage value={pimg} size={52} radius={12} emptyBg={C.primary + '12'} fontSize={24} fallback={prod?.icon || '📦'} />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontWeight: 700, color: C.text, fontSize: 15 }}>{prettyName(v.nameEn) || v.sku}</div>
+            <div style={{ fontWeight: 700, color: C.text, fontSize: 15 }}>{v.nameEn || v.sku}</div>
             {attrs.length > 0 && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, margin: '4px 0 2px' }}>
                 {attrs.map(([k, val]) => <span key={k} style={{ fontSize: 10, fontWeight: 700, color: C.primaryMid, background: C.primary + '12', borderRadius: 6, padding: '2px 7px' }}>{val}</span>)}
@@ -390,7 +390,7 @@ export default function Catalogue() {
                       <div key={v.id} onClick={editMode ? () => editVariant(v) : undefined}
                         style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', borderTop: (i || img) ? `1px solid ${C.surfaceAlt}` : 'none', cursor: editMode ? 'pointer' : 'default' }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontWeight: 700, color: C.text, fontSize: 14 }}>{editMode && '✎ '}{prettyName(v.nameEn) || variantLabel(v)}</div>
+                          <div style={{ fontWeight: 700, color: C.text, fontSize: 14 }}>{editMode && '✎ '}{v.nameEn || variantLabel(v)}</div>
                           {attrs.length > 0 && (
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, margin: '5px 0 2px' }}>
                               {attrs.map(([k, val]) => (
