@@ -104,7 +104,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
       });
       showToast(`${number} ✓`, 'success');
       onClose();
-    } catch (e) { console.error(e); showToast('Error', 'error'); }
+    } catch (e) { console.error(e); showToast(e?.message ? `⚠ ${String(e.message).slice(0, 140)}` : 'Error', 'error'); }
     finally { setBusy(false); }
   };
 

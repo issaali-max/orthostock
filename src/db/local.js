@@ -13,23 +13,40 @@ const DB_VERSION = 4; // bump whenever TABLES gains a store, so onupgradeneeded 
 const STORES = [...Object.values(TABLES), 'outbox', 'meta'];
 
 let _open;
-function openDB() {
-  if (_open) return _open;
-  _open = new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      STORES.forEach((s) => {
-        if (!db.objectStoreNames.contains(s)) {
-          if (s === 'outbox') db.createObjectStore(s, { keyPath: 'seq', autoIncrement: true });
-          else if (s === 'meta') db.createObjectStore(s, { keyPath: 'key' });
-          else db.createObjectStore(s, { keyPath: 'id' });
-        }
-      });
-    };
+function createMissingStores(db) {
+  STORES.forEach((s) => {
+    if (!db.objectStoreNames.contains(s)) {
+      if (s === 'outbox') db.createObjectStore(s, { keyPath: 'seq', autoIncrement: true });
+      else if (s === 'meta') db.createObjectStore(s, { keyPath: 'key' });
+      else db.createObjectStore(s, { keyPath: 'id' });
+    }
+  });
+}
+
+function openAt(version) {
+  return new Promise((resolve, reject) => {
+    let req;
+    try { req = version ? indexedDB.open(DB_NAME, version) : indexedDB.open(DB_NAME); }
+    catch (e) { return reject(e); }
+    req.onupgradeneeded = () => createMissingStores(req.result);
+    req.onblocked = () => reject(new Error('DB upgrade blocked — close other open tabs of the app and reload'));
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
+}
+
+function openDB() {
+  if (_open) return _open;
+  // Self-healing: open at the target version, and if any required store is STILL
+  // missing afterwards (e.g. a store was added but a previous upgrade was skipped),
+  // reopen at the next version to force onupgradeneeded to create it. This makes
+  // "object store not found" errors impossible after adding new tables.
+  _open = openAt(DB_VERSION).then((db) => {
+    const missing = STORES.filter((s) => !db.objectStoreNames.contains(s));
+    if (!missing.length) return db;
+    const nextV = db.version + 1; db.close();
+    return openAt(nextV);
+  }).catch((e) => { _open = null; throw e; });
   return _open;
 }
 
