@@ -219,6 +219,26 @@ export async function pull(onData) {
 let started = false;
 let _onData = null;
 let _nudgeTimer = null;
+let _realtimeChannel = null;
+let _rtTimer = null;
+
+// Realtime: subscribe to every change in the cloud and pull it down within a moment,
+// so another device's add/edit/delete appears here almost instantly — no manual sync
+// and no waiting for the periodic interval. Polling stays as a fallback if Realtime
+// isn't enabled for the tables. Own-writes echo back harmlessly (the merge keeps the
+// newer/equal local row).
+function startRealtime() {
+  if (!supabase || _realtimeChannel) return;
+  try {
+    _realtimeChannel = supabase
+      .channel('orthostock-sync')
+      .on('postgres_changes', { event: '*', schema: 'public' }, () => {
+        clearTimeout(_rtTimer);
+        _rtTimer = setTimeout(() => { if (isOnline()) pull(_onData); }, 250);
+      })
+      .subscribe();
+  } catch (e) { console.warn('[realtime] unavailable, relying on polling', e); }
+}
 
 // Full sync = push local up, then pull remote down (and refresh UI on change).
 async function cycle() {
@@ -232,7 +252,7 @@ async function cycle() {
 export function nudgeSync() {
   if (!started || !isOnline()) return;
   clearTimeout(_nudgeTimer);
-  _nudgeTimer = setTimeout(() => { cycle(); }, 1200);
+  _nudgeTimer = setTimeout(() => { cycle(); }, 500);
 }
 
 export function syncNow() { return cycle(); } // manual trigger (Sync now button)
@@ -249,7 +269,8 @@ export function startSync(onPulled) {
   // makes another device's changes appear "instantly" when you open/return to it.
   window.addEventListener('focus', kick);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) kick(); });
-  setInterval(kick, SYNC_INTERVAL_MS); // periodic flush+pull
+  setInterval(kick, SYNC_INTERVAL_MS); // periodic flush+pull (fallback safety net)
+  startRealtime();                     // instant cross-device propagation
   refreshPending();
   kick();
 }

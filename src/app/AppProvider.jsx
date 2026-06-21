@@ -64,7 +64,10 @@ export function AppProvider({ children }) {
   }, []);
 
   const refresh = useCallback(async (table) => {
-    const rows = await db.getAll(table);
+    let rows = await db.getAll(table);
+    // Apply the SAME soft-delete filter loadAll uses, so a per-table refresh after a
+    // void never briefly flashes the deleted (or all) rows before the next full load.
+    if (table === TABLES.invoices || table === TABLES.purchases) rows = rows.filter((r) => r.isActive !== false);
     setData((d) => ({ ...d, [table]: rows }));
     return rows;
   }, []);
