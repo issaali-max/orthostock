@@ -50,15 +50,11 @@ export async function authCurrentEmail() {
 
 const isOnline = () => (typeof navigator === 'undefined' ? true : navigator.onLine);
 
-// ── Future-proof cloud shape ────────────────────────────────────────────────
-// Every row is stored with the whole record inside a single jsonb `data` column
-// (id + updatedAt stay as top-level columns for the primary key and incremental
-// pull). Because every field lives inside `data`, ADDING A NEW FIELD NEVER NEEDS
-// AN ALTER TABLE AGAIN — this permanently removes the "missing column breaks sync"
-// class of bug. We still send the flat fields alongside for backward-readability;
-// the resilient upsert drops any flat column the cloud lacks, while `data` always
-// carries the complete record (including the isActive/deletedAt delete markers).
-const toCloud = (row) => ({ ...row, data: row });
+// Send ONLY the three columns that always exist: id (PK), updatedAt (for the
+// incremental pull filter), and data (the whole row as jsonb). Nothing else is sent,
+// so the cloud can never complain about a missing flat column again — every field,
+// new or old (supplierId, isActive, deletedAt, …), travels inside `data`.
+const toCloud = (row) => ({ id: row.id, updatedAt: row.updatedAt, data: row });
 const fromCloud = (c) => (c && c.data && typeof c.data === 'object' ? { ...c.data } : c);
 
 let state = {
