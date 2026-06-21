@@ -4,7 +4,7 @@ import { C, TABLES } from '../../lib/constants.js';
 import { fmtCur, fmtNum, num, round2 } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
 import { nextDocNumber } from '../../lib/ids.js';
-import { commitPurchase } from '../../lib/engine.js';
+import { commitPurchase, voidPurchase } from '../../lib/engine.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, SearchBar, Select } from '../../ui/components.jsx';
 
 const variantLabel = (v) => {
@@ -18,6 +18,7 @@ export default function Purchases() {
   const { t, data, displayCurrency, usdRate, showToast } = app;
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const [busy, setBusy] = useState(false);
   const [supplierId, setSupplierId] = useState('');
   const [date, setDate] = useState(todayISO());
@@ -46,7 +47,23 @@ export default function Purchases() {
     setProdId(''); setPq('');
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const startNew = () => { setSupplierId(''); setDate(todayISO()); setLines([]); setPaid(''); setOpen(true); };
+  const startNew = () => { setEditingId(null); setSupplierId(''); setDate(todayISO()); setLines([]); setPaid(''); setOpen(true); };
+
+  const openEdit = (po) => {
+    const its = (data[TABLES.purchaseItems] || []).filter((x) => x.purchaseId === po.id && x.isActive !== false);
+    setEditingId(po.id);
+    setSupplierId(po.supplierId || '');
+    setDate(po.date || todayISO());
+    setPaid(num(po.paidAmount) >= num(po.totalAED) ? '' : String(num(po.paidAmount)));
+    setLines(its.map((it) => ({ variantId: it.variantId, qty: num(it.qty), unitCost: num(it.unitCost) })));
+    setOpen(true);
+  };
+
+  const removePurchase = async (po) => {
+    if (!window.confirm(`${t('deletePurchaseConfirm')}\n${po.purchaseNumber}`)) return;
+    try { await voidPurchase(app, po.id); showToast(t('deleted'), 'success'); }
+    catch (e) { console.warn(e); showToast('—', 'error'); }
+  };
   const total = round2(lines.reduce((s, l) => s + num(l.qty) * num(l.unitCost), 0));
 
   // Same picker model as invoicing: category -> product -> variant (toggle into cart)
@@ -64,13 +81,20 @@ export default function Purchases() {
     if (valid.length === 0) return;
     setBusy(true);
     try {
-      const number = nextDocNumber(data[TABLES.purchases] || [], 'PO', 'purchaseNumber');
+      let number;
+      if (editingId) {
+        const old = (data[TABLES.purchases] || []).find((x) => x.id === editingId);
+        number = old?.purchaseNumber || nextDocNumber(data[TABLES.purchases] || [], 'PO', 'purchaseNumber');
+        await voidPurchase(app, editingId); // reverse old stock, then re-apply the edited values
+      } else {
+        number = nextDocNumber(data[TABLES.purchases] || [], 'PO', 'purchaseNumber');
+      }
       await commitPurchase(app, {
         purchaseNumber: number, supplierId: supplierId || null, date, currency: 'AED', exchangeRate: 1,
         totalOriginal: total, totalAED: total, paidAmount: paid === '' ? total : num(paid), invoiceRef: '', notes: '',
       }, valid.map((l) => ({ variantId: l.variantId, qty: num(l.qty), unitCost: num(l.unitCost) })));
       showToast(`${number} ✓`, 'success');
-      setOpen(false);
+      setOpen(false); setEditingId(null);
     } finally { setBusy(false); }
   };
 
@@ -89,12 +113,14 @@ export default function Purchases() {
                 <div style={{ fontSize: 11, color: C.textMuted }}>{supName(p.supplierId)} · {fmtDate(p.date)}</div>
               </div>
               <div style={{ fontWeight: 800, color: C.primary }}>{fmtCur(p.totalAED, displayCurrency, usdRate)}</div>
+              <button onClick={() => openEdit(p)} title={t('edit')} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 17, width: 28 }}>✏️</button>
+              <button onClick={() => removePurchase(p)} title={t('delete')} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 17, width: 28, color: C.danger }}>🗑</button>
             </Card>
           ))}
         </div>
       )}
 
-      <Modal open={open} onClose={() => setOpen(false)} title={t('newPurchase')} width={520}
+      <Modal open={open} onClose={() => setOpen(false)} title={editingId ? t('editPurchase') : t('newPurchase')} width={520}
         footer={<><Btn variant="ghost" onClick={() => setOpen(false)}>{t('cancel')}</Btn><Btn onClick={save} disabled={busy || lines.length === 0}>{t('save')}</Btn></>}>
         <div style={{ position: 'sticky', top: -1, zIndex: 5, background: '#fff', paddingBottom: 8, marginBottom: 4, borderBottom: `1px solid ${C.surfaceAlt}` }}>
           <Field label={t('supplier')}>

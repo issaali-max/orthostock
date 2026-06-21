@@ -77,6 +77,8 @@ export function AppProvider({ children }) {
       CORE_TABLES.forEach((tbl, i) => { fresh[tbl] = results[i].status === 'fulfilled' ? results[i].value : []; });
       // Voided invoices live only in the recycle bin — hide them everywhere else.
       if (Array.isArray(fresh[TABLES.invoices])) fresh[TABLES.invoices] = fresh[TABLES.invoices].filter((i) => i.isActive !== false);
+      // Voided purchases are hidden too (stock already reversed when voided).
+      if (Array.isArray(fresh[TABLES.purchases])) fresh[TABLES.purchases] = fresh[TABLES.purchases].filter((p) => p.isActive !== false);
       // PERF: keep the SAME array reference for tables that didn't actually change
       // (cheap signature = row count + newest updatedAt). This lets per-table
       // useMemos skip recomputing on every sync, and returns the same `data` object

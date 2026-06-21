@@ -862,3 +862,28 @@ export async function applyStockTake(app, counts) {
   }
   return adjusted;
 }
+
+// Delete (void) a purchase: reverse the stock it added, mark its movements
+// inactive (ledger stays consistent with reconcile), and flag the purchase + its
+// items isActive=false. Hidden everywhere via loadAll's filter; recoverable in the
+// DB. Cost averages are left as-is (approximate; the next purchase refreshes them).
+export async function voidPurchase(app, purchaseId) {
+  const [variants, allItems, allMoves] = await Promise.all([
+    db.getAll(TABLES.variants), db.getAll(TABLES.purchaseItems), db.getAll(TABLES.stockMovements),
+  ]);
+  const vById = new Map(variants.map((v) => [v.id, v]));
+  const items = allItems.filter((x) => x.purchaseId === purchaseId);
+  const moves = allMoves.filter((x) => x.refType === 'purchase' && x.refId === purchaseId && x.isActive !== false);
+  const stock = new Map();
+  const ensure = (id) => { if (!stock.has(id)) stock.set(id, num(vById.get(id)?.stockQty)); return stock.get(id); };
+  const specs = [];
+  for (const it of items) if (vById.has(it.variantId)) stock.set(it.variantId, round2(ensure(it.variantId) - num(it.qty))); // remove what was added
+  for (const m of moves) specs.push({ op: 'update', table: TABLES.stockMovements, id: m.id, patch: { isActive: false } });
+  for (const it of items) specs.push({ op: 'update', table: TABLES.purchaseItems, id: it.id, patch: { isActive: false } });
+  for (const [vid, finalQty] of stock) specs.push({ op: 'update', table: TABLES.variants, id: vid, patch: { stockQty: round2(finalQty) } });
+  specs.push({ op: 'update', table: TABLES.purchases, id: purchaseId, patch: { isActive: false, deletedAt: Date.now() } });
+  await db.atomicMutations(specs);
+  await Promise.all([app.refresh(TABLES.purchases), app.refresh(TABLES.purchaseItems), app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements)]);
+  nudgeSync();
+  return true;
+}
