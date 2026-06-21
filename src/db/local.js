@@ -9,7 +9,7 @@
 import { TABLES } from '../lib/constants.js';
 
 const DB_NAME = 'orthostock';
-const DB_VERSION = 3; // bump whenever TABLES gains a store, so onupgradeneeded recreates missing stores
+const DB_VERSION = 4; // bump whenever TABLES gains a store, so onupgradeneeded recreates missing stores (v4: auditLog, supplierPayments)
 const STORES = [...Object.values(TABLES), 'outbox', 'meta'];
 
 let _open;
