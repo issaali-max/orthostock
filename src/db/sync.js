@@ -57,6 +57,13 @@ const isOnline = () => (typeof navigator === 'undefined' ? true : navigator.onLi
 const toCloud = (row) => ({ id: row.id, updatedAt: row.updatedAt, data: row });
 const fromCloud = (c) => (c && c.data && typeof c.data === 'object' ? { ...c.data } : c);
 
+// Local-only tables are never pushed to or pulled from the cloud. The audit log and
+// supplier-payment ledger are device-local conveniences; keeping them out of sync
+// avoids needing extra cloud tables/policies and keeps the queue clean. (Supplier
+// BALANCES are still correct everywhere because they derive from purchases, which do
+// sync; only the separate later-payment records stay local.)
+const LOCAL_ONLY = new Set([TABLES.auditLog, TABLES.supplierPayments]);
+
 let state = {
   configured: cloudConfigured,
   online: isOnline(),
@@ -85,6 +92,7 @@ export async function pushAllLocal(onProgress) {
   if (!isOnline()) return { ok: false, error: 'offline', pushed: 0, errors: ['offline'] };
   let pushed = 0; const errors = [];
   for (const table of Object.values(TABLES)) {
+    if (LOCAL_ONLY.has(table)) continue; // never upload local-only tables
     let rows = [];
     try { rows = await idbGetAll(table); } catch { continue; }
     if (!rows || !rows.length) continue;
@@ -110,6 +118,7 @@ export async function wipeCloud() {
   if (!isOnline()) return { ok: false, error: 'offline' };
   const errors = [];
   for (const table of Object.values(TABLES)) {
+    if (LOCAL_ONLY.has(table)) continue; // nothing to wipe for local-only tables
     try {
       // delete all rows (id is never null, so this matches everything)
       const { error } = await supabase.from(table).delete().not('id', 'is', null);
@@ -126,6 +135,9 @@ export async function flush() {
     const ops = (await outboxAll()).sort((a, b) => a.seq - b.seq);
     const failed = [];
     for (const op of ops) {
+      // Local-only tables never go to the cloud — drop their queued ops silently so
+      // they don't error or clog the queue.
+      if (LOCAL_ONLY.has(op.table)) { await outboxDelete(op.seq); continue; }
       try {
         if (op.type === 'remove') {
           const { error } = await supabase.from(op.table).delete().eq('id', op.id);
@@ -191,6 +203,7 @@ export async function pull(onData) {
   const since = wm > 0 ? wm - SKEW_BUFFER_MS : 0;
   let maxSeen = wm, changed = 0, pushedBack = 0;
   for (const table of Object.values(TABLES)) {
+    if (LOCAL_ONLY.has(table)) continue; // local-only tables are never pulled
     try {
       let q = supabase.from(table).select('*');
       if (since > 0) q = q.gt('updatedAt', since);
@@ -287,6 +300,7 @@ export async function checkCloudSchema() {
   if (!isOnline()) return { ok: false, missing: [], errors: ['offline'] };
   const missing = []; const errors = [];
   for (const table of Object.values(TABLES)) {
+    if (LOCAL_ONLY.has(table)) continue; // local-only tables aren't in the cloud
     let rows = [];
     try { rows = await idbGetAll(table); } catch { continue; }
     if (!rows.length) continue;
