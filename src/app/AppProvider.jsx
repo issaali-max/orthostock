@@ -121,7 +121,9 @@ export function AppProvider({ children }) {
       try { const m = await import('../lib/engine.js'); await m.capitalizeExistingNames({ data, refresh }); updateSettings({ namesTitleCased: true }); }
       catch { /* ignore */ }
     })();
-  }, [loading, data, settings, refresh, updateSettings]);
+    // updateSettings/refresh are defined later in this component; referencing them in
+    // the deps array would hit the temporal dead zone and crash render (white screen).
+  }, [loading, data, settings]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Start offline<->cloud sync once; re-pull refreshes the UI caches.
   const lastDupFix = useRef(0);

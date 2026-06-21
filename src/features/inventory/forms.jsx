@@ -275,7 +275,7 @@ export function VariantForm({ rec, setRec, t, products, categories, variants = [
       {catId && (() => {
         const vCount = (pid) => (variants || []).filter((v) => v.productId === pid && v.isActive !== false).length;
         const groupsInCat = products.filter((p) => p.categoryId === catId && p.isActive !== false
-            && (p.isGroup === true || vCount(p.id) > 1))   // real groups only, not standalone materials
+            && !(p.isGroup === false && vCount(p.id) === 1))   // show every group; hide only true 1:1 standalone materials
           .slice().sort((a, b) => (a.nameEn || '').localeCompare(b.nameEn || ''));
         // current mode: existing group selected / typing a new group / standalone material
         const mode = rec.groupMode || ((rec.groupId || rec.productId) ? 'existing' : 'none');
