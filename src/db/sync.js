@@ -62,7 +62,9 @@ const fromCloud = (c) => (c && c.data && typeof c.data === 'object' ? { ...c.dat
 // avoids needing extra cloud tables/policies and keeps the queue clean. (Supplier
 // BALANCES are still correct everywhere because they derive from purchases, which do
 // sync; only the separate later-payment records stay local.)
-const LOCAL_ONLY = new Set([TABLES.auditLog, TABLES.supplierPayments]);
+// Tables that never sync to the cloud. Empty now — audit log and supplier payments
+// DO sync across devices (they need a permissive RLS policy in the cloud; see setup).
+const LOCAL_ONLY = new Set([]);
 
 let state = {
   configured: cloudConfigured,
