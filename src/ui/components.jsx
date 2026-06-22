@@ -133,7 +133,7 @@ export function SearchBar({ value, onChange, placeholder }) {
 }
 
 // ── Modal ──
-export function Modal({ open, onClose, title, children, footer, width = 460 }) {
+export function Modal({ open, onClose, title, children, footer, width = 460, dismissable = false }) {
   // Lock the BODY scroll while open so swiping scrolls only the modal content.
   useEffect(() => {
     if (!open) return;
@@ -144,8 +144,9 @@ export function Modal({ open, onClose, title, children, footer, width = 460 }) {
   if (!open) return null;
   return (
     <div
-      // Clicking the grey overlay does NOT close the modal (prevents losing
-      // unsaved input). Close only via the X or Cancel/Save buttons.
+      // `dismissable` modals (read-only views) close when the grey overlay itself is
+      // tapped; input modals leave it off so unsaved typing isn't lost.
+      onClick={dismissable ? (e) => { if (e.target === e.currentTarget) onClose(); } : undefined}
       style={{
         position: 'fixed', inset: 0, background: 'rgba(14,29,46,0.45)', zIndex: 1000,
         display: 'flex', alignItems: 'flex-end', justifyContent: 'center', padding: 0,
@@ -156,6 +157,9 @@ export function Modal({ open, onClose, title, children, footer, width = 460 }) {
         className="modal-sheet"
         style={{
           background: '#fff', borderRadius: '18px 18px 0 0', width: '100%', maxWidth: width,
+          // Never exceed the viewport, so the header (with the × button) is always
+          // reachable and the body scrolls instead of pushing the top off-screen.
+          maxHeight: '88vh',
           display: 'flex', flexDirection: 'column', boxShadow: '0 -8px 30px rgba(0,0,0,0.2)',
         }}
       >
@@ -166,7 +170,7 @@ export function Modal({ open, onClose, title, children, footer, width = 460 }) {
           <strong style={{ fontSize: 15, color: C.text }}>{title}</strong>
           <button onClick={onClose} style={{ border: 'none', background: 'none', fontSize: 20, cursor: 'pointer', color: C.textMuted }}>×</button>
         </div>
-        <div className="modal-body" style={{ paddingTop: 16, paddingInline: 16, overflowY: 'auto', flex: 1, minHeight: 0, WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain' }}>{children}</div>
+        <div className="modal-body" style={{ paddingTop: 16, paddingInline: 16, paddingBottom: 16, overflowY: 'auto', flex: 1, minHeight: 0, WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain' }}>{children}</div>
         {footer && (
           <div style={{ padding: '12px 16px', paddingBottom: 'calc(12px + env(safe-area-inset-bottom))', borderTop: `1px solid ${C.border}`, display: 'flex', gap: 8, justifyContent: 'flex-end', flexShrink: 0 }}>
             {footer}

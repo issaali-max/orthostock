@@ -128,7 +128,7 @@ export default function FinancialPanel({ app }) {
 function CashModal({ open, onClose, fin, t }) {
   const rows = [['AED', fin.cash.AED], ['USD', fin.cash.USD]].filter(([, b]) => Math.abs(b.balance) > 0.005 || b.in > 0.005 || b.out > 0.005);
   return (
-    <Modal open={open} onClose={onClose} title={`💵 ${t('cashBalance')}`}>
+    <Modal open={open} onClose={onClose} dismissable title={`💵 ${t('cashBalance')}`}>
       {rows.length === 0 ? <EmptyState icon="💵" text={t('noData')} /> : (
         <div style={{ display: 'grid', gap: 10 }}>
           {rows.map(([code, b]) => (
@@ -160,7 +160,7 @@ function InventoryModal({ open, onClose, data, t, cur }) {
     .sort((a, b) => b.value - a.value);
   const total = items.reduce((a, v) => a + v.value, 0);
   return (
-    <Modal open={open} onClose={onClose} title={`📦 ${t('inventoryValue')}`}>
+    <Modal open={open} onClose={onClose} dismissable title={`📦 ${t('inventoryValue')}`}>
       {items.length === 0 ? <EmptyState icon="📦" text={t('noData')} /> : (
         <div style={{ display: 'grid', gap: 7 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '4px 2px 8px' }}>
@@ -185,7 +185,7 @@ function InventoryModal({ open, onClose, data, t, cur }) {
 // ── Doctor receivables: list of doctors who owe money ──
 function ReceivablesModal({ open, onClose, recv, onPick, t }) {
   return (
-    <Modal open={open} onClose={onClose} title={`🏥 ${t('doctorDebts')}`}>
+    <Modal open={open} onClose={onClose} dismissable title={`🏥 ${t('doctorDebts')}`}>
       {recv.byCustomer.length === 0 ? <EmptyState icon="✅" text={t('noDebts')} /> : (
         <div style={{ display: 'grid', gap: 7 }}>
           {recv.byCustomer.map((d) => (
@@ -216,7 +216,7 @@ function DoctorModal({ open, onClose, customerId, data, t }) {
     .filter((inv) => inv.customerId === customerId && inv.isActive !== false && inv.status !== 'returned' && (num(inv.total) - num(inv.paidAmount)) > 0.005)
     .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   return (
-    <Modal open={open} onClose={onClose} title={customer ? `🧑‍⚕️ ${customer.name}` : ''}>
+    <Modal open={open} onClose={onClose} dismissable title={customer ? `🧑‍⚕️ ${customer.name}` : ''}>
       {unpaid.length === 0 ? <EmptyState icon="✅" text={t('noDebts')} /> : (
         <div style={{ display: 'grid', gap: 7 }}>
           {unpaid.map((inv) => {
@@ -245,7 +245,7 @@ function DoctorModal({ open, onClose, customerId, data, t }) {
 function InvestmentsModal({ open, onClose, positions, t }) {
   const held = (positions || []).filter((p) => p.qty > 0).sort((a, b) => b.marketValue - a.marketValue);
   return (
-    <Modal open={open} onClose={onClose} title={`📈 ${t('investments')}`}>
+    <Modal open={open} onClose={onClose} dismissable title={`📈 ${t('investments')}`}>
       {held.length === 0 ? <EmptyState icon="📈" text={t('noData')} /> : (
         <div style={{ display: 'grid', gap: 7 }}>
           {held.map((p) => {
@@ -276,7 +276,7 @@ function PersonalModal({ open, onClose, people, t }) {
     return { ...p, bal };
   }).filter((p) => Math.abs(p.bal) > 0.005).sort((a, b) => Math.abs(b.bal) - Math.abs(a.bal));
   return (
-    <Modal open={open} onClose={onClose} title={`🤝 ${t('personalDebts')}`}>
+    <Modal open={open} onClose={onClose} dismissable title={`🤝 ${t('personalDebts')}`}>
       {rows.length === 0 ? <EmptyState icon="🤝" text={t('noData')} /> : (
         <div style={{ display: 'grid', gap: 7 }}>
           {rows.map((p) => {
