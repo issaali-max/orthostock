@@ -88,9 +88,9 @@ export default function Catalogue() {
     const fn = edit.table === TABLES.categories ? saveCategory : edit.table === TABLES.products ? saveProduct : saveVariant;
     const isVariant = edit.table === TABLES.variants && edit.rec.id;
     const before = isVariant ? num((variants.find((v) => v.id === edit.rec.id) || {}).stockQty) : null;
-    // friendly validation so saving never fails silently
+    // friendly validation so saving never fails silently. SKU is auto-generated in
+    // saveVariant (per-category prefix), so we do NOT require the user to enter one.
     if (edit.table === TABLES.variants) {
-      if (!edit.rec.sku?.trim()) return app.showToast(t('skuRequired'), 'error');
       if (!edit.rec.categoryId && !edit.rec.productId) return app.showToast(t('categoryRequired'), 'error');
     }
     if (edit.table === TABLES.products && !edit.rec.nameEn?.trim()) return app.showToast(t('nameRequired'), 'error');
