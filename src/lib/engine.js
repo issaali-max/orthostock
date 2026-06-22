@@ -1135,6 +1135,11 @@ export function financialPosition(app, today = todayISO()) {
     if (net > 0) addCur(owedToMe, cur, net); else if (net < 0) addCur(iOwe, cur, -net);
   }
 
+  // Supplier debt = unpaid purchases (a LIABILITY, in AED). Not in cash yet (cash only
+  // reflects what was actually paid), so it must reduce net worth, not double-count.
+  const appLike = app.data ? app : { data: app };
+  const supplierOwed = supplierDebt(appLike).reduce((s, r) => s + Math.max(0, num(r.balance)), 0);
+
   // Expenses split business/personal, per currency.
   const data = app.data || app;
   const groups = data[TABLES.expenseGroups] || [];
@@ -1147,7 +1152,7 @@ export function financialPosition(app, today = todayISO()) {
 
   return {
     cash, receivables: recv, investments: inv, inventoryValue: stockVal,
-    owedToMe, iOwe, expBusiness, expPersonal,
+    owedToMe, iOwe, supplierOwed, expBusiness, expPersonal,
   };
 }
 

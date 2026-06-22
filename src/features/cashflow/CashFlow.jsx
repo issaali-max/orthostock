@@ -75,12 +75,13 @@ export default function CashFlow() {
         {fin.receivables.byCustomer.length === 0 && <Empty t={t} />}
       </Section>
 
-      {/* ── Personal debts ── */}
-      {(num(fin.owedToMe.AED) || num(fin.owedToMe.USD) || num(fin.iOwe.AED) || num(fin.iOwe.USD)) ? (
+      {/* ── Personal & supplier debts (assets vs liabilities) ── */}
+      {(num(fin.owedToMe.AED) || num(fin.owedToMe.USD) || num(fin.iOwe.AED) || num(fin.iOwe.USD) || num(fin.supplierOwed)) ? (
         <Card style={{ marginTop: 14 }}>
-          <div style={{ fontSize: 13, fontWeight: 800, color: C.text, marginBottom: 10 }}>🤝 {t('personalDebts')}</div>
-          <Row label={t('owedToMe')} aed={fin.owedToMe.AED} usd={fin.owedToMe.USD} />
-          <Row label={t('iOwe')} aed={fin.iOwe.AED} usd={fin.iOwe.USD} danger />
+          <div style={{ fontSize: 13, fontWeight: 800, color: C.text, marginBottom: 10 }}>🤝 {t('debtsToMe')} / {t('debtsIOwe')}</div>
+          <Row label={`＋ ${t('debtsToMe')}`} aed={fin.owedToMe.AED} usd={fin.owedToMe.USD} />
+          <Row label={`− ${t('iOwe')}`} aed={fin.iOwe.AED} usd={fin.iOwe.USD} danger />
+          {num(fin.supplierOwed) > 0 && <Row label={`− ${t('supplierDebts')}`} aed={fin.supplierOwed} usd={0} danger />}
         </Card>
       ) : null}
 
