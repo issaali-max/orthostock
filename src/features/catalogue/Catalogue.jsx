@@ -37,9 +37,9 @@ export default function Catalogue() {
   const [flatBrand, setFlatBrand] = useState('');
   const [flatCat, setFlatCat] = useState(null);
 
-  const categories = (data[TABLES.categories] || []).filter((c) => c.isActive !== false);
-  const products = (data[TABLES.products] || []).filter((p) => p.isActive !== false);
-  const variants = (data[TABLES.variants] || []).filter((v) => v.isActive !== false);
+  const categories = useMemo(() => (data[TABLES.categories] || []).filter((c) => c.isActive !== false), [data[TABLES.categories]]);
+  const products = useMemo(() => (data[TABLES.products] || []).filter((p) => p.isActive !== false), [data[TABLES.products]]);
+  const variants = useMemo(() => (data[TABLES.variants] || []).filter((v) => v.isActive !== false), [data[TABLES.variants]]);
   // Fixed ordering rule for materials inside a group:
   //   1) base name (alphabetical)  2) size (numeric)  3) position (upper before lower)
   const variantSortKey = (v) => {

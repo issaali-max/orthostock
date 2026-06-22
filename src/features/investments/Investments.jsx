@@ -86,7 +86,7 @@ export default function Investments() {
   }, [live, securities.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const priceOf = useMemo(() => (live ? (sid) => livePrices[sid] : undefined), [live, livePrices]);
-  const stats = useMemo(() => portfolioStats(data, priceOf), [data, priceOf]);
+  const stats = useMemo(() => portfolioStats(data, priceOf), [data[TABLES.securities], data[TABLES.tradeLots], data[TABLES.tradeSells], data[TABLES.cashFlows], priceOf]); // eslint-disable-line react-hooks/exhaustive-deps
   // each security displays in ITS OWN currency; USD never converted by mistake
   const ccyOf = (id) => (securities.find((x) => x.id === id)?.currency) === 'AED' ? 'AED' : 'USD';
   const moneyIn = (v, ccy) => ccy === 'USD' ? `$${fmtNum(round2(num(v)))}` : cur(v);

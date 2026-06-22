@@ -26,6 +26,7 @@ export default function Dashboard() {
   const dInv = data[TABLES.invoices], dItems = data[TABLES.invoiceItems];
   const dExp = data[TABLES.expenses], dExpG = data[TABLES.expenseGroups];
   const dCust = data[TABLES.customers], dVar = data[TABLES.variants];
+  const dSec = data[TABLES.securities], dDebt = data[TABLES.externalDebts];
   const pl = useMemo(() => pnl(data, bounds), [dInv, dItems, dExp, dExpG, range]); // eslint-disable-line react-hooks/exhaustive-deps
   const today = useMemo(() => pnl(data, { from: todayISO(), to: todayISO() }), [dInv, dItems, dExp, dExpG]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -71,7 +72,7 @@ export default function Dashboard() {
   // the existing cur() display logic stays consistent; USD is folded in via the rate
   // for an at-a-glance figure (the cash-flow screen shows each currency separately).
   const aedBase = (b) => num(b?.AED) + num(b?.USD) * num(usdRate);
-  const fin = useMemo(() => financialPosition(data), [data, usdRate]); // eslint-disable-line react-hooks/exhaustive-deps
+  const fin = useMemo(() => financialPosition(data), [dInv, dExp, dExpG, dDebt, dSec, dVar, dCust, usdRate]); // eslint-disable-line react-hooks/exhaustive-deps
   const finCards = {
     cash: aedBase({ AED: fin.cash.AED.balance, USD: fin.cash.USD.balance }),
     receivables: aedBase(fin.receivables.totals),
@@ -90,7 +91,7 @@ export default function Dashboard() {
     const inventoryValue = variants.reduce((s, v) => s + Math.max(0, num(v.stockQty)) * num(v.purchasePriceAvg), 0);
     const lowStock = variants.filter((v) => num(v.stockQty) <= 0 || (num(v.stockQty) <= num(v.stockMin) && num(v.stockMin) > 0));
     return { revenue, profit, debt, inventoryValue, invoiceCount: invoices.length, lowStock };
-  }, [data]);
+  }, [dInv, dItems, dVar]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const bestEmirate = emirates[0];
   const maxEmRev = Math.max(1, ...emirates.map((e) => e.revenue));

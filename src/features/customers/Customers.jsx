@@ -47,7 +47,7 @@ export default function Customers() {
       city: (a, b) => (a.emirate || '').localeCompare(b.emirate || '') || (a.name || '').localeCompare(b.name || ''),
     }[sortBy] || (() => 0);
     return withStats.sort(cmp);
-  }, [data, q, emirateFilter, cityFilter, typeFilter, sortBy, invoices, items]);
+  }, [data[TABLES.customers], q, emirateFilter, cityFilter, typeFilter, sortBy, invoices, items]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = async () => {
     const r = editing;

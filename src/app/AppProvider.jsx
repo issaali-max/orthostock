@@ -16,6 +16,7 @@ const CORE_TABLES = [
   TABLES.purchases, TABLES.purchaseItems, TABLES.stockMovements,
   TABLES.expenses, TABLES.expenseGroups,
   TABLES.securities, TABLES.tradeLots, TABLES.tradeSells, TABLES.cashFlows,
+  TABLES.externalDebts,
   TABLES.auditLog, TABLES.supplierPayments,
 ];
 
