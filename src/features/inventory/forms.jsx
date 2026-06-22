@@ -149,6 +149,17 @@ export async function saveVariant(app, rec) {
   };
   if (rec.id) await app.updateRow(TABLES.variants, rec.id, payload);
   else await app.createRow(TABLES.variants, payload);
+  // For a standalone material (not placed in a group), keep its hidden product shell's
+  // name identical to the material's English name, so the card, search and flat view
+  // always show exactly the name typed on the material — nothing else.
+  {
+    const intoGroup = rec.groupMode === 'existing' || !!rec.groupId || (rec.groupName || '').trim().length > 0;
+    const prod = (app.data[TABLES.products] || []).find((p) => p.id === productId);
+    const nm = (rec.nameEn || '').trim();
+    if (!intoGroup && prod && prod.isGroup !== true && nm && (prod.nameEn || '') !== nm) {
+      await app.updateRow(TABLES.products, productId, { nameEn: nm });
+    }
+  }
   // Catalogue cards show the PRODUCT image. Mirror the material's image onto its
   // product so a photo added on a material actually appears on the card.
   const recImg = rec.image_path || rec.image_url;
