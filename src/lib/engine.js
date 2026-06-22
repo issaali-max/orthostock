@@ -1154,3 +1154,27 @@ export function combineForInfo(bucket, displayCurrency = 'AED', usdRate = 3.6725
   return displayCurrency === 'USD' ? round2(aed / usdRate) : round2(aed);
 }
 
+
+// One-time cleanup: a standalone material is stored as a hidden 1:1 product "shell".
+// Make every such shell's name identical to its material's English name, so there is
+// no separate hidden name that can ever differ. GROUPS are never touched (a group's
+// name is the real, user-set group name). This only rewrites the hidden shell to match
+// the visible material name — it never changes a name the user sees. Idempotent.
+export async function alignStandaloneNames(app) {
+  const byProduct = new Map();
+  for (const v of (app.data[TABLES.variants] || [])) {
+    if (v.isActive === false) continue;
+    if (!byProduct.has(v.productId)) byProduct.set(v.productId, []);
+    byProduct.get(v.productId).push(v);
+  }
+  let n = 0;
+  for (const p of (app.data[TABLES.products] || [])) {
+    if (p.isActive === false || p.isGroup === true) continue; // never a group
+    const vs = byProduct.get(p.id) || [];
+    if (vs.length !== 1) continue;                            // only true 1:1 standalones
+    const nm = (vs[0].nameEn || '').trim();
+    if (nm && (p.nameEn || '') !== nm) { await db.update(TABLES.products, p.id, { nameEn: nm }); n++; }
+  }
+  if (n) { await app.refresh(TABLES.products); nudgeSync(); }
+  return n;
+}

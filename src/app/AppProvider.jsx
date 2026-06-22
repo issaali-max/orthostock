@@ -226,6 +226,20 @@ export function AppProvider({ children }) {
     else await createRow(TABLES.settings, { id: 'singleton', ...patch });
   }, [data, updateRow, createRow]);
 
+  // One-time cleanup: align each standalone material's hidden product-shell name with
+  // the material's real English name, so no hidden duplicate name can ever differ.
+  // Groups are never touched. Runs once per device; never changes a visible name.
+  const alignedRef = useRef(false);
+  useEffect(() => {
+    if (alignedRef.current || loading || settings?.standaloneNamesAligned) return;
+    if (!(data[TABLES.products] || []).length) return;
+    alignedRef.current = true;
+    (async () => {
+      try { const m = await import('../lib/engine.js'); await m.alignStandaloneNames({ data, refresh }); updateSettings({ standaloneNamesAligned: true }); }
+      catch { /* ignore */ }
+    })();
+  }, [loading, data, settings]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const value = {
     user, login, logout, resetPassword,
     lang, setLang, dir, t,
