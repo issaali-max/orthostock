@@ -35,7 +35,7 @@ export default function CashFlow() {
     { key: 'recv', label: `🧾 ${t('doctorDebts')}`, val: recvInfo, color: C.warning },
     { key: 'inv', label: `📈 ${t('investments')}`, val: invInfo, color: C.primary },
     { key: 'stock', label: `📦 ${t('inventoryValue')}`, val: stockInfo, color: '#8E44AD' },
-    { key: 'owed', label: `🤝 ${t('owedToMe')}`, val: owedInfo, color: '#16A085' },
+    { key: 'owed', label: `🤝 ${t('personalDebts')}`, val: owedInfo, color: '#16A085' },
   ].filter((d) => d.val > 0);
 
   return (
