@@ -5,7 +5,7 @@ import { C, TABLES, SHADOW } from '../lib/constants.js';
 import { fmtCur, fmtNum, num } from '../lib/money.js';
 import { todayISO } from '../lib/dates.js';
 import RestockList from './catalogue/RestockList.jsx';
-import { pnl, monthlyTrend, periodTrend, buildAlerts, emirateStats, topProducts, topCustomers } from '../lib/engine.js';
+import { pnl, monthlyTrend, periodTrend, buildAlerts, emirateStats, topProducts, topCustomers, financialPosition } from '../lib/engine.js';
 import { Badge, Card, EmptyState, Modal, PageHeader } from '../ui/components.jsx';
 
 const monthStart = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`; };
@@ -67,6 +67,18 @@ export default function Dashboard() {
   const topCust = useMemo(() => topCustomers(data, 10, { bounds }), [dInv, dItems, dCust, range]); // eslint-disable-line react-hooks/exhaustive-deps
   const alerts = useMemo(() => buildAlerts(data), [data]);
   const cur = (v) => fmtCur(v, displayCurrency, usdRate);
+  // Whole financial position (currency-separated). Convert each bucket to AED base so
+  // the existing cur() display logic stays consistent; USD is folded in via the rate
+  // for an at-a-glance figure (the cash-flow screen shows each currency separately).
+  const aedBase = (b) => num(b?.AED) + num(b?.USD) * num(usdRate);
+  const fin = useMemo(() => financialPosition(data), [data, usdRate]); // eslint-disable-line react-hooks/exhaustive-deps
+  const finCards = {
+    cash: aedBase({ AED: fin.cash.AED.balance, USD: fin.cash.USD.balance }),
+    receivables: aedBase(fin.receivables.totals),
+    owedToMe: aedBase(fin.owedToMe),
+    iOwe: aedBase(fin.iOwe),
+    investments: aedBase(fin.investments),
+  };
 
   const kpi = useMemo(() => {
     const invoices = data[TABLES.invoices] || [];
@@ -143,6 +155,21 @@ export default function Dashboard() {
         <Kpi icon="🔻" label={t('lowStock')} value={fmtNum(kpi.lowStock.length)} color={kpi.lowStock.length ? C.warning : C.success} onClick={() => setShowRestock(true)} />
       </div>
       {showRestock && <RestockList onClose={() => setShowRestock(false)} />}
+
+      {/* ── Financial position (cash, debts, investments) ── */}
+      <Card className="rise" style={{ marginBottom: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+          <span style={{ fontSize: 18 }}>💵</span>
+          <span style={{ fontSize: 14, fontWeight: 800, color: C.text }}>{t('financialPosition')}</span>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 10 }}>
+          <Kpi icon="💵" label={t('cashBalance')} value={cur(finCards.cash)} color={finCards.cash >= 0 ? C.success : C.danger} />
+          <Kpi icon="🏥" label={t('doctorDebts')} value={cur(finCards.receivables)} color={finCards.receivables > 0 ? C.danger : C.success} />
+          <Kpi icon="🤝" label={t('owedToMe')} value={cur(finCards.owedToMe)} color={finCards.owedToMe > 0 ? C.warning : C.textMid} />
+          <Kpi icon="📉" label={t('iOwe')} value={cur(finCards.iOwe)} color={finCards.iOwe > 0 ? C.danger : C.textMid} />
+          <Kpi icon="📈" label={t('investments')} value={cur(finCards.investments)} color={C.primary} />
+        </div>
+      </Card>
 
       {/* ── P&L waterfall ── */}
       <Card className="rise" style={{ marginBottom: 14 }}>

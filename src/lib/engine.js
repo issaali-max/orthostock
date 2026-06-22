@@ -1050,8 +1050,8 @@ export function cashEvents(app) {
     if (person.isActive === false) continue;
     const cur = person.currency || 'AED';
     for (const tx of (person.txns || [])) {
-      if (tx.type === 'collect') push(tx.date, cur, tx.amount, 'in', 'debtCollect', person.name);
-      else push(tx.date, cur, tx.amount, 'out', 'debtLend', person.name);
+      if (tx.type === 'collect') push(tx.date, cur, tx.amount, 'in', 'debtCollect', person.personName || person.name || '');
+      else push(tx.date, cur, tx.amount, 'out', 'debtLend', person.personName || person.name || '');
     }
   }
 

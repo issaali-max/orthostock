@@ -5,7 +5,7 @@ import { fmtCur, num } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, Select, Textarea } from '../../ui/components.jsx';
 
-const blankExpense = () => ({ date: todayISO(), amount: '', groupId: '', note: '' });
+const blankExpense = () => ({ date: todayISO(), amount: '', groupId: '', note: '', currency: 'AED' });
 const blankGroup = () => ({ nameAr: '', nameEn: '', type: 'business', icon: '🧾', color: CATEGORY_COLORS[0], isActive: true });
 
 // Date range helpers
@@ -37,15 +37,16 @@ export default function Expenses() {
     let business = 0, personal = 0;
     for (const e of list) {
       const g = groupById(e.groupId);
-      if (g?.type === 'personal') personal += num(e.amount); else business += num(e.amount);
+      const aed = e.currency === 'USD' ? num(e.amount) * num(usdRate) : num(e.amount); // to AED base so totals never mix currencies
+      if (g?.type === 'personal') personal += aed; else business += aed;
     }
     return { business, personal, all: business + personal };
-  }, [list, groups]);
+  }, [list, groups, usdRate]);
 
   const saveExpense = async () => {
     const r = editExpense;
     if (!(num(r.amount) > 0) || !r.groupId) return;
-    const payload = { date: r.date || todayISO(), amount: num(r.amount), groupId: r.groupId, note: r.note || '' };
+    const payload = { date: r.date || todayISO(), amount: num(r.amount), groupId: r.groupId, note: r.note || '', currency: r.currency === 'USD' ? 'USD' : 'AED' };
     if (r.id) await updateRow(TABLES.expenses, r.id, payload); else await createRow(TABLES.expenses, payload);
     setEditExpense(null);
   };
@@ -106,7 +107,7 @@ export default function Expenses() {
                       <div style={{ fontWeight: 700, color: C.text, fontSize: 13 }}>{groupName(g)} {g && <Badge tone={g.type === 'personal' ? 'warning' : 'info'}>{t(g.type)}</Badge>}</div>
                       <div style={{ fontSize: 11, color: C.textMuted }}>{fmtDate(e.date, lang)}{e.note ? ` · ${e.note}` : ''}</div>
                     </div>
-                    <div style={{ fontWeight: 800, color: C.text }}>{fmtCur(e.amount, displayCurrency, usdRate)}</div>
+                    <div style={{ fontWeight: 800, color: C.text }}>{`${e.currency === 'USD' ? 'USD' : 'AED'} ${num(e.amount).toFixed(2)}`}</div>
                   </Card>
                 );
               })}
@@ -134,7 +135,13 @@ export default function Expenses() {
         footer={<><Btn variant="ghost" onClick={() => setEditExpense(null)}>{t('cancel')}</Btn><Btn onClick={saveExpense}>{t('save')}</Btn></>}>
         {editExpense && (
           <div>
-            <Field label={t('amount')} required><Input type="number" value={editExpense.amount} onChange={(v) => setEditExpense((r) => ({ ...r, amount: v }))} /></Field>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ flex: 2 }}><Field label={t('amount')} required><Input type="number" value={editExpense.amount} onChange={(v) => setEditExpense((r) => ({ ...r, amount: v }))} /></Field></div>
+              <div style={{ flex: 1 }}><Field label={t('currency')} required>
+                <Select value={editExpense.currency === 'USD' ? 'USD' : 'AED'} onChange={(v) => setEditExpense((r) => ({ ...r, currency: v }))}
+                  options={[{ value: 'AED', label: 'AED' }, { value: 'USD', label: 'USD' }]} />
+              </Field></div>
+            </div>
             <Field label={t('expenseGroup')} required>
               <Select value={editExpense.groupId} onChange={(v) => setEditExpense((r) => ({ ...r, groupId: v }))} placeholder="—"
                 options={groups.map((g) => ({ value: g.id, label: `${g.icon} ${groupName(g)} (${t(g.type)})` }))} />
