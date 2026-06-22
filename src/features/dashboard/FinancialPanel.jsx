@@ -7,7 +7,7 @@ import { Modal, Badge, EmptyState } from '../../ui/components.jsx';
 
 // Distinct, readable hues for the money-distribution donut. Cash = green (money in hand),
 // doctor debts = brand navy, investments = violet, personal lent = amber.
-const HUE = { cash: '#1A8F52', receivables: '#1558A0', investments: '#7C4DFF', owed: '#D97B20' };
+const HUE = { cash: '#1A8F52', inventory: '#0E8A8F', receivables: '#1558A0', investments: '#7C4DFF', owed: '#D97B20' };
 
 // A small two-currency money string, original currencies never mixed.
 const ccy = (v, c) => `${c === 'USD' ? 'USD' : 'AED'} ${num(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -26,13 +26,15 @@ export default function FinancialPanel({ app }) {
   const investV = aedBase(fin.investments);
   const owedV = aedBase(fin.owedToMe);
   const iOweV = aedBase(fin.iOwe);
+  const inventoryV = num(fin.inventoryValue); // stock at average cost (AED)
 
   // The donut shows where my money sits — only positive asset buckets.
   const slices = [
     { key: 'cash', label: t('cashBalance'), value: Math.max(0, cash), color: HUE.cash, icon: '💵' },
+    { key: 'inventory', label: t('inventoryValue'), value: Math.max(0, inventoryV), color: HUE.inventory, icon: '📦' },
     { key: 'receivables', label: t('doctorDebts'), value: Math.max(0, recvV), color: HUE.receivables, icon: '🏥' },
     { key: 'investments', label: t('investments'), value: Math.max(0, investV), color: HUE.investments, icon: '📈' },
-    { key: 'owed', label: t('owedToMe'), value: Math.max(0, owedV), color: HUE.owed, icon: '🤝' },
+    { key: 'owed', label: t('personalDebts'), value: Math.max(0, owedV), color: HUE.owed, icon: '🤝' },
   ].filter((s) => s.value > 0.005);
   const totalAssets = slices.reduce((a, s) => a + s.value, 0);
   const pct = (v) => (totalAssets > 0 ? (v / totalAssets) * 100 : 0);
@@ -42,6 +44,7 @@ export default function FinancialPanel({ app }) {
   // ── Cards: each opens a drill-down ──
   const cards = [
     { key: 'cash', icon: '💵', label: t('cashBalance'), value: cur(cash), color: cash >= 0 ? C.success : C.danger },
+    { key: 'inventory', icon: '📦', label: t('inventoryValue'), value: cur(inventoryV), color: HUE.inventory },
     { key: 'receivables', icon: '🏥', label: t('doctorDebts'), value: cur(recvV), color: recvV > 0 ? C.danger : C.textMid, badge: recv.byCustomer.length },
     { key: 'investments', icon: '📈', label: t('investments'), value: cur(investV), color: HUE.investments },
     { key: 'personal', icon: '🤝', label: t('personalDebts'), value: cur(owedV - iOweV), color: (owedV - iOweV) >= 0 ? C.warning : C.danger },
@@ -111,6 +114,7 @@ export default function FinancialPanel({ app }) {
 
       {/* ── Drill-downs ── */}
       <CashModal open={drill === 'cash'} onClose={() => setDrill(null)} fin={fin} t={t} />
+      <InventoryModal open={drill === 'inventory'} onClose={() => setDrill(null)} data={data} t={t} cur={cur} />
       <ReceivablesModal open={drill === 'receivables'} onClose={() => setDrill(null)} recv={recv} onPick={(id) => setDrill(`doctor:${id}`)} t={t} cur={cur} />
       <DoctorModal open={typeof drill === 'string' && drill.startsWith('doctor:')} onClose={() => setDrill('receivables')}
         customerId={typeof drill === 'string' && drill.startsWith('doctor:') ? drill.slice(7) : null} data={data} t={t} />
@@ -139,6 +143,37 @@ function CashModal({ open, onClose, fin, t }) {
                 <Stat label={t('thisMonth')} value={ccy(b.month, code)} color={C.textMid} />
                 <Stat label={t('thisYear')} value={ccy(b.year, code)} color={C.textMid} />
               </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+// ── Inventory: stock value by material (qty x average cost) ──
+function InventoryModal({ open, onClose, data, t, cur }) {
+  const items = (data[TABLES.variants] || [])
+    .filter((v) => v.isActive !== false)
+    .map((v) => ({ id: v.id, name: v.nameEn || v.sku, sku: v.sku, qty: num(v.stockQty), value: Math.max(0, num(v.stockQty)) * num(v.purchasePriceAvg) }))
+    .filter((v) => v.value > 0.005)
+    .sort((a, b) => b.value - a.value);
+  const total = items.reduce((a, v) => a + v.value, 0);
+  return (
+    <Modal open={open} onClose={onClose} title={`📦 ${t('inventoryValue')}`}>
+      {items.length === 0 ? <EmptyState icon="📦" text={t('noData')} /> : (
+        <div style={{ display: 'grid', gap: 7 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '4px 2px 8px' }}>
+            <span style={{ fontSize: 12, color: C.textMuted, fontWeight: 700 }}>{items.length} {t('materials')}</span>
+            <span style={{ fontSize: 16, fontWeight: 900, color: C.text }}>{cur(total)}</span>
+          </div>
+          {items.map((v) => (
+            <div key={v.id} style={{ display: 'flex', alignItems: 'center', gap: 10, border: `1px solid ${C.border}`, borderRadius: 11, padding: '9px 12px' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, color: C.text, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.name}</div>
+                <div style={{ fontSize: 11, color: C.textMuted }}>{fmtNum(v.qty)} {t('inStock')} · {v.sku}</div>
+              </div>
+              <div style={{ fontWeight: 800, color: C.text }}>{cur(v.value)}</div>
             </div>
           ))}
         </div>
