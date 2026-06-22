@@ -110,20 +110,6 @@ export function AppProvider({ children }) {
   useEffect(() => { loadAll(); }, [loadAll]);
   useEffect(() => { import('../lib/backup.js').then((m) => m.maybeAutoBackup()).catch(() => {}); }, []); // daily local safety snapshot
 
-  // One-time: capitalise existing material/group names so they match the title-cased
-  // scheme. Guarded by a settings flag so it runs only once per device.
-  const namesFixed = useRef(false);
-  useEffect(() => {
-    if (namesFixed.current || loading || settings?.namesTitleCased) return;
-    if (!(data[TABLES.products] || []).length && !(data[TABLES.variants] || []).length) return;
-    namesFixed.current = true;
-    (async () => {
-      try { const m = await import('../lib/engine.js'); await m.capitalizeExistingNames({ data, refresh }); updateSettings({ namesTitleCased: true }); }
-      catch { /* ignore */ }
-    })();
-    // updateSettings/refresh are defined later in this component; referencing them in
-    // the deps array would hit the temporal dead zone and crash render (white screen).
-  }, [loading, data, settings]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Start offline<->cloud sync once; re-pull refreshes the UI caches.
   const lastDupFix = useRef(0);

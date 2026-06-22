@@ -9,7 +9,7 @@ import { useState } from 'react';
 import { C, CATEGORY_ICONS, CATEGORY_COLORS, TABLES, UNITS } from '../../lib/constants.js';
 import { AttributePicker, Btn, Field, Input, Select, Textarea } from '../../ui/components.jsx';
 import { ImageUpload } from '../../ui/ImageUpload.jsx';
-import { num, titleCase } from '../../lib/money.js';
+import { num } from '../../lib/money.js';
 
 // ── Blank factories ──
 export const blankCategory = () => ({ nameAr: '', nameEn: '', icon: '🦷', image_path: '', image_url: '', color: C.primary, attributes: [], isActive: true });
@@ -34,7 +34,7 @@ export async function saveCategory(app, rec) {
 export async function saveProduct(app, rec) {
   if (!rec.nameEn?.trim()) return false; // English name required, no Arabic field
   const payload = {
-    nameEn: titleCase(rec.nameEn.trim()), brand: rec.brand || '', categoryId: rec.categoryId || null,
+    nameEn: rec.nameEn.trim(), brand: rec.brand || '', categoryId: rec.categoryId || null,
     icon: rec.icon || '📦', image_path: rec.image_path || rec.image_url || '', description: rec.description || '', isActive: true,
     isGroup: rec.isGroup === true, // preserve the group flag so groups made from a category show in the material's group picker
   };
@@ -100,13 +100,13 @@ export async function saveVariant(app, rec) {
     // and re-creating a product on every save of an already-standalone item).
     const siblings = (app.data[TABLES.variants] || []).filter((v) => v.productId === productId && v.id !== rec.id && v.isActive !== false);
     if (!productId || siblings.length > 0) {
-      const pname = titleCase((rec.nameEn || sku).trim());
+      const pname = (rec.nameEn || sku).trim();
       const saved = await app.createRow(TABLES.products, { nameAr: pname, nameEn: pname, brand: rec.brand || '', categoryId: wantCat, icon: '📦', image_path: rec.image_path || rec.image_url || '', description: '', isGroup: false, isActive: true });
       productId = saved?.id || null;
     }
   } else if ((rec.groupName || '').trim() && wantCat) {
     // user typed a new group name: find-or-create it inside the category
-    const gname = titleCase(rec.groupName.trim());
+    const gname = rec.groupName.trim();
     const match = products.find((p) => p.categoryId === wantCat && (p.nameEn || '').trim().toLowerCase() === gname.toLowerCase());
     if (match) productId = match.id;
     else {
@@ -114,7 +114,7 @@ export async function saveVariant(app, rec) {
       productId = saved?.id || null;
     }
   } else if (rec.categoryId && rec.categoryId !== currentCatId) {
-    const pname = titleCase((rec.nameEn || sku).trim());
+    const pname = (rec.nameEn || sku).trim();
     const match = products.find((p) => p.categoryId === rec.categoryId && (p.nameEn || '').trim().toLowerCase() === pname.toLowerCase());
     if (match) productId = match.id;
     else {
@@ -139,7 +139,7 @@ export async function saveVariant(app, rec) {
     if (prod && (prod.brand || '') !== (rec.brand || '')) await app.updateRow(TABLES.products, productId, { brand: rec.brand || '' });
   }
   const payload = {
-    productId, sku, nameEn: titleCase((rec.nameEn || '').trim()),
+    productId, sku, nameEn: (rec.nameEn || '').trim(),
     attributes: rec.attributes || {}, image_path: rec.image_path || rec.image_url || '',
     sellingPriceDefault: num(rec.sellingPriceDefault), stockMin: num(rec.stockMin),
     unit: rec.unit || 'piece', notes: rec.notes || '', isActive: true, supplierId: rec.supplierId || '',
@@ -157,10 +157,12 @@ export async function saveVariant(app, rec) {
     if (prod && (prod.image_path || prod.image_url || '') !== recImg) await app.updateRow(TABLES.products, productId, { image_path: recImg });
   }
   // If the material moved to a different product and its old group is now empty,
-  // remove the empty group shell so no contentless groups are left behind.
+  // remove ONLY an auto-created standalone shell — never an intentional group the
+  // user made (isGroup === true), so empty groups stay until the user deletes them.
   if (prevProductId && prevProductId !== productId) {
     const left = (app.data[TABLES.variants] || []).filter((v) => v.productId === prevProductId && v.id !== rec.id && v.isActive !== false);
-    if (left.length === 0) await app.deleteRow(TABLES.products, prevProductId);
+    const prevProd = (app.data[TABLES.products] || []).find((p) => p.id === prevProductId);
+    if (left.length === 0 && prevProd?.isGroup !== true) await app.deleteRow(TABLES.products, prevProductId);
   }
   return true;
 }
@@ -275,7 +277,7 @@ export function VariantForm({ rec, setRec, t, products, categories, variants = [
       {catId && (() => {
         const vCount = (pid) => (variants || []).filter((v) => v.productId === pid && v.isActive !== false).length;
         const groupsInCat = products.filter((p) => p.categoryId === catId && p.isActive !== false
-            && !(p.isGroup === false && vCount(p.id) === 1))   // show every group; hide only true 1:1 standalone materials
+            && (p.isGroup === true || vCount(p.id) !== 1))   // real groups: intentional, empty, or multi-size — NOT 1:1 standalone material shells
           .slice().sort((a, b) => (a.nameEn || '').localeCompare(b.nameEn || ''));
         // current mode: existing group selected / typing a new group / standalone material
         const mode = rec.groupMode || ((rec.groupId || rec.productId) ? 'existing' : 'none');

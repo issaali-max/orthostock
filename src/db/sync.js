@@ -57,6 +57,21 @@ const isOnline = () => (typeof navigator === 'undefined' ? true : navigator.onLi
 const toCloud = (row) => ({ id: row.id, updatedAt: row.updatedAt, data: row });
 const fromCloud = (c) => (c && c.data && typeof c.data === 'object' ? { ...c.data } : c);
 
+// Field-preserving merge for pulls: cloud wins for any field it actually provides,
+// but an EMPTY/missing cloud value never wipes a non-empty local one. This stops an
+// incomplete cloud row (e.g. a customer whose name didn't round-trip) from blanking
+// good local data, while real deletions (isActive:false) and real edits still apply.
+function mergePreserve(local, rec) {
+  if (!local) return rec;
+  const out = { ...local, ...rec };
+  for (const k of Object.keys(local)) {
+    const rv = out[k];
+    const lv = local[k];
+    if ((rv === '' || rv === null || rv === undefined) && lv !== '' && lv !== null && lv !== undefined) out[k] = lv;
+  }
+  return out;
+}
+
 // Local-only tables are never pushed to or pulled from the cloud. The audit log and
 // supplier-payment ledger are device-local conveniences; keeping them out of sync
 // avoids needing extra cloud tables/policies and keeps the queue clean. (Supplier
@@ -230,7 +245,7 @@ export async function pull(onData) {
         const local = localById.get(rec.id);
         const lu = Number(local?.updatedAt || 0);
         if (!local) { toWrite.push(rec); changed++; }                    // brand-new row → download
-        else if (cu > lu) { toWrite.push(rec); changed++; }              // cloud strictly newer → cloud wins
+        else if (cu > lu) { toWrite.push(mergePreserve(local, rec)); changed++; } // cloud newer → cloud wins, but never blank a field with an empty cloud value
         else if (lu > cu && outboxEmpty) { await enqueueMutation({ type: 'update', table, id: local.id, row: local }); pushedBack++; } // local newer → correct cloud
         // equal timestamps (cu === lu) → keep local: this is usually the echo of our
         // own push; overwriting here is what used to resurrect a just-deleted row.

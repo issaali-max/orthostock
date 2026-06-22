@@ -277,7 +277,7 @@ export default function Catalogue() {
   const arches = [...new Set(allCatVariants.map(archValueOf).filter(Boolean))].sort();
   const matchVariantArch = (v) => !archFilter || archValueOf(v) === archFilter;
   const shownProducts = catProducts
-    .filter((p) => editMode || (variantsByProduct[p.id] || []).some(matchVariantArch))
+    .filter((p) => editMode || p.isGroup === true || (variantsByProduct[p.id] || []).some(matchVariantArch))
     .filter((p) => !brandFilter || (p.brand || '') === brandFilter)
     .filter((p) => !archFilter || (variantsByProduct[p.id] || []).some(matchVariantArch))
     .sort((a, b) => (a.nameEn || '').toLowerCase().localeCompare((b.nameEn || '').toLowerCase(), 'en')); // alphabetical groups within the category

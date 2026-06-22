@@ -6,7 +6,7 @@
 // ─────────────────────────────────────────────────────────────
 import * as db from '../db/db.js';
 import { TABLES } from './constants.js';
-import { num, round2, safeDiv, prettyName, titleCase } from './money.js';
+import { num, round2, safeDiv, prettyName } from './money.js';
 import { newId, nextDocNumber } from './ids.js';
 import { uploadDataUrl } from './storage.js';
 import { nudgeSync } from '../db/sync.js';
@@ -1154,18 +1154,3 @@ export function combineForInfo(bucket, displayCurrency = 'AED', usdRate = 3.6725
   return displayCurrency === 'USD' ? round2(aed / usdRate) : round2(aed);
 }
 
-// One-time migration: capitalise existing product (group) and material names so the
-// stored value matches the title-cased scheme used going forward. Idempotent — only
-// rewrites rows whose name actually changes. Returns how many were updated.
-export async function capitalizeExistingNames(app) {
-  let n = 0;
-  for (const table of [TABLES.products, TABLES.variants]) {
-    for (const row of (app.data[table] || [])) {
-      if (row.isActive === false) continue;
-      const fixed = titleCase((row.nameEn || '').trim());
-      if (fixed && fixed !== row.nameEn) { await db.update(table, row.id, { nameEn: fixed }); n++; }
-    }
-  }
-  if (n) { await app.refresh(TABLES.products); await app.refresh(TABLES.variants); nudgeSync(); }
-  return n;
-}
