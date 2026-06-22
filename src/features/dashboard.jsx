@@ -375,10 +375,10 @@ function RankCard({ title, rows, label, primary, secondary, emptyIcon, emptyText
 
 function alertText(al, t, cur) {
   switch (al.kind) {
-    case 'outOfStock': return { title: t('alertOutOfStock'), desc: `${al.sku} · ${al.label}` };
-    case 'lowStock': return { title: t('alertLowStock'), desc: `${al.sku} · ${t('stock')}: ${fmtNum(al.qty)} / ${fmtNum(al.min)}` };
-    case 'sellBelowCost': return { title: t('alertSellBelowCost'), desc: `${al.sku} · ${cur(al.sell)} < ${cur(al.cost)}` };
-    case 'noSellingPrice': return { title: t('alertNoSellingPrice'), desc: `${al.sku} · ${al.label}` };
+    case 'outOfStock': return { title: t('alertOutOfStock'), desc: `${al.label} · ${al.sku}` };
+    case 'lowStock': return { title: t('alertLowStock'), desc: `${al.label} · ${al.sku} · ${t('stock')}: ${fmtNum(al.qty)} / ${fmtNum(al.min)}` };
+    case 'sellBelowCost': return { title: t('alertSellBelowCost'), desc: `${al.label} · ${al.sku} · ${cur(al.sell)} < ${cur(al.cost)}` };
+    case 'noSellingPrice': return { title: t('alertNoSellingPrice'), desc: `${al.label} · ${al.sku}` };
     case 'overdueInvoice': return { title: t('alertOverdueInvoice'), desc: `${al.invoiceNumber} · ${al.customer} · ${t('remainingAmount')} ${cur(al.remaining)} · ${fmtNum(al.days)} ${t('daysAgo')}` };
     default: return { title: al.kind, desc: '' };
   }

@@ -439,7 +439,7 @@ export function invoiceBreakdown(invoice, items, settings) {
 // severity (3 = critical, 2 = warning, 1 = info).
 // ─────────────────────────────────────────────────────────────
 export function variantLabel(v) {
-  return prettyName(v.nameEn) || Object.values(v.attributes || {}).filter(Boolean).join(' · ') || v.sku;
+  return v.nameEn || Object.values(v.attributes || {}).filter(Boolean).join(' · ') || v.sku;
 }
 
 export function buildAlerts(data, opts = {}) {
