@@ -1082,10 +1082,15 @@ export function receivables(app) {
 // existing securities — logic unchanged, just read.
 export function investmentValue(app) {
   const data = app.data || app;
+  const lots = data[TABLES.tradeLots] || [];
   const val = blankCur();
   for (const s of (data[TABLES.securities] || [])) {
     if (s.isActive === false) continue;
-    addCur(val, s.currency || 'USD', num(s.qty) * num(s.currentPrice));
+    // The real holding = remaining quantity across this security's buy lots
+    // (securities have no standalone qty field — that was the "investments = 0" bug).
+    const qty = lots.filter((l) => l.securityId === s.id).reduce((a, l) => a + num(l.qtyRemaining), 0);
+    if (qty <= 0) continue;
+    addCur(val, s.currency || 'USD', qty * num(s.currentPrice));
   }
   return val;
 }
