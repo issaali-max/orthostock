@@ -277,17 +277,28 @@ function startRealtime() {
       .channel('orthostock-sync')
       .on('postgres_changes', { event: '*', schema: 'public' }, () => {
         clearTimeout(_rtTimer);
-        _rtTimer = setTimeout(() => { if (isOnline()) pull(_onData); }, 250);
+        _rtTimer = setTimeout(() => { if (isOnline()) cycle(); }, 400); // guarded; slightly longer debounce coalesces bursts
       })
       .subscribe();
   } catch (e) { console.warn('[realtime] unavailable, relying on polling', e); }
 }
 
 // Full sync = push local up, then pull remote down (and refresh UI on change).
+// Guarded so overlapping triggers (realtime + interval + focus + nudge firing close
+// together) can't stack concurrent flush/pull passes that saturate the main thread and
+// freeze the app. A trigger that arrives mid-cycle just sets a "run again" flag.
+let _inCycle = false, _rerun = false;
 async function cycle() {
   if (!isOnline()) return;
-  try { await flush(); } catch { /* ignore */ }
-  try { await pull(_onData); } catch { /* ignore */ }
+  if (_inCycle) { _rerun = true; return; }
+  _inCycle = true;
+  try {
+    try { await flush(); } catch { /* ignore */ }
+    try { await pull(_onData); } catch { /* ignore */ }
+  } finally {
+    _inCycle = false;
+    if (_rerun) { _rerun = false; setTimeout(() => cycle(), 200); } // coalesce a queued trigger
+  }
 }
 
 // Called after a local write: pushes the change up quickly (debounced so a burst

@@ -518,6 +518,19 @@ function ExternalDebts({ app }) {
     await updateRow(TABLES.externalDebts, p.id, { txns: [...(p.txns || []), { type: txn.type, amount: num(txn.amount), date: txn.date || todayISO(), note: txn.note || '' }] });
     setTxn(null); showToast(t('saved'), 'success');
   };
+  // Delete a single lend/collect entry (txns have no id, so remove by its index in the
+  // stored array — the list is shown reversed, callers pass the original index).
+  const delTxn = async (p, origIndex) => {
+    const next = (p.txns || []).filter((_, idx) => idx !== origIndex);
+    await updateRow(TABLES.externalDebts, p.id, { txns: next });
+    showToast(t('deleted'), 'success');
+  };
+  // Delete the whole person record (and all their entries).
+  const delPerson = async (p) => {
+    if (!window.confirm(t('confirmDelete'))) return;
+    await deleteRow(TABLES.externalDebts, p.id);
+    setOpenP(null); setTxn(null); showToast(t('deleted'), 'success');
+  };
   const person = people.find((x) => x.id === openP);
   return (
     <div>
@@ -563,6 +576,7 @@ function ExternalDebts({ app }) {
           <div style={{ display: 'flex', gap: 6 }}>
             <Btn size="sm" onClick={() => setTxn({ type: 'lend', amount: '', date: todayISO(), note: '' })}>＋ {t('lend')}</Btn>
             <Btn size="sm" variant="light" onClick={() => setTxn({ type: 'collect', amount: '', date: todayISO(), note: '' })}>💰 {t('collect')}</Btn>
+            <Btn size="sm" variant="outline" onClick={() => delPerson(person)} style={{ color: C.danger, marginInlineStart: 'auto' }}>🗑️ {t('delete')}</Btn>
           </div>
           {txn && (<div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: 10 }}>
             <Field label={t('amount')} required><Input type="number" value={txn.amount} onChange={(v) => setTxn((x) => ({ ...x, amount: v }))} /></Field>
@@ -571,13 +585,15 @@ function ExternalDebts({ app }) {
             <Btn size="sm" onClick={saveTxn}>{t('save')}</Btn>
           </div>)}
           <div style={{ display: 'grid', gap: 5 }}>
-            {[...(person.txns || [])].reverse().map((x, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, background: C.surfaceAlt, borderRadius: 9, padding: '7px 10px' }}>
+            {[...(person.txns || [])].map((x, origIdx) => ({ x, origIdx })).reverse().map(({ x, origIdx }) => (
+              <div key={origIdx} style={{ display: 'flex', alignItems: 'center', gap: 8, background: C.surfaceAlt, borderRadius: 9, padding: '7px 10px' }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: C.text }}>{x.type === 'collect' ? `💰 ${t('collect')}` : `🤝 ${t('lend')}`}</div>
                   <div style={{ fontSize: 10, color: C.textMuted }}>{x.date}{x.note ? ` · ${x.note}` : ''}</div>
                 </div>
                 <div style={{ fontWeight: 800, color: x.type === 'collect' ? C.success : C.danger }}>{x.type === 'collect' ? '-' : '+'}{money(num(x.amount), person.currency)}</div>
+                <button onClick={() => delTxn(person, origIdx)} title={t('delete')}
+                  style={{ border: 'none', background: 'transparent', color: C.textMuted, cursor: 'pointer', fontSize: 15, padding: '2px 4px', lineHeight: 1 }}>🗑️</button>
               </div>
             ))}
           </div>

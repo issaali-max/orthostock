@@ -17,7 +17,7 @@ export default function FinancialPanel({ app }) {
   const cur = (v) => fmtCur(v, displayCurrency, usdRate);
   const aedBase = (b) => num(b?.AED) + num(b?.USD) * num(usdRate);
 
-  const fin = useMemo(() => financialPosition(data), [data, usdRate]); // eslint-disable-line react-hooks/exhaustive-deps
+  const fin = useMemo(() => financialPosition(data), [data[TABLES.invoices], data[TABLES.expenses], data[TABLES.expenseGroups], data[TABLES.externalDebts], data[TABLES.securities], data[TABLES.tradeLots], data[TABLES.variants], data[TABLES.customers], usdRate]); // eslint-disable-line react-hooks/exhaustive-deps
   const recv = useMemo(() => receivables(data), [data[TABLES.invoices], data[TABLES.customers]]); // eslint-disable-line react-hooks/exhaustive-deps
   const portfolio = useMemo(() => portfolioStats(data), [data[TABLES.securities], data[TABLES.tradeLots], data[TABLES.tradeSells], data[TABLES.cashFlows]]); // eslint-disable-line react-hooks/exhaustive-deps
 
