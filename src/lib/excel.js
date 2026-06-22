@@ -431,11 +431,19 @@ export async function importExcel(file, data) {
       const v = (rid && byVid.get(rid)) || bySku.get(String(sku).trim());
       if (v) {
         const patch = {};
+        // Name edits in the sheet must apply too (this was missing — names never updated).
+        const newName = norm(cellVal(row, idx, 'Name'));
+        if (newName && newName !== (v.nameEn || '')) patch.nameEn = newName;
         if (cost !== undefined && cost !== '') { patch.purchasePriceAvg = round2(cost); patch.purchasePriceLatest = round2(cost); }
         if (sell !== undefined && sell !== '') patch.sellingPriceDefault = round2(sell);
         if (stock !== undefined && stock !== '') patch.stockQty = round2(stock);
         if (min !== undefined && min !== '') patch.stockMin = num(min);
         if (Object.keys(patch).length) { await db.update(TABLES.variants, v.id, patch); summary.materialsUpdated++; }
+        // Keep the standalone product-shell name in sync (skip real multi-size groups).
+        if (patch.nameEn) {
+          const prod = products.find((pp) => pp.id === v.productId);
+          if (prod && prod.isGroup !== true) { try { await db.update(TABLES.products, prod.id, { nameEn: patch.nameEn, nameAr: patch.nameEn }); } catch { /* non-fatal */ } }
+        }
         continue;
       }
       // create new material (and its product/category if needed)
