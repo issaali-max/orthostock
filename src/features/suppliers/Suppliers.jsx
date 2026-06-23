@@ -3,7 +3,7 @@ import { useApp } from '../../app/AppProvider.jsx';
 import { C, emirateOptions, emirateLabel, TABLES } from '../../lib/constants.js';
 import { fmtCur, num, round2 } from '../../lib/money.js';
 import { fmtDate } from '../../lib/dates.js';
-import { supplierStats, supplierDebt, recordSupplierPayment } from '../../lib/engine.js';
+import { supplierStats, supplierDebt, recordSupplierPayment, freeRestocks } from '../../lib/engine.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, SearchBar, Select, Textarea } from '../../ui/components.jsx';
 
 const blank = () => ({ name: '', phone: '', whatsapp: '', city: '', currency: 'AED', notes: '', isActive: true });
@@ -157,6 +157,30 @@ function SupplierProfile({ supplier, onBack, onEdit, data, t, displayCurrency, u
           </div>
         </div>
       )}
+
+      {(() => {
+        const free = freeRestocks({ data }, supplier.id);
+        if (!free.rows.length) return null;
+        return (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+              <span style={{ fontSize: 13, fontWeight: 800, color: C.text }}>🎁 {t('freePieces')}</span>
+              <span style={{ fontSize: 12, color: C.textMuted, fontWeight: 700 }}>{free.totalQty} {t('pieces') || ''} · {fmtCur(free.totalValue, displayCurrency, usdRate)}</span>
+            </div>
+            <div style={{ display: 'grid', gap: 6 }}>
+              {free.rows.map((r) => (
+                <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#E9F6EF', borderRadius: 10, padding: '8px 10px' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>🧑‍⚕️ {r.doctor} · {r.material}</div>
+                    <div style={{ fontSize: 10.5, color: C.textMuted }}>{fmtDate(r.date)} · {r.qty} × {t('free')}</div>
+                  </div>
+                  <b style={{ color: C.success, fontSize: 12.5 }}>{fmtCur(r.value, displayCurrency, usdRate)}</b>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       <div style={{ fontSize: 13, fontWeight: 800, color: C.text, marginBottom: 8 }}>{t('history')}</div>
       {st.purchases.length === 0 ? <EmptyState icon="📥" text={t('noPurchases')} /> : (

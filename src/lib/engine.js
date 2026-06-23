@@ -271,6 +271,12 @@ export async function migrateImagesToStorage(app, onProgress) {
 export async function commitPurchase(app, purchaseData, lines) {
   const variants = app.data[TABLES.variants] || [];
   const vById = (id) => variants.find((x) => x.id === id);
+  // A "free restock" (استرجاع مجاني) is stock that comes back to me at NO cost (e.g.
+  // pieces a doctor was billed for but didn't take). It must NOT drag the moving-average
+  // cost down, so we add the quantity but keep purchasePriceAvg untouched, and record the
+  // value at the CURRENT average cost for the historical report. customerId links it to
+  // the doctor it relates to.
+  const isFree = !!purchaseData.isFree;
   // Build every write first, then commit in ONE atomic transaction so a purchase,
   // its items, the stock movements and the per-variant cost/stock updates are
   // all-or-nothing — never half written if something fails mid-way.
@@ -278,7 +284,19 @@ export async function commitPurchase(app, purchaseData, lines) {
   const specs = [{ op: 'insert', table: TABLES.purchases, row: { ...purchaseData, id: poId } }];
   for (const l of lines) {
     const v = vById(l.variantId);
-    const qty = num(l.qty); const unitCost = num(l.unitCost);
+    const qty = num(l.qty);
+    if (isFree) {
+      const avg = v ? num(v.purchasePriceAvg) : 0;            // value the free pieces at current cost
+      const valueAtCost = round2(qty * avg);
+      specs.push({ op: 'insert', table: TABLES.purchaseItems, row: { purchaseId: poId, variantId: l.variantId, qty, unitCost: 0, total: 0, free: true, valueAtCost } });
+      if (v) {
+        const newQty = round2(num(v.stockQty) + qty);
+        specs.push({ op: 'update', table: TABLES.variants, id: v.id, patch: { stockQty: newQty } }); // qty only — avg untouched
+        specs.push({ op: 'insert', table: TABLES.stockMovements, row: { variantId: v.id, type: 'freeRestock', qtyChange: qty, qtyAfter: newQty, refType: 'purchase', refId: poId } });
+      }
+      continue;
+    }
+    const unitCost = num(l.unitCost);
     specs.push({ op: 'insert', table: TABLES.purchaseItems, row: { purchaseId: poId, variantId: l.variantId, qty, unitCost, total: round2(qty * unitCost) } });
     if (v) {
       const oldQty = num(v.stockQty); const newQty = oldQty + qty;
@@ -297,8 +315,36 @@ export async function commitPurchase(app, purchaseData, lines) {
   const res = await db.atomicMutations(specs);
   await Promise.all([app.refresh(TABLES.purchases), app.refresh(TABLES.purchaseItems), app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements)]);
   nudgeSync();
-  await logAudit(app, 'create', 'purchase', purchaseData.purchaseNumber || poId);
+  await logAudit(app, 'create', isFree ? 'freeRestock' : 'purchase', purchaseData.purchaseNumber || poId);
   return res.find((r) => r && r.id === poId) || { id: poId };
+}
+
+// Report of all FREE restocks (gifts to me) for a given supplier — grouped rows with
+// doctor, material, qty, value-at-cost and date — plus totals. Drives the supplier view.
+export function freeRestocks(app, supplierId) {
+  const data = app.data || app;
+  const variants = new Map((data[TABLES.variants] || []).map((v) => [v.id, v]));
+  const customers = new Map((data[TABLES.customers] || []).map((c) => [c.id, c]));
+  const itemsByPo = new Map();
+  for (const it of (data[TABLES.purchaseItems] || [])) {
+    if (!itemsByPo.has(it.purchaseId)) itemsByPo.set(it.purchaseId, []);
+    itemsByPo.get(it.purchaseId).push(it);
+  }
+  const rows = [];
+  let totalQty = 0; let totalValue = 0;
+  for (const po of (data[TABLES.purchases] || [])) {
+    if (!po.isFree || po.isActive === false) continue;
+    if (supplierId && po.supplierId !== supplierId) continue;
+    const doctor = po.customerId ? (customers.get(po.customerId)?.name || '—') : '—';
+    for (const it of (itemsByPo.get(po.id) || [])) {
+      const v = variants.get(it.variantId);
+      const value = num(it.valueAtCost);
+      totalQty += num(it.qty); totalValue += value;
+      rows.push({ id: po.id + it.variantId, date: po.date, doctor, material: v?.nameEn || it.variantId, qty: num(it.qty), value });
+    }
+  }
+  rows.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  return { rows, totalQty, totalValue: round2(totalValue) };
 }
 
 // ── Customer (clinic/doctor) lifetime stats ──
@@ -386,7 +432,9 @@ export function clinicRating(allCustomers, invoices, items, customerId) {
 
 // ── Supplier lifetime stats ──
 export function supplierStats(purchases, supplierId) {
-  const mine = purchases.filter((p) => p.supplierId === supplierId);
+  // Free restocks have their own section and a zero cost, so they're excluded here to
+  // keep "total spent", the balance and the normal purchase history clean.
+  const mine = purchases.filter((p) => p.supplierId === supplierId && !p.isFree && p.isActive !== false);
   const totalSpent = round2(mine.reduce((s, p) => s + num(p.totalAED), 0));
   // paidAmount defaults to the full total for older records that predate the field
   const totalPaid = round2(mine.reduce((s, p) => s + (p.paidAmount == null ? num(p.totalAED) : num(p.paidAmount)), 0));
@@ -934,7 +982,7 @@ export async function deleteSupplierPayment(app, id) {
 // Per-supplier accounts payable: what each supplier was billed (active purchases),
 // what was paid at purchase time, what was paid later, and the remaining balance.
 export function supplierDebt(app) {
-  const purchases = (app.data[TABLES.purchases] || []).filter((p) => p.isActive !== false);
+  const purchases = (app.data[TABLES.purchases] || []).filter((p) => p.isActive !== false && !p.isFree);
   const payments = app.data[TABLES.supplierPayments] || [];
   const suppliers = (app.data[TABLES.suppliers] || []).filter((s) => s.isActive !== false);
   const byId = {};

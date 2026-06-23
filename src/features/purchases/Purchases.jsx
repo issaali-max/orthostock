@@ -24,6 +24,8 @@ export default function Purchases() {
   const [date, setDate] = useState(todayISO());
   const [lines, setLines] = useState([]);     // [{variantId, qty, unitCost}]
   const [paid, setPaid] = useState('');
+  const [isFree, setIsFree] = useState(false);   // استرجاع مجاني: stock back at no cost, avg untouched
+  const [customerId, setCustomerId] = useState(''); // the doctor this free restock relates to
   const [catId, setCatId] = useState('');
   const [prodId, setProdId] = useState('');
   const [pq, setPq] = useState('');            // product search within the picker
@@ -47,12 +49,14 @@ export default function Purchases() {
     setProdId(''); setPq('');
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const startNew = () => { setEditingId(null); setSupplierId(''); setDate(todayISO()); setLines([]); setPaid(''); setOpen(true); };
+  const startNew = () => { setEditingId(null); setSupplierId(''); setDate(todayISO()); setLines([]); setPaid(''); setIsFree(false); setCustomerId(''); setOpen(true); };
 
   const openEdit = (po) => {
     const its = (data[TABLES.purchaseItems] || []).filter((x) => x.purchaseId === po.id && x.isActive !== false);
     setEditingId(po.id);
     setSupplierId(po.supplierId || '');
+    setIsFree(!!po.isFree);
+    setCustomerId(po.customerId || '');
     setDate(po.date || todayISO());
     setPaid(num(po.paidAmount) >= num(po.totalAED) ? '' : String(num(po.paidAmount)));
     setLines(its.map((it) => ({ variantId: it.variantId, qty: num(it.qty), unitCost: num(it.unitCost) })));
@@ -91,8 +95,10 @@ export default function Purchases() {
       }
       await commitPurchase(app, {
         purchaseNumber: number, supplierId: supplierId || null, date, currency: 'AED', exchangeRate: 1,
-        totalOriginal: total, totalAED: total, paidAmount: paid === '' ? total : num(paid), invoiceRef: '', notes: '',
-      }, valid.map((l) => ({ variantId: l.variantId, qty: num(l.qty), unitCost: num(l.unitCost) })));
+        totalOriginal: isFree ? 0 : total, totalAED: isFree ? 0 : total,
+        paidAmount: isFree ? 0 : (paid === '' ? total : num(paid)),
+        isFree, customerId: isFree ? (customerId || null) : null, invoiceRef: '', notes: '',
+      }, valid.map((l) => ({ variantId: l.variantId, qty: num(l.qty), unitCost: isFree ? 0 : num(l.unitCost) })));
       showToast(`${number} ✓`, 'success');
       setOpen(false); setEditingId(null);
     } finally { setBusy(false); }
@@ -109,10 +115,10 @@ export default function Purchases() {
           {list.map((p) => (
             <Card key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 700, color: C.text }}>{p.purchaseNumber}</div>
+                <div style={{ fontWeight: 700, color: C.text }}>{p.purchaseNumber}{p.isFree ? ' 🎁' : ''}</div>
                 <div style={{ fontSize: 11, color: C.textMuted }}>{supName(p.supplierId)} · {fmtDate(p.date)}</div>
               </div>
-              <div style={{ fontWeight: 800, color: C.primary }}>{fmtCur(p.totalAED, displayCurrency, usdRate)}</div>
+              <div style={{ fontWeight: 800, color: p.isFree ? C.success : C.primary }}>{p.isFree ? t('free') : fmtCur(p.totalAED, displayCurrency, usdRate)}</div>
               <button onClick={() => openEdit(p)} title={t('edit')} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 17, width: 28 }}>✏️</button>
               <button onClick={() => removePurchase(p)} title={t('delete')} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 17, width: 28, color: C.danger }}>🗑</button>
             </Card>
@@ -127,6 +133,19 @@ export default function Purchases() {
             <Select value={supplierId} onChange={setSupplierId} placeholder="—" options={suppliers.map((s) => ({ value: s.id, label: s.name }))} />
           </Field>
           <Field label={t('date')}><Input type="date" value={date} onChange={setDate} /></Field>
+          {/* Free restock (استرجاع مجاني): stock returns at no cost — keeps the moving
+              average untouched and is logged against a doctor for the history report. */}
+          <button type="button" onClick={() => setIsFree((f) => !f)}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 10px', marginTop: 4, borderRadius: 10, cursor: 'pointer',
+              border: `1px solid ${isFree ? C.primary : C.border}`, background: isFree ? C.primaryLight : '#fff' }}>
+            <span style={{ width: 18, height: 18, borderRadius: 5, border: `2px solid ${isFree ? C.primary : C.textMuted}`, background: isFree ? C.primary : '#fff', color: '#fff', fontSize: 12, lineHeight: '14px', textAlign: 'center', fontWeight: 900 }}>{isFree ? '✓' : ''}</span>
+            <span style={{ fontSize: 13, fontWeight: 800, color: isFree ? C.primary : C.textMid }}>🎁 {t('freeRestock')}</span>
+          </button>
+          {isFree && (
+            <Field label={t('doctor')} hint={t('freeRestockHint')}>
+              <Select value={customerId} onChange={setCustomerId} placeholder="—" options={(data[TABLES.customers] || []).filter((c) => c.isActive !== false).map((c) => ({ value: c.id, label: c.name }))} />
+            </Field>
+          )}
         </div>
 
         {/* Step 1: category */}
@@ -196,7 +215,9 @@ export default function Purchases() {
                 <div key={l.variantId} style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: '6px 8px', display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ flex: 1, fontSize: 12, fontWeight: 700, color: C.text, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{variantLabel(v)}</span>
                   <Input type="number" value={l.qty} onChange={(val) => setLine(l.variantId, { qty: num(val) })} style={{ width: 54, padding: 6 }} />
-                  <Input type="number" value={l.unitCost} onChange={(val) => setLine(l.variantId, { unitCost: val })} style={{ width: 72, padding: 6 }} />
+                  {isFree
+                    ? <span style={{ width: 72, fontSize: 11, color: C.success, fontWeight: 800, textAlign: 'center' }}>🎁 {t('free')}</span>
+                    : <Input type="number" value={l.unitCost} onChange={(val) => setLine(l.variantId, { unitCost: val })} style={{ width: 72, padding: 6 }} />}
                   <button onClick={() => removeLine(l.variantId)} style={{ border: 'none', background: 'none', color: C.danger, cursor: 'pointer', fontSize: 18, width: 24 }}>×</button>
                 </div>
               );
@@ -204,6 +225,12 @@ export default function Purchases() {
           </div>
         )}
 
+        {isFree ? (
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12, fontWeight: 800, color: C.success }}>
+            <span>🎁 {t('giftValue')}</span>
+            <span>{fmtCur(round2(lines.reduce((s, l) => { const v = vById(l.variantId); return s + num(l.qty) * num(v?.purchasePriceAvg); }, 0)), displayCurrency, usdRate)}</span>
+          </div>
+        ) : (<>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12, fontWeight: 800, color: C.text }}>
           <span>{t('total')}</span><span>{fmtCur(total, displayCurrency, usdRate)}</span>
         </div>
@@ -214,6 +241,7 @@ export default function Purchases() {
         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, fontSize: 13, fontWeight: 700, color: balance > 0 ? C.danger : C.success }}>
           <span>{t('balanceDue')}</span><span>{fmtCur(balance, displayCurrency, usdRate)}</span>
         </div>
+        </>)}
       </Modal>
     </div>
   );
