@@ -574,17 +574,28 @@ export function pnl(data, opts = {}) {
   const revenue = invoices.reduce((s, i) => s + num(i.total), 0);
   const cogs = items.reduce((s, it) => s + num(it.avgCostAtSale) * num(it.qty), 0);
   const salesProfit = items.reduce((s, it) => s + num(it.lineProfit), 0);
+
+  // Free restocks (استرجاع مجاني) are pieces billed on an invoice but kept in stock — a
+  // real gain (recovered inventory at cost) that the sale's COGS over-charged for. Add
+  // their value as other income so reported profit equals the true economic profit.
+  const freePurch = new Set((data[TABLES.purchases] || []).filter((p) => p.isFree && p.isActive !== false && inRange(p.date)).map((p) => p.id));
+  const freeRestockGain = (data[TABLES.purchaseItems] || [])
+    .filter((it) => it.free && freePurch.has(it.purchaseId) && it.isActive !== false)
+    .reduce((s, it) => s + num(it.valueAtCost), 0);
+
   const businessExp = expenses.filter((e) => typeOf(e.groupId) === 'business').reduce((s, e) => s + num(e.amount), 0);
   const personalExp = expenses.filter((e) => typeOf(e.groupId) === 'personal').reduce((s, e) => s + num(e.amount), 0);
-  const operatingProfit = salesProfit - businessExp;
+  const grossProfit = salesProfit + freeRestockGain;       // sales margin + recovered inventory
+  const operatingProfit = grossProfit - businessExp;
   const netAfterAll = operatingProfit - personalExp;
 
   return {
     revenue: round2(revenue), cogs: round2(cogs), salesProfit: round2(salesProfit),
+    freeRestockGain: round2(freeRestockGain), grossProfit: round2(grossProfit),
     businessExp: round2(businessExp), personalExp: round2(personalExp),
     operatingProfit: round2(operatingProfit), netAfterAll: round2(netAfterAll),
     invoiceCount: invoices.length, expenseCount: expenses.length,
-    margin: revenue > 0 ? round2((salesProfit / revenue) * 100) : 0,
+    margin: revenue > 0 ? round2((grossProfit / revenue) * 100) : 0,
   };
 }
 

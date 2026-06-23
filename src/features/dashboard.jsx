@@ -29,8 +29,9 @@ export default function Dashboard() {
   const dExp = data[TABLES.expenses], dExpG = data[TABLES.expenseGroups];
   const dCust = data[TABLES.customers], dVar = data[TABLES.variants];
   const dSec = data[TABLES.securities], dDebt = data[TABLES.externalDebts];
-  const pl = useMemo(() => pnl(data, bounds), [dInv, dItems, dExp, dExpG, range]); // eslint-disable-line react-hooks/exhaustive-deps
-  const today = useMemo(() => pnl(data, { from: todayISO(), to: todayISO() }), [dInv, dItems, dExp, dExpG]); // eslint-disable-line react-hooks/exhaustive-deps
+  const dPur = data[TABLES.purchases], dPurIt = data[TABLES.purchaseItems];
+  const pl = useMemo(() => pnl(data, bounds), [dInv, dItems, dExp, dExpG, dPur, dPurIt, range]); // eslint-disable-line react-hooks/exhaustive-deps
+  const today = useMemo(() => pnl(data, { from: todayISO(), to: todayISO() }), [dInv, dItems, dExp, dExpG, dPur, dPurIt]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Drill-down: materials sold + buyers within the active range (active invoices only)
   const periodReport = useMemo(() => {
@@ -160,6 +161,7 @@ export default function Dashboard() {
           <PnlRow label={t('revenueLabel')} value={cur(pl.revenue)} color={C.text} />
           <PnlRow label={t('cogs')} value={'− ' + cur(pl.cogs)} color={C.danger} />
           <PnlRow label={t('salesProfit')} value={cur(pl.salesProfit)} color={C.success} strong />
+          {pl.freeRestockGain > 0 && <PnlRow label={`🎁 ${t('freeRestock')}`} value={'＋ ' + cur(pl.freeRestockGain)} color={C.success} />}
           <PnlRow label={t('businessExpenses')} value={'− ' + cur(pl.businessExp)} color={C.warning} />
           <PnlRow label={t('operatingProfit')} value={cur(pl.operatingProfit)} color={C.primary} strong />
           <PnlRow label={t('personalExpenses')} value={'− ' + cur(pl.personalExp)} color={C.warning} />
