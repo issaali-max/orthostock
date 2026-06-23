@@ -13,6 +13,7 @@
 // ─────────────────────────────────────────────────────────────
 import { createClient } from '@supabase/supabase-js';
 import { TABLES } from '../lib/constants.js';
+import { observeTimestamp } from '../lib/clock.js';
 import { idbGetAll, idbBulkPut, outboxAll, outboxDelete, outboxBumpTries, enqueueMutation, metaSet, metaGet } from './local.js';
 
 const MAX_OP_TRIES = 6; // after this many failed attempts, drop a stuck outbox op
@@ -247,12 +248,12 @@ export async function pull(onData) {
         if (!local) { toWrite.push(rec); changed++; }                    // brand-new row → download
         else if (cu > lu) { toWrite.push(mergePreserve(local, rec)); changed++; } // cloud newer → cloud wins, but never blank a field with an empty cloud value
         else if (lu > cu && outboxEmpty) { await enqueueMutation({ type: 'update', table, id: local.id, row: local }); pushedBack++; } // local newer → correct cloud
-        // equal timestamps (cu === lu) → keep local: this is usually the echo of our
-        // own push; overwriting here is what used to resurrect a just-deleted row.
+        // equal timestamps (cu === lu) → keep local: this is usually the echo of our own push.
       }
       if (toWrite.length) await idbBulkPut(table, toWrite);
     } catch { /* table may not exist / timed out; skip and try next */ }
   }
+  observeTimestamp(maxSeen); // adopt the cloud's highest stamp so our next local edit out-ranks it
   if (maxSeen > wm) await metaSet('pullWatermark', maxSeen);
   state.lastSyncAt = Date.now(); emit();
   if (pushedBack > 0) { await refreshPending(); flush(); }

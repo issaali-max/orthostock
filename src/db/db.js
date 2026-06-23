@@ -8,6 +8,7 @@
 import { TABLES } from '../lib/constants.js';
 import { newId } from '../lib/ids.js';
 import { nowISO } from '../lib/dates.js';
+import { nextTimestamp } from '../lib/clock.js';
 import * as L from './local.js';
 import { cloudConfigured, flush, refreshPending } from './sync.js';
 
@@ -62,7 +63,7 @@ export async function insert(table, row) {
   await ensureSeed();
   const rec = { id: row.id || newId(), ...row };
   if (TIMESTAMPED.has(table)) rec.createdAt = rec.createdAt || nowISO();
-  rec.updatedAt = Date.now(); // for last-write-wins conflict resolution across devices
+  rec.updatedAt = nextTimestamp(); // monotonic logical clock — consistent across devices/timezones
   await assertUnique(table, rec, rec.id);
   await L.idbPut(table, rec);
   await L.enqueueMutation({ type: 'insert', table, id: rec.id, row: rec });
@@ -73,7 +74,7 @@ export async function insert(table, row) {
 export async function update(table, id, patch) {
   const cur = await L.idbGet(table, id);
   if (!cur) { const e = new Error('NOT_FOUND'); e.code = 'NOT_FOUND'; throw e; }
-  const rec = { ...cur, ...patch, id, updatedAt: Date.now() };
+  const rec = { ...cur, ...patch, id, updatedAt: nextTimestamp() };
   await assertUnique(table, rec, id);
   await L.idbPut(table, rec);
   await L.enqueueMutation({ type: 'update', table, id, row: rec });
@@ -85,7 +86,7 @@ export async function remove(table, id) {
   const cur = await L.idbGet(table, id);
   if (!cur) return true;
   if (SOFT_DELETE.has(table)) {
-    const rec = { ...cur, isActive: false, updatedAt: Date.now() };
+    const rec = { ...cur, isActive: false, updatedAt: nextTimestamp() };
     await L.idbPut(table, rec);
     await L.enqueueMutation({ type: 'update', table, id, row: rec });
   } else {
@@ -109,7 +110,7 @@ export async function atomicMutations(specs) {
     if (s.op === 'insert') {
       const rec = { id: s.row.id || newId(), ...s.row };
       if (TIMESTAMPED.has(s.table)) rec.createdAt = rec.createdAt || nowISO();
-      rec.updatedAt = Date.now();
+      rec.updatedAt = nextTimestamp();
       await assertUnique(s.table, rec, rec.id);
       ops.push({ store: s.table, type: 'put', value: rec });
       outbox.push({ type: 'insert', table: s.table, id: rec.id, row: rec });
@@ -117,7 +118,7 @@ export async function atomicMutations(specs) {
     } else if (s.op === 'update') {
       const cur = await L.idbGet(s.table, s.id);
       if (!cur) { const e = new Error('NOT_FOUND'); e.code = 'NOT_FOUND'; throw e; }
-      const rec = { ...cur, ...s.patch, id: s.id, updatedAt: Date.now() };
+      const rec = { ...cur, ...s.patch, id: s.id, updatedAt: nextTimestamp() };
       await assertUnique(s.table, rec, s.id);
       ops.push({ store: s.table, type: 'put', value: rec });
       outbox.push({ type: 'update', table: s.table, id: s.id, row: rec });
@@ -126,7 +127,7 @@ export async function atomicMutations(specs) {
       const cur = await L.idbGet(s.table, s.id);
       if (cur) {
         if (SOFT_DELETE.has(s.table)) {
-          const rec = { ...cur, isActive: false, updatedAt: Date.now() };
+          const rec = { ...cur, isActive: false, updatedAt: nextTimestamp() };
           ops.push({ store: s.table, type: 'put', value: rec });
           outbox.push({ type: 'update', table: s.table, id: s.id, row: rec });
         } else {
