@@ -165,14 +165,25 @@ function SupplierProfile({ supplier, onBack, onEdit, data, t, displayCurrency, u
           <div style={{ marginBottom: 14 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
               <span style={{ fontSize: 13, fontWeight: 800, color: C.text }}>🎁 {t('freePieces')}</span>
-              <span style={{ fontSize: 12, color: C.textMuted, fontWeight: 700 }}>{free.totalQty} {t('pieces') || ''} · {fmtCur(free.totalValue, displayCurrency, usdRate)}</span>
+              <span style={{ fontSize: 12, color: C.textMuted, fontWeight: 700 }}>{free.totalQty} · {fmtCur(free.totalValue, displayCurrency, usdRate)}</span>
             </div>
+            {/* Summary per center */}
+            {free.centers.length > 1 && (
+              <div style={{ display: 'grid', gap: 5, marginBottom: 8 }}>
+                {free.centers.map((c) => (
+                  <div key={c.center} style={{ display: 'flex', justifyContent: 'space-between', background: '#EAF1FB', borderRadius: 9, padding: '6px 10px', fontSize: 12 }}>
+                    <span style={{ fontWeight: 700, color: C.primary }}>🏥 {c.center}</span>
+                    <span style={{ color: C.textMid }}>{c.qty} · <b style={{ color: C.success }}>{fmtCur(c.value, displayCurrency, usdRate)}</b></span>
+                  </div>
+                ))}
+              </div>
+            )}
             <div style={{ display: 'grid', gap: 6 }}>
               {free.rows.map((r) => (
                 <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#E9F6EF', borderRadius: 10, padding: '8px 10px' }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>🧑‍⚕️ {r.doctor} · {r.material}</div>
-                    <div style={{ fontSize: 10.5, color: C.textMuted }}>{fmtDate(r.date)} · {r.qty} × {t('free')}</div>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>🏥 {r.center} · {r.material}</div>
+                    <div style={{ fontSize: 10.5, color: C.textMuted }}>{r.invoiceNumber} · {fmtDate(r.date)} · {r.qty} × {fmtCur(r.unitCost, displayCurrency, usdRate)}</div>
                   </div>
                   <b style={{ color: C.success, fontSize: 12.5 }}>{fmtCur(r.value, displayCurrency, usdRate)}</b>
                 </div>

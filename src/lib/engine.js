@@ -277,6 +277,18 @@ export async function commitPurchase(app, purchaseData, lines) {
   // value at the CURRENT average cost for the historical report. customerId links it to
   // the doctor it relates to.
   const isFree = !!purchaseData.isFree;
+  // For a free restock, the value of each returned piece is taken from the cost the
+  // LINKED INVOICE actually used at sale time (avgCostAtSale) — so the gift value exactly
+  // cancels the COGS that was charged for the undelivered pieces. Falls back to the
+  // material's current average if the invoice line can't be found.
+  const invItems = app.data[TABLES.invoiceItems] || [];
+  const saleCost = (variantId) => {
+    if (isFree && purchaseData.invoiceId) {
+      const it = invItems.find((x) => x.invoiceId === purchaseData.invoiceId && x.variantId === variantId && x.isActive !== false);
+      if (it && num(it.avgCostAtSale) > 0) return num(it.avgCostAtSale);
+    }
+    return 0;
+  };
   // Build every write first, then commit in ONE atomic transaction so a purchase,
   // its items, the stock movements and the per-variant cost/stock updates are
   // all-or-nothing — never half written if something fails mid-way.
@@ -286,9 +298,9 @@ export async function commitPurchase(app, purchaseData, lines) {
     const v = vById(l.variantId);
     const qty = num(l.qty);
     if (isFree) {
-      const avg = v ? num(v.purchasePriceAvg) : 0;            // value the free pieces at current cost
-      const valueAtCost = round2(qty * avg);
-      specs.push({ op: 'insert', table: TABLES.purchaseItems, row: { purchaseId: poId, variantId: l.variantId, qty, unitCost: 0, total: 0, free: true, valueAtCost } });
+      const unitCost = saleCost(l.variantId) || (v ? num(v.purchasePriceAvg) : 0); // sale-time cost, else current avg
+      const valueAtCost = round2(qty * unitCost);
+      specs.push({ op: 'insert', table: TABLES.purchaseItems, row: { purchaseId: poId, variantId: l.variantId, qty, unitCost: 0, total: 0, free: true, unitCostAtRestock: round2(unitCost), valueAtCost } });
       if (v) {
         const newQty = round2(num(v.stockQty) + qty);
         specs.push({ op: 'update', table: TABLES.variants, id: v.id, patch: { stockQty: newQty } }); // qty only — avg untouched
@@ -319,32 +331,43 @@ export async function commitPurchase(app, purchaseData, lines) {
   return res.find((r) => r && r.id === poId) || { id: poId };
 }
 
-// Report of all FREE restocks (gifts to me) for a given supplier — grouped rows with
-// doctor, material, qty, value-at-cost and date — plus totals. Drives the supplier view.
+// Report of all FREE restocks (gifts to me) for a given supplier. Each row carries the
+// linked invoice, the center/clinic (doctor) from that invoice, the material, qty and
+// value-at-cost (sale-time cost). Also groups totals per center. Drives the supplier view.
 export function freeRestocks(app, supplierId) {
   const data = app.data || app;
   const variants = new Map((data[TABLES.variants] || []).map((v) => [v.id, v]));
   const customers = new Map((data[TABLES.customers] || []).map((c) => [c.id, c]));
+  const invoices = new Map((data[TABLES.invoices] || []).map((i) => [i.id, i]));
   const itemsByPo = new Map();
   for (const it of (data[TABLES.purchaseItems] || [])) {
+    if (it.isActive === false) continue;
     if (!itemsByPo.has(it.purchaseId)) itemsByPo.set(it.purchaseId, []);
     itemsByPo.get(it.purchaseId).push(it);
   }
   const rows = [];
+  const byCenter = new Map(); // centerName -> { qty, value }
   let totalQty = 0; let totalValue = 0;
   for (const po of (data[TABLES.purchases] || [])) {
     if (!po.isFree || po.isActive === false) continue;
     if (supplierId && po.supplierId !== supplierId) continue;
-    const doctor = po.customerId ? (customers.get(po.customerId)?.name || '—') : '—';
+    const inv = po.invoiceId ? invoices.get(po.invoiceId) : null;
+    const center = inv && inv.customerId ? (customers.get(inv.customerId)?.name || '—')
+                 : (po.customerId ? (customers.get(po.customerId)?.name || '—') : '—');
+    const invNo = inv?.invoiceNumber || '—';
     for (const it of (itemsByPo.get(po.id) || [])) {
       const v = variants.get(it.variantId);
       const value = num(it.valueAtCost);
-      totalQty += num(it.qty); totalValue += value;
-      rows.push({ id: po.id + it.variantId, date: po.date, doctor, material: v?.nameEn || it.variantId, qty: num(it.qty), value });
+      const qty = num(it.qty);
+      totalQty += qty; totalValue += value;
+      const g = byCenter.get(center) || { center, qty: 0, value: 0 };
+      g.qty += qty; g.value = round2(g.value + value); byCenter.set(center, g);
+      rows.push({ id: po.id + it.variantId, date: po.date, center, invoiceNumber: invNo, material: v?.nameEn || it.variantId, qty, unitCost: num(it.unitCostAtRestock), value });
     }
   }
   rows.sort((a, b) => String(b.date).localeCompare(String(a.date)));
-  return { rows, totalQty, totalValue: round2(totalValue) };
+  const centers = [...byCenter.values()].sort((a, b) => b.value - a.value);
+  return { rows, centers, totalQty, totalValue: round2(totalValue) };
 }
 
 // ── Customer (clinic/doctor) lifetime stats ──

@@ -25,7 +25,7 @@ export default function Purchases() {
   const [lines, setLines] = useState([]);     // [{variantId, qty, unitCost}]
   const [paid, setPaid] = useState('');
   const [isFree, setIsFree] = useState(false);   // استرجاع مجاني: stock back at no cost, avg untouched
-  const [customerId, setCustomerId] = useState(''); // the doctor this free restock relates to
+  const [freeInvoiceId, setFreeInvoiceId] = useState(''); // the REAL invoice this restock belongs to (carries the center/doctor)
   const [catId, setCatId] = useState('');
   const [prodId, setProdId] = useState('');
   const [pq, setPq] = useState('');            // product search within the picker
@@ -36,6 +36,18 @@ export default function Purchases() {
   const variants = (data[TABLES.variants] || []).filter((v) => v.isActive !== false);
   const supName = (id) => suppliers.find((s) => s.id === id)?.name || '—';
   const vById = (id) => variants.find((v) => v.id === id);
+
+  // For the free-restock invoice picker: real, active invoices (newest first) with the
+  // center name, and the materials each invoice billed (so you can only restock pieces
+  // that were actually sold on a real invoice).
+  const custName = (id) => (data[TABLES.customers] || []).find((c) => c.id === id)?.name || '—';
+  const invoiceOptions = useMemo(() => (data[TABLES.invoices] || [])
+    .filter((i) => i.isActive !== false && i.status !== 'returned')
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)))
+    .map((i) => ({ value: i.id, label: `${i.invoiceNumber} · ${custName(i.customerId)} · ${fmtDate(i.date)}` })), [data]); // eslint-disable-line react-hooks/exhaustive-deps
+  const invoiceMaterials = (invId) => (data[TABLES.invoiceItems] || [])
+    .filter((it) => it.invoiceId === invId && it.isActive !== false)
+    .map((it) => ({ variantId: it.variantId, billedQty: num(it.qty), avgCostAtSale: num(it.avgCostAtSale), v: vById(it.variantId) }));
 
   const list = useMemo(() => {
     const rows = (data[TABLES.purchases] || []).slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
@@ -49,14 +61,14 @@ export default function Purchases() {
     setProdId(''); setPq('');
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const startNew = () => { setEditingId(null); setSupplierId(''); setDate(todayISO()); setLines([]); setPaid(''); setIsFree(false); setCustomerId(''); setOpen(true); };
+  const startNew = () => { setEditingId(null); setSupplierId(''); setDate(todayISO()); setLines([]); setPaid(''); setIsFree(false); setFreeInvoiceId(''); setOpen(true); };
 
   const openEdit = (po) => {
     const its = (data[TABLES.purchaseItems] || []).filter((x) => x.purchaseId === po.id && x.isActive !== false);
     setEditingId(po.id);
     setSupplierId(po.supplierId || '');
     setIsFree(!!po.isFree);
-    setCustomerId(po.customerId || '');
+    setFreeInvoiceId(po.invoiceId || '');
     setDate(po.date || todayISO());
     setPaid(num(po.paidAmount) >= num(po.totalAED) ? '' : String(num(po.paidAmount)));
     setLines(its.map((it) => ({ variantId: it.variantId, qty: num(it.qty), unitCost: num(it.unitCost) })));
@@ -83,6 +95,7 @@ export default function Purchases() {
   const save = async () => {
     const valid = lines.filter((l) => l.variantId && num(l.qty) > 0);
     if (valid.length === 0) return;
+    if (isFree && !freeInvoiceId) { showToast(t('pickInvoiceFirst'), 'error'); return; }
     setBusy(true);
     try {
       let number;
@@ -97,7 +110,10 @@ export default function Purchases() {
         purchaseNumber: number, supplierId: supplierId || null, date, currency: 'AED', exchangeRate: 1,
         totalOriginal: isFree ? 0 : total, totalAED: isFree ? 0 : total,
         paidAmount: isFree ? 0 : (paid === '' ? total : num(paid)),
-        isFree, customerId: isFree ? (customerId || null) : null, invoiceRef: '', notes: '',
+        isFree,
+        invoiceId: isFree ? (freeInvoiceId || null) : null,
+        customerId: isFree ? ((data[TABLES.invoices] || []).find((i) => i.id === freeInvoiceId)?.customerId || null) : null,
+        invoiceRef: '', notes: '',
       }, valid.map((l) => ({ variantId: l.variantId, qty: num(l.qty), unitCost: isFree ? 0 : num(l.unitCost) })));
       showToast(`${number} ✓`, 'success');
       setOpen(false); setEditingId(null);
@@ -127,7 +143,7 @@ export default function Purchases() {
       )}
 
       <Modal open={open} onClose={() => setOpen(false)} title={editingId ? t('editPurchase') : t('newPurchase')} width={520}
-        footer={<><Btn variant="ghost" onClick={() => setOpen(false)}>{t('cancel')}</Btn><Btn onClick={save} disabled={busy || lines.length === 0}>{t('save')}</Btn></>}>
+        footer={<><Btn variant="ghost" onClick={() => setOpen(false)}>{t('cancel')}</Btn><Btn onClick={save} disabled={busy || lines.length === 0 || (isFree && !freeInvoiceId)}>{t('save')}</Btn></>}>
         <div style={{ position: 'sticky', top: -1, zIndex: 5, background: '#fff', paddingBottom: 8, marginBottom: 4, borderBottom: `1px solid ${C.surfaceAlt}` }}>
           <Field label={t('supplier')}>
             <Select value={supplierId} onChange={setSupplierId} placeholder="—" options={suppliers.map((s) => ({ value: s.id, label: s.name }))} />
@@ -142,12 +158,44 @@ export default function Purchases() {
             <span style={{ fontSize: 13, fontWeight: 800, color: isFree ? C.primary : C.textMid }}>🎁 {t('freeRestock')}</span>
           </button>
           {isFree && (
-            <Field label={t('doctor')} hint={t('freeRestockHint')}>
-              <Select value={customerId} onChange={setCustomerId} placeholder="—" options={(data[TABLES.customers] || []).filter((c) => c.isActive !== false).map((c) => ({ value: c.id, label: c.name }))} />
+            <Field label={t('invoice')} hint={t('freeRestockHint')}>
+              <Select value={freeInvoiceId} onChange={(v) => { setFreeInvoiceId(v); setLines([]); }} placeholder="—" options={invoiceOptions} />
             </Field>
           )}
         </div>
 
+        {isFree ? (
+          /* Free restock: pick from the linked invoice's own materials only */
+          !freeInvoiceId ? (
+            <div style={{ fontSize: 12, color: C.textMuted, textAlign: 'center', padding: 14, border: `1px dashed ${C.border}`, borderRadius: 10 }}>{t('pickInvoiceFirst')}</div>
+          ) : (
+            <div style={{ display: 'grid', gap: 7 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: C.textMid }}>{t('materials')}</div>
+              {invoiceMaterials(freeInvoiceId).map((m) => {
+                const cur = lines.find((l) => l.variantId === m.variantId);
+                const qty = cur ? cur.qty : '';
+                const setQ = (val) => {
+                  const q = num(val);
+                  setLines((ls) => {
+                    const rest = ls.filter((l) => l.variantId !== m.variantId);
+                    return q > 0 ? [...rest, { variantId: m.variantId, qty: q }] : rest;
+                  });
+                };
+                return (
+                  <div key={m.variantId} style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{variantLabel(m.v)}</div>
+                      <div style={{ fontSize: 10.5, color: C.textMuted }}>{t('sold')}: {fmtNum(m.billedQty)} · {t('avgCost')} {fmtCur(m.avgCostAtSale, displayCurrency, usdRate)}</div>
+                    </div>
+                    <Input type="number" value={qty} onChange={setQ} placeholder="0" style={{ width: 60, padding: 6 }} />
+                    {num(qty) > 0 && <span style={{ fontSize: 11, fontWeight: 800, color: C.success, minWidth: 56, textAlign: 'end' }}>{fmtCur(round2(num(qty) * m.avgCostAtSale), displayCurrency, usdRate)}</span>}
+                  </div>
+                );
+              })}
+              {invoiceMaterials(freeInvoiceId).length === 0 && <div style={{ fontSize: 12, color: C.textMuted, padding: 8 }}>{t('noData')}</div>}
+            </div>
+          )
+        ) : (<>
         {/* Step 1: category */}
         <div style={{ fontSize: 12, fontWeight: 700, color: C.textMid, margin: '4px 0 6px' }}>{t('categories')}</div>
         <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4, marginBottom: 8 }}>
@@ -224,11 +272,12 @@ export default function Purchases() {
             })}
           </div>
         )}
+        </>)}
 
         {isFree ? (
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12, fontWeight: 800, color: C.success }}>
             <span>🎁 {t('giftValue')}</span>
-            <span>{fmtCur(round2(lines.reduce((s, l) => { const v = vById(l.variantId); return s + num(l.qty) * num(v?.purchasePriceAvg); }, 0)), displayCurrency, usdRate)}</span>
+            <span>{fmtCur(round2(lines.reduce((s, l) => { const m = invoiceMaterials(freeInvoiceId).find((x) => x.variantId === l.variantId); return s + num(l.qty) * num(m?.avgCostAtSale); }, 0)), displayCurrency, usdRate)}</span>
           </div>
         ) : (<>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12, fontWeight: 800, color: C.text }}>
