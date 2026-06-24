@@ -24,8 +24,9 @@ const UNIQUE = {
 const SOFT_DELETE = new Set([
   TABLES.categories, TABLES.products, TABLES.variants,
   TABLES.customers, TABLES.suppliers, TABLES.users, TABLES.expenseGroups, TABLES.securities,
+  TABLES.orders,
 ]);
-const TIMESTAMPED = new Set([TABLES.purchases, TABLES.invoices, TABLES.stockMovements, TABLES.expenses, TABLES.tradeLots, TABLES.tradeSells, TABLES.cashFlows]);
+const TIMESTAMPED = new Set([TABLES.purchases, TABLES.invoices, TABLES.stockMovements, TABLES.expenses, TABLES.tradeLots, TABLES.tradeSells, TABLES.cashFlows, TABLES.orders]);
 
 function dupError(key, val) { const e = new Error(`Duplicate ${key}: ${val}`); e.code = 'DUPLICATE'; return e; }
 

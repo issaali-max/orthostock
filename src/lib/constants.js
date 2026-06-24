@@ -90,6 +90,8 @@ export const TABLES = {
   externalDebts: 'externalDebts',
   auditLog: 'auditLog',
   supplierPayments: 'supplierPayments',
+  orders: 'orders',
+  orderItems: 'orderItems',
 };
 
 // A small set of icon glyphs offered for categories (kept simple — emoji,

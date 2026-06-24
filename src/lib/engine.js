@@ -1272,3 +1272,57 @@ export async function alignStandaloneNames(app) {
   if (n) { await app.refresh(TABLES.products); nudgeSync(); }
   return n;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Orders (التواصي) — doctors/centers request materials; orders are recorded, linked to
+// the customer (which carries emirate/city/type), and used to plan visits.
+// ─────────────────────────────────────────────────────────────────────────────
+export const ORDER_STATUSES = ['new', 'planning', 'ready', 'delivered', 'cancelled'];
+// statuses that still need a visit / delivery (drive the visit planner)
+export const OPEN_ORDER_STATUSES = ['new', 'planning', 'ready'];
+
+// All orders enriched with their customer (name/type/emirate/city) and their item lines
+// (material name + qty + note). One pass; safe on missing references.
+export function orderList(app) {
+  const data = app.data || app;
+  const custById = new Map((data[TABLES.customers] || []).map((c) => [c.id, c]));
+  const varById = new Map((data[TABLES.variants] || []).map((v) => [v.id, v]));
+  const itemsByOrder = new Map();
+  for (const it of (data[TABLES.orderItems] || [])) {
+    if (it.isActive === false) continue;
+    if (!itemsByOrder.has(it.orderId)) itemsByOrder.set(it.orderId, []);
+    itemsByOrder.get(it.orderId).push(it);
+  }
+  return (data[TABLES.orders] || [])
+    .filter((o) => o.isActive !== false)
+    .map((o) => {
+      const c = custById.get(o.customerId);
+      const items = (itemsByOrder.get(o.id) || []).map((it) => ({ ...it, material: varById.get(it.variantId)?.nameEn || it.variantId, qty: num(it.qty) }));
+      return {
+        ...o,
+        customerName: c?.name || '—', customerType: c?.type || 'doctor',
+        emirate: c?.emirate || '', city: (c?.city || '').trim(),
+        phone: c?.phone || '', items, itemCount: items.length,
+        totalQty: items.reduce((s, it) => s + num(it.qty), 0),
+      };
+    })
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+}
+
+// Visit planner: open orders in an area, grouped by center/doctor and ranked by priority.
+// Pass { emirate, city } (either can be empty to widen the scope).
+export function visitPlan(app, { emirate = '', city = '' } = {}) {
+  const orders = orderList(app).filter((o) =>
+    OPEN_ORDER_STATUSES.includes(o.status || 'new')
+    && (!emirate || o.emirate === emirate)
+    && (!city || o.city === city));
+  const byCustomer = new Map();
+  for (const o of orders) {
+    const g = byCustomer.get(o.customerId) || { customerId: o.customerId, customerName: o.customerName, customerType: o.customerType, emirate: o.emirate, city: o.city, phone: o.phone, orders: [], totalQty: 0, highPriority: false };
+    g.orders.push(o); g.totalQty += o.totalQty; if (o.priority === 'high') g.highPriority = true;
+    byCustomer.set(o.customerId, g);
+  }
+  const groups = [...byCustomer.values()].sort((a, b) =>
+    (b.highPriority ? 1 : 0) - (a.highPriority ? 1 : 0) || (a.customerName || '').localeCompare(b.customerName || ''));
+  return { groups, orderCount: orders.length, centerCount: groups.length, totalQty: groups.reduce((s, g) => s + g.totalQty, 0) };
+}

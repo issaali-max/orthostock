@@ -8,6 +8,7 @@ import { CurrencyToggle } from '../ui/components.jsx';
 const Dashboard = lazy(() => import('../features/dashboard.jsx'));
 const Catalogue = lazy(() => import('../features/catalogue/Catalogue.jsx'));
 const Invoices = lazy(() => import('../features/sales/Invoices.jsx'));
+const Orders = lazy(() => import('../features/orders/Orders.jsx'));
 const Purchases = lazy(() => import('../features/purchases/Purchases.jsx'));
 const Customers = lazy(() => import('../features/customers/Customers.jsx'));
 const Suppliers = lazy(() => import('../features/suppliers/Suppliers.jsx'));
@@ -33,6 +34,7 @@ const NAV = [
   { key: 'catalogue', labelKey: 'catalogue', icon: '🗂️', Comp: Catalogue, primary: true },
   { key: 'invoices', labelKey: 'invoices', icon: '🧾', Comp: Invoices, primary: true },
   { key: 'customers', labelKey: 'customers', icon: '🧑‍⚕️', Comp: Customers, primary: true },
+  { key: 'orders', labelKey: 'orders', icon: '📋', Comp: Orders, primary: false },
   { key: 'cashflow', labelKey: 'cashFlow', icon: '💰', Comp: CashFlow, primary: false },
   { key: 'purchases', labelKey: 'purchases', icon: '📥', Comp: Purchases, primary: false },
   { key: 'suppliers', labelKey: 'suppliers', icon: '🚚', Comp: Suppliers, primary: false },
