@@ -15,7 +15,7 @@ const yearStart = () => `${new Date().getFullYear()}-01-01`;
 export default function Dashboard() {
   const [showRestock, setShowRestock] = useState(false);
   const app = useApp();
-  const { t, data, displayCurrency, usdRate } = app;
+  const { t, data, displayCurrency, usdRate, lang } = app;
   const [range, setRange] = useState('month'); // day | month | year
   const [trendMode, setTrendMode] = useState('month'); // month | year
   const [showSold, setShowSold] = useState(false);
@@ -32,6 +32,26 @@ export default function Dashboard() {
   const dPur = data[TABLES.purchases], dPurIt = data[TABLES.purchaseItems];
   const pl = useMemo(() => pnl(data, bounds), [dInv, dItems, dExp, dExpG, dPur, dPurIt, range]); // eslint-disable-line react-hooks/exhaustive-deps
   const today = useMemo(() => pnl(data, { from: todayISO(), to: todayISO() }), [dInv, dItems, dExp, dExpG, dPur, dPurIt]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Expenses grouped by their group for the selected range (AED base). These are the very
+  // same amounts the P&L subtracts (business → operating, personal/home → net) and that
+  // leave cash, so this chart ties exactly to profit and cash.
+  const expByGroup = useMemo(() => {
+    const inRange = (d) => d && d >= bounds.from && (!bounds.to || d <= bounds.to);
+    const grps = dExpG || [];
+    const gById = (id) => grps.find((g) => g.id === id);
+    const map = new Map();
+    for (const e of (dExp || [])) {
+      if (e.isActive === false || !inRange(e.date)) continue;
+      const g = gById(e.groupId);
+      const aed = e.currency === 'USD' ? num(e.amount) * num(usdRate) : num(e.amount);
+      const key = e.groupId || 'none';
+      const row = map.get(key) || { id: key, name: g ? ((lang === 'ar' ? g.nameAr : g.nameEn) || g.nameEn || g.nameAr) : t('other'), type: g?.type || 'business', color: g?.color, total: 0 };
+      row.total += aed; map.set(key, row);
+    }
+    const rows = [...map.values()].sort((a, b) => b.total - a.total);
+    return { rows, total: rows.reduce((s, r) => s + r.total, 0) };
+  }, [dExp, dExpG, range, usdRate, lang]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Drill-down: materials sold + buyers within the active range (active invoices only)
   const periodReport = useMemo(() => {
@@ -169,6 +189,31 @@ export default function Dashboard() {
           <PnlRow label={t('netAfterAll')} value={cur(pl.netAfterAll)} color={pl.netAfterAll >= 0 ? C.success : C.danger} strong />
         </div>
       </Card>
+
+      {/* ── Expenses by group (ties to the P&L expenses and cash) ── */}
+      {expByGroup.rows.length > 0 && (
+        <Card style={{ marginBottom: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
+            <span style={{ fontSize: 13, fontWeight: 800, color: C.text }}>📊 {t('expensesByGroup')}</span>
+            <span style={{ fontSize: 12, fontWeight: 800, color: C.warning }}>{cur(expByGroup.total)}</span>
+          </div>
+          <div style={{ display: 'grid', gap: 7 }}>
+            {expByGroup.rows.map((r) => {
+              const color = r.type === 'business' ? C.primary : r.type === 'home' ? C.success : C.warning;
+              const pctv = expByGroup.total > 0 ? (r.total / expByGroup.total) * 100 : 0;
+              return (
+                <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ width: 84, fontSize: 11, color: C.textMid, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
+                  <div style={{ flex: 1, height: 13, background: C.surfaceAlt, borderRadius: 7, overflow: 'hidden' }}>
+                    <div style={{ width: `${pctv}%`, height: '100%', background: color, borderRadius: 7 }} />
+                  </div>
+                  <span style={{ width: 72, textAlign: 'end', fontSize: 11, fontWeight: 700, color: C.text }}>{cur(r.total)}</span>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
 
       {/* ── Comparison trend (4 series, monthly/yearly) ── */}
       <Card className="rise" style={{ marginBottom: 14 }}>

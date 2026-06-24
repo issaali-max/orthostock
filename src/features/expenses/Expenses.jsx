@@ -37,22 +37,39 @@ export default function Expenses() {
     return rows.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   }, [data, from, filterGroup, typeFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Daily / monthly / yearly totals per type (independent of the range filter above), in
-  // AED base so currencies never mix. Drives the stat cards and the comparison chart.
-  const breakdown = useMemo(() => {
+  // Chart data drills down with the filter:
+  //  • no type  → compare the 3 TYPES (business/personal/home)
+  //  • a type   → compare the GROUPS inside that type
+  //  • a group  → compare the individual EXPENSES inside that group
+  // Every series carries its day / month / year total (AED base) so the chart and the
+  // stat cards always match the current selection.
+  const chartData = useMemo(() => {
     const today = todayISO(), mStart = monthStart(), yStart = yearStart();
-    const blank = () => ({ business: 0, personal: 0, home: 0 });
-    const w = { day: blank(), month: blank(), year: blank() };
-    for (const e of (data[TABLES.expenses] || [])) {
-      const type = typeOfGroup(e.groupId);
-      const aed = e.currency === 'USD' ? num(e.amount) * num(usdRate) : num(e.amount);
-      const d = e.date || '';
-      if (d === today) w.day[type] += aed;
-      if (d >= mStart) w.month[type] += aed;
-      if (d >= yStart) w.year[type] += aed;
+    const aedOf = (e) => (e.currency === 'USD' ? num(e.amount) * num(usdRate) : num(e.amount));
+    const sumWin = (rows) => {
+      const o = { day: 0, month: 0, year: 0 };
+      for (const e of rows) { const d = e.date || '', a = aedOf(e); if (d === today) o.day += a; if (d >= mStart) o.month += a; if (d >= yStart) o.year += a; }
+      return o;
+    };
+    const all = (data[TABLES.expenses] || []).filter((e) => e.isActive !== false);
+    const pal = CATEGORY_COLORS;
+    let series;
+    if (filterGroup) {
+      series = all.filter((e) => e.groupId === filterGroup)
+        .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+        .map((e, i) => ({ key: e.id, label: (e.note || '').trim() || fmtDate(e.date) || `#${i + 1}`, color: pal[i % pal.length], ...sumWin([e]) }));
+    } else if (typeFilter !== 'all') {
+      series = groups.filter((g) => typeOfGroup(g.id) === typeFilter)
+        .map((g, i) => ({ key: g.id, label: groupName(g), color: g.color || pal[i % pal.length], ...sumWin(all.filter((e) => e.groupId === g.id)) }))
+        .filter((s) => s.day || s.month || s.year);
+    } else {
+      series = [['business', C.primary], ['personal', C.warning], ['home', C.success]]
+        .map(([type, color]) => ({ key: type, label: t(type), color, ...sumWin(all.filter((e) => typeOfGroup(e.groupId) === type)) }));
     }
-    return w;
-  }, [data, groups, usdRate]); // eslint-disable-line react-hooks/exhaustive-deps
+    const maxVal = Math.max(1, ...series.flatMap((s) => [s.day, s.month, s.year]));
+    const totals = series.reduce((o, s) => ({ day: o.day + s.day, month: o.month + s.month, year: o.year + s.year }), { day: 0, month: 0, year: 0 });
+    return { series, maxVal, totals };
+  }, [data, groups, usdRate, typeFilter, filterGroup]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveExpense = async () => {
     const r = editExpense;
@@ -93,58 +110,50 @@ export default function Expenses() {
             ))}
           </div>
 
-          {/* Type filter */}
-          <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+          {/* Type filter — drives both the list and the chart */}
+          <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
             {[['all', `📋 ${t('allExpenses')}`], ['business', `🏢 ${t('business')}`], ['personal', `👤 ${t('personal')}`], ['home', `🏠 ${t('home')}`]].map(([k, label]) => (
-              <TabBtn key={k} active={typeFilter === k} onClick={() => setTypeFilter(k)} small>{label}</TabBtn>
+              <TabBtn key={k} active={typeFilter === k} onClick={() => { setTypeFilter(k); setFilterGroup(''); }} small>{label}</TabBtn>
             ))}
           </div>
 
-          {/* Daily / monthly / yearly totals for the selected type */}
-          {(() => {
-            const pick = (w) => typeFilter === 'all' ? (w.business + w.personal + w.home) : w[typeFilter];
-            return (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 12 }}>
-                <MiniStat label={t('daily')} value={fmtCur(pick(breakdown.day), displayCurrency, usdRate)} color={C.text} />
-                <MiniStat label={t('thisMonth')} value={fmtCur(pick(breakdown.month), displayCurrency, usdRate)} color={C.primary} />
-                <MiniStat label={t('thisYear')} value={fmtCur(pick(breakdown.year), displayCurrency, usdRate)} color={C.warning} />
-              </div>
-            );
-          })()}
+          {/* Group filter — scoped to the chosen type, sits right under it */}
+          <div style={{ marginBottom: 12 }}>
+            <Select value={filterGroup} onChange={setFilterGroup} placeholder={`— ${t('expenseGroup')} —`}
+              options={[{ value: '', label: typeFilter === 'all' ? t('allExpenses') : `${t(typeFilter)} (${t('allExpenses')})` },
+                ...groups.filter((g) => typeFilter === 'all' || typeOfGroup(g.id) === typeFilter).map((g) => ({ value: g.id, label: `${g.icon} ${groupName(g)}` }))]} />
+          </div>
 
-          {/* Comparison chart: business vs personal vs home across day / month / year */}
+          {/* Daily / monthly / yearly totals for the current selection */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 12 }}>
+            <MiniStat label={t('daily')} value={fmtCur(chartData.totals.day, displayCurrency, usdRate)} color={C.text} />
+            <MiniStat label={t('thisMonth')} value={fmtCur(chartData.totals.month, displayCurrency, usdRate)} color={C.primary} />
+            <MiniStat label={t('thisYear')} value={fmtCur(chartData.totals.year, displayCurrency, usdRate)} color={C.warning} />
+          </div>
+
+          {/* Comparison chart — drills with the filter (types → groups → expenses) */}
           {(() => {
-            const series = [['business', C.primary, `🏢 ${t('business')}`], ['personal', C.warning, `👤 ${t('personal')}`], ['home', C.success, `🏠 ${t('home')}`]];
             const periods = [['day', t('daily')], ['month', t('thisMonth')], ['year', t('thisYear')]];
-            const maxVal = Math.max(1, ...periods.flatMap(([p]) => series.map(([k]) => breakdown[p][k])));
-            const anyData = periods.some(([p]) => series.some(([k]) => breakdown[p][k] > 0));
-            if (!anyData) return null;
+            const { series, maxVal } = chartData;
+            if (!series.some((s) => s.day || s.month || s.year)) return null;
+            const scope = filterGroup ? groupName(groupById(filterGroup)) : (typeFilter === 'all' ? t('allExpenses') : t(typeFilter));
             return (
               <Card style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 13, fontWeight: 800, color: C.text, marginBottom: 4 }}>📊 {t('expenseComparison')}</div>
-                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
-                  {series.map(([k, color, label]) => (
-                    <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: C.textMid }}>
-                      <span style={{ width: 10, height: 10, borderRadius: 3, background: color }} />{label}
-                    </span>
-                  ))}
-                </div>
+                <div style={{ fontSize: 13, fontWeight: 800, color: C.text, marginBottom: 8 }}>📊 {t('expenseComparison')} · <span style={{ color: C.primary }}>{scope}</span></div>
                 <div style={{ display: 'grid', gap: 12 }}>
                   {periods.map(([p, plabel]) => (
                     <div key={p}>
                       <div style={{ fontSize: 11.5, fontWeight: 700, color: C.textMid, marginBottom: 4 }}>{plabel}</div>
                       <div style={{ display: 'grid', gap: 4 }}>
-                        {series.map(([k, color]) => {
-                          const v = breakdown[p][k];
-                          return (
-                            <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                              <div style={{ flex: 1, height: 14, background: C.surfaceAlt, borderRadius: 7, overflow: 'hidden' }}>
-                                <div style={{ width: `${(v / maxVal) * 100}%`, height: '100%', background: color, borderRadius: 7, transition: 'width .3s' }} />
-                              </div>
-                              <span style={{ width: 76, textAlign: 'end', fontSize: 11, fontWeight: 700, color: v > 0 ? C.text : C.textMuted }}>{fmtCur(v, displayCurrency, usdRate)}</span>
+                        {series.map((s) => (
+                          <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ width: 64, fontSize: 10, color: C.textMid, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.label}</span>
+                            <div style={{ flex: 1, height: 13, background: C.surfaceAlt, borderRadius: 7, overflow: 'hidden' }}>
+                              <div style={{ width: `${(s[p] / maxVal) * 100}%`, height: '100%', background: s.color, borderRadius: 7, transition: 'width .3s' }} />
                             </div>
-                          );
-                        })}
+                            <span style={{ width: 70, textAlign: 'end', fontSize: 10.5, fontWeight: 700, color: s[p] > 0 ? C.text : C.textMuted }}>{fmtCur(s[p], displayCurrency, usdRate)}</span>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   ))}
@@ -152,12 +161,6 @@ export default function Expenses() {
               </Card>
             );
           })()}
-
-          {/* Group filter */}
-          <div style={{ marginBottom: 10 }}>
-            <Select value={filterGroup} onChange={setFilterGroup} placeholder={`— ${t('expenseGroup')} —`}
-              options={[{ value: '', label: t('allTime') }, ...groups.map((g) => ({ value: g.id, label: `${g.icon} ${groupName(g)}` }))]} />
-          </div>
 
           {list.length === 0 ? <EmptyState icon="🧾" text={t('noExpenses')} /> : (
             <div style={{ display: 'grid', gap: 8 }}>
