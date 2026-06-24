@@ -40,6 +40,8 @@ function OrdersTab({ app, t, lang, data, createRow, updateRow, deleteRow }) {
   const [busy, setBusy] = useState(false);
 
   const customers = (data[TABLES.customers] || []).filter((c) => c.isActive !== false);
+  const categories = (data[TABLES.categories] || []).filter((c) => c.isActive !== false);
+  const products = (data[TABLES.products] || []).filter((p) => p.isActive !== false);
   const variants = (data[TABLES.variants] || []).filter((v) => v.isActive !== false);
   const orders = useMemo(() => orderList(app), [data]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -122,7 +124,7 @@ function OrdersTab({ app, t, lang, data, createRow, updateRow, deleteRow }) {
       )}
 
       {editing && (
-        <OrderEditor editing={editing} setEditing={setEditing} customers={customers} variants={variants}
+        <OrderEditor editing={editing} setEditing={setEditing} customers={customers} categories={categories} products={products} variants={variants}
           t={t} lang={lang} busy={busy} onSave={save} onDelete={editing.id ? () => { remove(editing); setEditing(null); } : null} />
       )}
     </>
@@ -130,27 +132,26 @@ function OrdersTab({ app, t, lang, data, createRow, updateRow, deleteRow }) {
 }
 
 // ── Add / edit a single order ────────────────────────────────────────────────
-function OrderEditor({ editing, setEditing, customers, variants, t, lang, busy, onSave, onDelete }) {
-  const [pick, setPick] = useState('');               // variant search text
+function OrderEditor({ editing, setEditing, customers, categories, products, variants, t, lang, busy, onSave, onDelete }) {
   const set = (patch) => setEditing((r) => ({ ...r, ...patch }));
   const cust = customers.find((c) => c.id === editing.customerId);
-  // Area picker state: emirate → city → customer. Seeded from the chosen customer (when
-  // editing) so the dropdowns show the right context.
   const [emirate, setEmirate] = useState(cust?.emirate || '');
   const [city, setCity] = useState((cust?.city || '').trim());
+  const [catId, setCatId] = useState('');
+  const [prodId, setProdId] = useState('');
   const lines = editing.lines || [];
 
-  // customers narrowed by the chosen area — pick the doctor/center from here
   const areaCustomers = customers.filter((c) =>
     (!emirate || c.emirate === emirate) && (!city || (c.city || '').trim() === city));
 
-  const matches = pick.trim()
-    ? variants.filter((v) => `${v.nameEn} ${v.sku || ''}`.toLowerCase().includes(pick.trim().toLowerCase())).slice(0, 8)
-    : [];
-  const addLine = (v) => { if (!lines.some((l) => l.variantId === v.id)) set({ lines: [...lines, { variantId: v.id, qty: 1, note: '' }] }); setPick(''); };
+  // Product picker, same flow as the invoice: category → product → variant.
+  const catProducts = products.filter((p) => p.categoryId === catId);
+  const variantsOfProduct = (pid) => variants.filter((v) => v.productId === pid);
+  const inLine = (id) => lines.some((l) => l.variantId === id);
+  const toggle = (v) => set({ lines: inLine(v.id) ? lines.filter((l) => l.variantId !== v.id) : [...lines, { variantId: v.id, qty: 1, note: '' }] });
   const setLine = (id, patch) => set({ lines: lines.map((l) => (l.variantId === id ? { ...l, ...patch } : l)) });
   const delLine = (id) => set({ lines: lines.filter((l) => l.variantId !== id) });
-  const vName = (id) => variants.find((v) => v.id === id)?.nameEn || id;
+  const vLabel = (id) => { const v = variants.find((x) => x.id === id); if (!v) return id; const attrs = Object.values(v.attributes || {}).filter(Boolean); return attrs.length ? `${v.nameEn} · ${attrs.join(' · ')}` : (v.nameEn || v.sku); };
 
   return (
     <Modal open onClose={() => setEditing(null)} title={editing.id ? t('editOrder') : t('newOrder')} dismissable
@@ -176,31 +177,56 @@ function OrderEditor({ editing, setEditing, customers, variants, t, lang, busy, 
       {cust && <div style={{ fontSize: 11, color: C.textMuted, marginTop: -6, marginBottom: 10 }}>📍 {emirateLabel(cust.emirate, lang) || '—'}{cust.city ? ` · ${cust.city}` : ''}{cust.phone ? ` · ${cust.phone}` : ''}</div>}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-        <Field label={t('orderDate')}><Input type="date" value={editing.date} onChange={(v) => set({ date: v })} /></Field>
-        <Field label={t('plannedDate')}><Input type="date" value={editing.plannedDate} onChange={(v) => set({ plannedDate: v })} /></Field>
         <Field label={t('orderStatus')}><Select value={editing.status} onChange={(v) => set({ status: v })} options={ORDER_STATUSES.map((s) => ({ value: s, label: t(`status_${s}`) }))} /></Field>
         <Field label={t('priority')}><Select value={editing.priority} onChange={(v) => set({ priority: v })} options={[{ value: 'normal', label: t('normal') }, { value: 'high', label: `🔥 ${t('high')}` }]} /></Field>
       </div>
+      {/* Delivery date is optional — leave empty to keep the order "in planning", set/change it any time */}
+      <Field label={`${t('plannedDate')} · ${t('optional')}`}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <Input type="date" value={editing.plannedDate || ''} onChange={(v) => set({ plannedDate: v })} style={{ flex: 1 }} />
+          {editing.plannedDate && <button type="button" onClick={() => set({ plannedDate: '' })} style={{ border: 'none', background: 'transparent', color: C.danger, fontSize: 14, cursor: 'pointer' }}>✕</button>}
+        </div>
+      </Field>
 
-      {/* Products */}
-      <div style={{ fontSize: 12, fontWeight: 800, color: C.text, margin: '8px 0 6px' }}>📦 {t('products')}</div>
-      <Input value={pick} onChange={setPick} placeholder={`🔍 ${t('addProduct')}`} />
-      {matches.length > 0 && (
-        <div style={{ display: 'grid', gap: 4, margin: '6px 0' }}>
-          {matches.map((v) => (
-            <button key={v.id} type="button" onClick={() => addLine(v)} style={{ textAlign: 'start', padding: '8px 10px', borderRadius: 8, border: `1px solid ${C.border}`, background: '#fff', cursor: 'pointer', fontSize: 12.5, color: C.text }}>
-              {v.nameEn} <span style={{ color: C.textMuted, fontSize: 11 }}>· {v.sku || ''}</span>
-            </button>
-          ))}
+      {/* Products — category → product → variant, like the invoice */}
+      <div style={{ fontSize: 12, fontWeight: 800, color: C.text, margin: '10px 0 6px' }}>📦 {t('products')}</div>
+      <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4, marginBottom: 6 }}>
+        {categories.map((c) => (
+          <button key={c.id} type="button" onClick={() => { setCatId(c.id); setProdId(''); }} style={{ whiteSpace: 'nowrap', border: `1.5px solid ${catId === c.id ? C.primary : C.border}`, background: catId === c.id ? C.primary : '#fff', color: catId === c.id ? '#fff' : C.textMid, borderRadius: 999, padding: '6px 12px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>{c.icon} {c.nameEn}</button>
+        ))}
+      </div>
+      {catId && (catProducts.length === 0
+        ? <div style={{ fontSize: 12, color: C.textMuted, textAlign: 'center', padding: 10, border: `1px solid ${C.border}`, borderRadius: 10, marginBottom: 8 }}>{t('noProducts')}</div>
+        : <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4, marginBottom: 6 }}>
+            {catProducts.map((p) => (
+              <button key={p.id} type="button" onClick={() => setProdId(p.id)} style={{ whiteSpace: 'nowrap', border: `1.5px solid ${prodId === p.id ? C.primaryMid : C.border}`, background: prodId === p.id ? C.primaryMid : '#fff', color: prodId === p.id ? '#fff' : C.textMid, borderRadius: 999, padding: '6px 12px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>{p.icon} {p.nameEn}</button>
+            ))}
+          </div>)}
+      {prodId && (
+        <div style={{ maxHeight: 200, overflowY: 'auto', border: `1px solid ${C.border}`, borderRadius: 10, padding: 8, marginBottom: 8 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {variantsOfProduct(prodId).map((v) => {
+              const on = inLine(v.id);
+              const attrs = Object.values(v.attributes || {}).filter(Boolean);
+              return (
+                <button key={v.id} type="button" onClick={() => toggle(v)} style={{ border: `1.5px solid ${on ? C.success : C.border}`, background: on ? C.success : '#fff', color: on ? '#fff' : C.text, borderRadius: 10, padding: '8px 11px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                  {on ? '✓ ' : ''}{attrs.length ? attrs.join(' · ') : (v.nameEn || v.sku)}
+                </button>
+              );
+            })}
+            {variantsOfProduct(prodId).length === 0 && <div style={{ fontSize: 12, color: C.textMuted, padding: 8 }}>{t('noData')}</div>}
+          </div>
         </div>
       )}
-      <div style={{ display: 'grid', gap: 6, marginTop: 8 }}>
+
+      {/* Chosen lines: recommended quantity + optional note */}
+      <div style={{ display: 'grid', gap: 6 }}>
         {lines.length === 0 && <div style={{ fontSize: 12, color: C.textMuted, textAlign: 'center', padding: 10, border: `1px dashed ${C.border}`, borderRadius: 10 }}>{t('noProducts')}</div>}
         {lines.map((l) => (
           <div key={l.variantId} style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ flex: 1, fontSize: 12.5, fontWeight: 700, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{vName(l.variantId)}</span>
-              <Input type="number" value={l.qty} onChange={(v) => setLine(l.variantId, { qty: num(v) })} style={{ width: 54, padding: 6 }} />
+              <span style={{ flex: 1, fontSize: 12.5, fontWeight: 700, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{vLabel(l.variantId)}</span>
+              <Input type="number" value={l.qty} onChange={(v) => setLine(l.variantId, { qty: num(v) })} style={{ width: 56, padding: 6 }} />
               <button type="button" onClick={() => delLine(l.variantId)} style={{ border: 'none', background: 'transparent', color: C.danger, fontSize: 16, cursor: 'pointer' }}>✕</button>
             </div>
             <Input value={l.note || ''} onChange={(v) => setLine(l.variantId, { note: v })} placeholder={t('note')} style={{ marginTop: 6, fontSize: 12 }} />
@@ -213,77 +239,128 @@ function OrderEditor({ editing, setEditing, customers, variants, t, lang, busy, 
   );
 }
 
-// ── Visit Plan ───────────────────────────────────────────────────────────────
+// ── Visit Plan (calendar) ────────────────────────────────────────────────────
 function PlanTab({ app, t, lang }) {
-  const [emirate, setEmirate] = useState('');
-  const [city, setCity] = useState('');
-  const plan = useMemo(() => visitPlan(app, { emirate, city }), [app.data, emirate, city]); // eslint-disable-line react-hooks/exhaustive-deps
+  const { data, createRow, deleteRow } = app;
+  const [cursor, setCursor] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
+  const [selDate, setSelDate] = useState(todayISO());
+  const [editVisit, setEditVisit] = useState(null);
+
+  const visits = useMemo(() => (data[TABLES.visits] || []).filter((v) => v.isActive !== false), [data]);
+  const visitsByDate = useMemo(() => {
+    const m = new Map();
+    for (const v of visits) { if (!m.has(v.date)) m.set(v.date, []); m.get(v.date).push(v); }
+    return m;
+  }, [visits]);
+  const dayVisits = visitsByDate.get(selDate) || [];
+
+  // month grid (weeks starting Sunday)
+  const first = new Date(cursor.y, cursor.m, 1);
+  const startPad = first.getDay();
+  const daysInMonth = new Date(cursor.y, cursor.m + 1, 0).getDate();
+  const iso = (d) => `${cursor.y}-${String(cursor.m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  const monthName = first.toLocaleDateString(lang === 'ar' ? 'ar' : 'en', { month: 'long', year: 'numeric' });
+  const cells = [...Array(startPad).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
+  const weekdays = lang === 'ar' ? ['أحد', 'إثن', 'ثلا', 'أرب', 'خمي', 'جمع', 'سبت'] : ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+
+  const saveVisit = async () => {
+    const r = editVisit;
+    if (!r.city) return;
+    await createRow(TABLES.visits, { date: r.date || selDate, emirate: r.emirate || '', city: r.city, notes: r.notes || '', isActive: true });
+    setEditVisit(null);
+  };
 
   return (
     <>
+      {/* Calendar */}
       <Card style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: C.textMid, marginBottom: 8 }}>🗺️ {t('selectArea')}</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-          <Select value={emirate} onChange={(v) => { setEmirate(v); setCity(''); }} placeholder={t('allEmirates')} options={[{ value: '', label: t('allEmirates') }, ...emirateOptions(lang)]} />
-          <Select value={city} onChange={setCity} placeholder={t('allCities')} options={[{ value: '', label: t('allCities') }, ...(emirate ? citiesOfEmirate(emirate) : allCities()).map((c) => ({ value: c, label: c }))]} />
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <button type="button" onClick={() => setCursor((c) => { const m = c.m - 1; return m < 0 ? { y: c.y - 1, m: 11 } : { ...c, m }; })} style={navBtn}>‹</button>
+          <span style={{ fontSize: 14, fontWeight: 800, color: C.text }}>{monthName}</span>
+          <button type="button" onClick={() => setCursor((c) => { const m = c.m + 1; return m > 11 ? { y: c.y + 1, m: 0 } : { ...c, m }; })} style={navBtn}>›</button>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 2, marginBottom: 4 }}>
+          {weekdays.map((w) => <div key={w} style={{ textAlign: 'center', fontSize: 9.5, color: C.textMuted, fontWeight: 700 }}>{w}</div>)}
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 2 }}>
+          {cells.map((d, i) => {
+            if (!d) return <div key={`p${i}`} />;
+            const ds = iso(d); const has = visitsByDate.has(ds); const isToday = ds === todayISO(); const isSel = ds === selDate;
+            return (
+              <button key={ds} type="button" onClick={() => setSelDate(ds)}
+                style={{ aspectRatio: '1', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 12.5, fontWeight: isToday ? 800 : 600,
+                  background: isSel ? C.primary : (isToday ? C.surfaceAlt : 'transparent'), color: isSel ? '#fff' : C.text,
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1, position: 'relative' }}>
+                {d}
+                {has && <span style={{ width: 5, height: 5, borderRadius: 3, background: isSel ? '#fff' : C.danger }} />}
+              </button>
+            );
+          })}
         </div>
       </Card>
 
-      {/* Summary */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 12 }}>
-        <Stat label={t('centers')} value={plan.centerCount} />
-        <Stat label={t('openOrders')} value={plan.orderCount} />
-        <Stat label={t('totalQty')} value={plan.totalQty} />
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <span style={{ fontSize: 13, fontWeight: 800, color: C.text }}>🗓️ {fmtDate(selDate)}</span>
+        <Btn size="sm" onClick={() => setEditVisit({ date: selDate, emirate: '', city: '', notes: '' })}>＋ {t('planVisit')}</Btn>
       </div>
 
-      {plan.groups.length === 0 ? <EmptyState icon="🗺️" text={t('noOpenOrders')} /> : (
-        <div style={{ display: 'grid', gap: 10 }}>
-          {plan.groups.map((g) => (
-            <Card key={g.customerId}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontWeight: 800, color: C.text }}>{g.customerType === 'center' ? '🏥' : '🧑‍⚕️'} {g.customerName} {g.highPriority && <span style={{ fontSize: 10, color: C.danger }}>🔥</span>}</div>
-                  <div style={{ fontSize: 10.5, color: C.textMuted }}>📍 {emirateLabel(g.emirate, lang) || '—'}{g.city ? ` · ${g.city}` : ''}{g.phone ? ` · ${g.phone}` : ''}</div>
-                </div>
-                {g.phone && <a href={`tel:${g.phone}`} onClick={(e) => e.stopPropagation()} style={{ fontSize: 18, textDecoration: 'none' }}>📞</a>}
-              </div>
-              <div style={{ display: 'grid', gap: 6 }}>
-                {g.orders.map((o) => (
-                  <div key={o.id} style={{ background: C.surfaceAlt, borderRadius: 9, padding: '7px 9px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
-                      <Badge tone={STATUS_TONE[o.status] || 'info'}>{t(`status_${o.status || 'new'}`)}</Badge>
-                      <span style={{ fontSize: 10, color: C.textMuted }}>{fmtDate(o.date)}</span>
-                    </div>
-                    <div style={{ fontSize: 12, color: C.text }}>
-                      {o.items.map((it) => (
-                        <div key={it.variantId} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '2px 0' }}>
-                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>📦 {it.material}{it.note ? ` — ${it.note}` : ''}</span>
-                          <b style={{ color: C.primary }}>×{it.qty}</b>
-                        </div>
-                      ))}
-                    </div>
-                    {o.notes && <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4, fontStyle: 'italic' }}>📝 {o.notes}</div>}
-                  </div>
-                ))}
-              </div>
-            </Card>
-          ))}
+      {dayVisits.length === 0 ? <EmptyState icon="🗺️" text={t('noVisitsThisDay')} /> : (
+        <div style={{ display: 'grid', gap: 12 }}>
+          {dayVisits.map((v) => <VisitCard key={v.id} visit={v} app={app} t={t} lang={lang} onDelete={() => deleteRow(TABLES.visits, v.id)} />)}
         </div>
+      )}
+
+      {editVisit && (
+        <Modal open onClose={() => setEditVisit(null)} title={t('planVisit')} dismissable
+          footer={<><Btn variant="ghost" onClick={() => setEditVisit(null)}>{t('cancel')}</Btn><Btn onClick={saveVisit} disabled={!editVisit.city}>{t('save')}</Btn></>}>
+          <Field label={t('date')}><Input type="date" value={editVisit.date} onChange={(v) => setEditVisit((r) => ({ ...r, date: v }))} /></Field>
+          <Field label={t('emirate')}><Select value={editVisit.emirate} onChange={(v) => setEditVisit((r) => ({ ...r, emirate: v, city: '' }))} placeholder="—" options={emirateOptions(lang)} /></Field>
+          <Field label={t('city')}><Select value={editVisit.city} onChange={(v) => setEditVisit((r) => ({ ...r, city: v }))} placeholder="—" options={(editVisit.emirate ? citiesOfEmirate(editVisit.emirate) : allCities()).map((c) => ({ value: c, label: c }))} /></Field>
+          <Field label={t('notes')}><Textarea value={editVisit.notes} onChange={(v) => setEditVisit((r) => ({ ...r, notes: v }))} rows={2} /></Field>
+        </Modal>
       )}
     </>
   );
 }
 
+// A scheduled visit: shows the open orders for its city (centers + materials to prepare).
+function VisitCard({ visit, app, t, lang, onDelete }) {
+  const plan = useMemo(() => visitPlan(app, { emirate: visit.emirate, city: visit.city }), [app.data, visit.emirate, visit.city]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <Card>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+        <div>
+          <div style={{ fontWeight: 800, color: C.text }}>🚗 {visit.city || emirateLabel(visit.emirate, lang) || t('visit')}</div>
+          <div style={{ fontSize: 10.5, color: C.textMuted }}>📍 {emirateLabel(visit.emirate, lang) || '—'} · {plan.centerCount} {t('centers')} · {plan.orderCount} {t('openOrders')} · {plan.totalQty} {t('totalQty')}</div>
+        </div>
+        <button type="button" onClick={onDelete} style={{ border: 'none', background: 'transparent', color: C.danger, fontSize: 14, cursor: 'pointer' }}>🗑</button>
+      </div>
+      {visit.notes && <div style={{ fontSize: 11.5, color: C.textMid, fontStyle: 'italic', marginBottom: 8 }}>📝 {visit.notes}</div>}
+      {plan.groups.length === 0 ? <div style={{ fontSize: 12, color: C.textMuted, padding: 8 }}>{t('noOpenOrders')}</div> : (
+        <div style={{ display: 'grid', gap: 8 }}>
+          {plan.groups.map((g) => (
+            <div key={g.customerId} style={{ background: C.surfaceAlt, borderRadius: 9, padding: '8px 10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                <span style={{ fontWeight: 700, color: C.text, fontSize: 12.5 }}>{g.customerType === 'center' ? '🏥' : '🧑‍⚕️'} {g.customerName} {g.highPriority && <span style={{ color: C.danger, fontSize: 10 }}>🔥</span>}</span>
+                {g.phone && <a href={`tel:${g.phone}`} style={{ fontSize: 15, textDecoration: 'none' }}>📞</a>}
+              </div>
+              {g.orders.flatMap((o) => o.items).map((it, idx) => (
+                <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12, padding: '2px 0' }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>📦 {it.material}{it.note ? ` — ${it.note}` : ''}</span>
+                  <b style={{ color: C.primary }}>×{it.qty}</b>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+const navBtn = { width: 32, height: 32, borderRadius: 8, border: `1px solid ${C.border}`, background: '#fff', fontSize: 18, fontWeight: 800, color: C.primary, cursor: 'pointer' };
+
 function TabBtn({ active, onClick, children }) {
   return (
     <button type="button" onClick={onClick} style={{ flex: 1, padding: '9px 8px', borderRadius: 10, border: `1px solid ${active ? C.primary : C.border}`, background: active ? C.primary : '#fff', color: active ? '#fff' : C.textMid, fontSize: 13, fontWeight: 800, cursor: 'pointer' }}>{children}</button>
-  );
-}
-function Stat({ label, value }) {
-  return (
-    <Card style={{ padding: 10, textAlign: 'center' }}>
-      <div style={{ fontSize: 18, fontWeight: 800, color: C.primary }}>{value}</div>
-      <div style={{ fontSize: 11, color: C.textMuted }}>{label}</div>
-    </Card>
   );
 }
