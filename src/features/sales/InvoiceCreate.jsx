@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useApp } from '../../app/AppProvider.jsx';
+import QuickOrder from '../orders/QuickOrder.jsx';
 import { C, TABLES, emirateOptions, citiesOfEmirate, allCities } from '../../lib/constants.js';
 import { fmtCur, fmtNum, num, round2, safeDiv } from '../../lib/money.js';
 import { todayISO } from '../../lib/dates.js';
@@ -28,6 +29,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
   const [vq, setVq] = useState(''); // quick material search across ALL categories
   const [prodId, setProdId] = useState('');
   const [customerId, setCustomerId] = useState('');
+  const [showQuickOrder, setShowQuickOrder] = useState(false);
   const [custEmirate, setCustEmirate] = useState('');
   const [custCity, setCustCity] = useState('');
   // city list follows the chosen emirate (fixed Arabic cities), else every city
@@ -109,6 +111,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
   };
 
   return (
+    <>
     <Modal open={open} onClose={onClose} title={editing ? `${t('editInvoice')} · ${editing.invoiceNumber}` : t('newInvoice')} width={520}
       footer={<>
         {editing && <Btn variant="ghost" onClick={async () => {
@@ -137,6 +140,12 @@ export default function InvoiceCreate({ open, onClose, editing }) {
         <Field label={t('customer')} required>
           <Select value={customerId} onChange={setCustomerId} placeholder={t('selectCustomer')} options={clinicOptions} />
         </Field>
+        {customerId && (
+          <button type="button" onClick={() => setShowQuickOrder(true)}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, border: `1px solid ${C.primary}`, background: '#fff', color: C.primary, borderRadius: 9, padding: '5px 10px', fontSize: 12, fontWeight: 800, cursor: 'pointer', marginBottom: 8 }}>
+            ＋ {t('newOrder')}
+          </button>
+        )}
         <Field label={t('date')}><Input type="date" value={date} onChange={setDate} /></Field>
       </div>
 
@@ -291,6 +300,11 @@ export default function InvoiceCreate({ open, onClose, editing }) {
         </>
       )}
     </Modal>
+    {showQuickOrder && (
+      <QuickOrder app={app} customerId={customerId} onClose={() => setShowQuickOrder(false)}
+        onSaved={() => app.showToast(t('orderSaved'), 'success')} />
+    )}
+    </>
   );
 }
 
