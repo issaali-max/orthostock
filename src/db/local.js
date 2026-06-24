@@ -9,7 +9,7 @@
 import { TABLES } from '../lib/constants.js';
 
 const DB_NAME = 'orthostock';
-const DB_VERSION = 4; // bump whenever TABLES gains a store, so onupgradeneeded recreates missing stores (v4: auditLog, supplierPayments)
+const DB_VERSION = 5; // bump whenever TABLES gains a store, so onupgradeneeded recreates missing stores (v5: orders, orderItems)
 const STORES = [...Object.values(TABLES), 'outbox', 'meta'];
 
 let _open;
@@ -37,16 +37,23 @@ function openAt(version) {
 
 function openDB() {
   if (_open) return _open;
-  // Self-healing: open at the target version, and if any required store is STILL
-  // missing afterwards (e.g. a store was added but a previous upgrade was skipped),
-  // reopen at the next version to force onupgradeneeded to create it. This makes
-  // "object store not found" errors impossible after adding new tables.
-  _open = openAt(DB_VERSION).then((db) => {
-    const missing = STORES.filter((s) => !db.objectStoreNames.contains(s));
-    if (!missing.length) return db;
-    const nextV = db.version + 1; db.close();
-    return openAt(nextV);
-  }).catch((e) => { _open = null; throw e; });
+  // Self-healing open:
+  //  1) Open at the target version. If the DB on disk is at a HIGHER version than the
+  //     code (e.g. a previous self-heal already bumped it), opening at a lower version
+  //     throws a VersionError — so we retry WITHOUT a version, which opens at whatever
+  //     version exists (the needed stores were created when it was bumped). This makes
+  //     a lagging DB_VERSION impossible to lock anyone out.
+  //  2) If any required store is still missing afterwards, reopen at the next version to
+  //     force onupgradeneeded to create it. So "object store not found" can't happen.
+  _open = openAt(DB_VERSION)
+    .catch(() => openAt())
+    .then((db) => {
+      const missing = STORES.filter((s) => !db.objectStoreNames.contains(s));
+      if (!missing.length) return db;
+      const nextV = db.version + 1; db.close();
+      return openAt(nextV);
+    })
+    .catch((e) => { _open = null; throw e; });
   return _open;
 }
 
