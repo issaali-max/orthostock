@@ -103,6 +103,10 @@ export async function saveVariant(app, rec) {
       const pname = (rec.nameEn || sku).trim();
       const saved = await app.createRow(TABLES.products, { nameAr: pname, nameEn: pname, brand: rec.brand || '', categoryId: wantCat, icon: '📦', image_path: rec.image_path || rec.image_url || '', description: '', isGroup: false, isActive: true });
       productId = saved?.id || null;
+    } else if (wantCat && currentCatId !== wantCat) {
+      // already standalone with its OWN product, but the category changed → move that
+      // product to the new category (this is the "can't move material" fix).
+      await app.updateRow(TABLES.products, productId, { categoryId: wantCat });
     }
   } else if ((rec.groupName || '').trim() && wantCat) {
     // user typed a new group name: find-or-create it inside the category

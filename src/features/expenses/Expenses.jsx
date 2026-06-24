@@ -17,6 +17,7 @@ export default function Expenses() {
   const [tab, setTab] = useState('list');           // list | groups
   const [range, setRange] = useState('month');      // month | year | all
   const [filterGroup, setFilterGroup] = useState('');
+  const [typeFilter, setTypeFilter] = useState('all'); // all | business | personal | home
   const [editExpense, setEditExpense] = useState(null);
   const [editGroup, setEditGroup] = useState(null);
 
@@ -26,22 +27,32 @@ export default function Expenses() {
 
   const from = range === 'month' ? monthStart() : range === 'year' ? yearStart() : '';
 
+  const typeOfGroup = (id) => { const g = groupById(id); return g?.type === 'personal' ? 'personal' : g?.type === 'home' ? 'home' : 'business'; };
+
   const list = useMemo(() => {
     let rows = (data[TABLES.expenses] || []).slice();
     if (from) rows = rows.filter((e) => (e.date || '') >= from);
     if (filterGroup) rows = rows.filter((e) => e.groupId === filterGroup);
+    if (typeFilter !== 'all') rows = rows.filter((e) => typeOfGroup(e.groupId) === typeFilter);
     return rows.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  }, [data, from, filterGroup]);
+  }, [data, from, filterGroup, typeFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const totals = useMemo(() => {
-    let business = 0, personal = 0;
-    for (const e of list) {
-      const g = groupById(e.groupId);
-      const aed = e.currency === 'USD' ? num(e.amount) * num(usdRate) : num(e.amount); // to AED base so totals never mix currencies
-      if (g?.type === 'personal') personal += aed; else business += aed;
+  // Daily / monthly / yearly totals per type (independent of the range filter above), in
+  // AED base so currencies never mix. Drives the stat cards and the comparison chart.
+  const breakdown = useMemo(() => {
+    const today = todayISO(), mStart = monthStart(), yStart = yearStart();
+    const blank = () => ({ business: 0, personal: 0, home: 0 });
+    const w = { day: blank(), month: blank(), year: blank() };
+    for (const e of (data[TABLES.expenses] || [])) {
+      const type = typeOfGroup(e.groupId);
+      const aed = e.currency === 'USD' ? num(e.amount) * num(usdRate) : num(e.amount);
+      const d = e.date || '';
+      if (d === today) w.day[type] += aed;
+      if (d >= mStart) w.month[type] += aed;
+      if (d >= yStart) w.year[type] += aed;
     }
-    return { business, personal, all: business + personal };
-  }, [list, groups, usdRate]);
+    return w;
+  }, [data, groups, usdRate]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveExpense = async () => {
     const r = editExpense;
@@ -82,12 +93,65 @@ export default function Expenses() {
             ))}
           </div>
 
-          {/* Totals */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 12 }}>
-            <MiniStat label={t('total')} value={fmtCur(totals.all, displayCurrency, usdRate)} color={C.text} />
-            <MiniStat label={t('business')} value={fmtCur(totals.business, displayCurrency, usdRate)} color={C.primary} />
-            <MiniStat label={t('personal')} value={fmtCur(totals.personal, displayCurrency, usdRate)} color={C.warning} />
+          {/* Type filter */}
+          <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+            {[['all', `📋 ${t('allExpenses')}`], ['business', `🏢 ${t('business')}`], ['personal', `👤 ${t('personal')}`], ['home', `🏠 ${t('home')}`]].map(([k, label]) => (
+              <TabBtn key={k} active={typeFilter === k} onClick={() => setTypeFilter(k)} small>{label}</TabBtn>
+            ))}
           </div>
+
+          {/* Daily / monthly / yearly totals for the selected type */}
+          {(() => {
+            const pick = (w) => typeFilter === 'all' ? (w.business + w.personal + w.home) : w[typeFilter];
+            return (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 12 }}>
+                <MiniStat label={t('daily')} value={fmtCur(pick(breakdown.day), displayCurrency, usdRate)} color={C.text} />
+                <MiniStat label={t('thisMonth')} value={fmtCur(pick(breakdown.month), displayCurrency, usdRate)} color={C.primary} />
+                <MiniStat label={t('thisYear')} value={fmtCur(pick(breakdown.year), displayCurrency, usdRate)} color={C.warning} />
+              </div>
+            );
+          })()}
+
+          {/* Comparison chart: business vs personal vs home across day / month / year */}
+          {(() => {
+            const series = [['business', C.primary, `🏢 ${t('business')}`], ['personal', C.warning, `👤 ${t('personal')}`], ['home', C.success, `🏠 ${t('home')}`]];
+            const periods = [['day', t('daily')], ['month', t('thisMonth')], ['year', t('thisYear')]];
+            const maxVal = Math.max(1, ...periods.flatMap(([p]) => series.map(([k]) => breakdown[p][k])));
+            const anyData = periods.some(([p]) => series.some(([k]) => breakdown[p][k] > 0));
+            if (!anyData) return null;
+            return (
+              <Card style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: C.text, marginBottom: 4 }}>📊 {t('expenseComparison')}</div>
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
+                  {series.map(([k, color, label]) => (
+                    <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: C.textMid }}>
+                      <span style={{ width: 10, height: 10, borderRadius: 3, background: color }} />{label}
+                    </span>
+                  ))}
+                </div>
+                <div style={{ display: 'grid', gap: 12 }}>
+                  {periods.map(([p, plabel]) => (
+                    <div key={p}>
+                      <div style={{ fontSize: 11.5, fontWeight: 700, color: C.textMid, marginBottom: 4 }}>{plabel}</div>
+                      <div style={{ display: 'grid', gap: 4 }}>
+                        {series.map(([k, color]) => {
+                          const v = breakdown[p][k];
+                          return (
+                            <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <div style={{ flex: 1, height: 14, background: C.surfaceAlt, borderRadius: 7, overflow: 'hidden' }}>
+                                <div style={{ width: `${(v / maxVal) * 100}%`, height: '100%', background: color, borderRadius: 7, transition: 'width .3s' }} />
+                              </div>
+                              <span style={{ width: 76, textAlign: 'end', fontSize: 11, fontWeight: 700, color: v > 0 ? C.text : C.textMuted }}>{fmtCur(v, displayCurrency, usdRate)}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            );
+          })()}
 
           {/* Group filter */}
           <div style={{ marginBottom: 10 }}>
@@ -104,7 +168,7 @@ export default function Expenses() {
                     onClick={() => setEditExpense({ ...e, amount: String(e.amount) })}>
                     <div style={{ fontSize: 18 }}>{g?.icon || '🧾'}</div>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 700, color: C.text, fontSize: 13 }}>{groupName(g)} {g && <Badge tone={g.type === 'personal' ? 'warning' : 'info'}>{t(g.type)}</Badge>}</div>
+                      <div style={{ fontWeight: 700, color: C.text, fontSize: 13 }}>{groupName(g)} {g && <Badge tone={g.type === 'personal' ? 'warning' : g.type === 'home' ? 'success' : 'info'}>{t(g.type)}</Badge>}</div>
                       <div style={{ fontSize: 11, color: C.textMuted }}>{fmtDate(e.date, lang)}{e.note ? ` · ${e.note}` : ''}</div>
                     </div>
                     <div style={{ fontWeight: 800, color: C.text }}>{`${e.currency === 'USD' ? 'USD' : 'AED'} ${num(e.amount).toFixed(2)}`}</div>
@@ -122,7 +186,7 @@ export default function Expenses() {
                 onClick={() => setEditGroup({ ...g })}>
                 <div style={{ fontSize: 20 }}>{g.icon}</div>
                 <div style={{ flex: 1, fontWeight: 700, color: C.text }}>{groupName(g)}</div>
-                <Badge tone={g.type === 'personal' ? 'warning' : 'info'}>{t(g.type)}</Badge>
+                <Badge tone={g.type === 'personal' ? 'warning' : g.type === 'home' ? 'success' : 'info'}>{t(g.type)}</Badge>
                 <span style={{ color: C.textMuted }}>›</span>
               </Card>
             ))}
@@ -164,7 +228,7 @@ export default function Expenses() {
             </div>
             <Field label={t('expenseType')} required>
               <Select value={editGroup.type} onChange={(v) => setEditGroup((r) => ({ ...r, type: v }))}
-                options={[{ value: 'business', label: t('business') }, { value: 'personal', label: t('personal') }]} />
+                options={[{ value: 'business', label: t('business') }, { value: 'personal', label: t('personal') }, { value: 'home', label: t('home') }]} />
             </Field>
             <Field label={t('icon')}>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>

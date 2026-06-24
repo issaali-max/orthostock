@@ -585,14 +585,15 @@ export function pnl(data, opts = {}) {
 
   const businessExp = expenses.filter((e) => typeOf(e.groupId) === 'business').reduce((s, e) => s + num(e.amount), 0);
   const personalExp = expenses.filter((e) => typeOf(e.groupId) === 'personal').reduce((s, e) => s + num(e.amount), 0);
+  const homeExp = expenses.filter((e) => typeOf(e.groupId) === 'home').reduce((s, e) => s + num(e.amount), 0);
   const grossProfit = salesProfit + freeRestockGain;       // sales margin + recovered inventory
   const operatingProfit = grossProfit - businessExp;
-  const netAfterAll = operatingProfit - personalExp;
+  const netAfterAll = operatingProfit - personalExp - homeExp;
 
   return {
     revenue: round2(revenue), cogs: round2(cogs), salesProfit: round2(salesProfit),
     freeRestockGain: round2(freeRestockGain), grossProfit: round2(grossProfit),
-    businessExp: round2(businessExp), personalExp: round2(personalExp),
+    businessExp: round2(businessExp), personalExp: round2(personalExp), homeExp: round2(homeExp),
     operatingProfit: round2(operatingProfit), netAfterAll: round2(netAfterAll),
     invoiceCount: invoices.length, expenseCount: expenses.length,
     margin: revenue > 0 ? round2((grossProfit / revenue) * 100) : 0,
@@ -813,7 +814,7 @@ export function periodTrend(data, mode = 'month', n = 6) {
   const byKey = Object.fromEntries(buckets.map((b) => [b.key, b]));
   for (const inv of invoices) { const b = byKey[periodKey(inv.date, mode)]; if (b) b.revenue += num(inv.total); }
   for (const it of items) { const b = byKey[invKey.get(it.invoiceId)]; if (b) b.salesProfit += num(it.lineProfit); }
-  for (const e of expenses) { const b = byKey[periodKey(e.date, mode)]; if (b) { if (typeOf(e.groupId) === 'personal') b.personalExp += num(e.amount); else b.businessExp += num(e.amount); } }
+  for (const e of expenses) { const b = byKey[periodKey(e.date, mode)]; if (b) { if (typeOf(e.groupId) === 'business') b.businessExp += num(e.amount); else b.personalExp += num(e.amount); } } // home+personal = non-business
   return buckets.map((b) => ({
     key: b.key, revenue: round2(b.revenue), salesProfit: round2(b.salesProfit),
     businessExp: round2(b.businessExp), personalExp: round2(b.personalExp),
@@ -1230,7 +1231,7 @@ export function financialPosition(app, today = todayISO()) {
   const expBusiness = blankCur(); const expPersonal = blankCur();
   for (const e of (data[TABLES.expenses] || [])) {
     if (e.isActive === false) continue;
-    addCur(typeOf(e.groupId) === 'personal' ? expPersonal : expBusiness, e.currency || 'AED', e.amount);
+    addCur(typeOf(e.groupId) === 'business' ? expBusiness : expPersonal, e.currency || 'AED', e.amount); // home + personal = non-business
   }
 
   return {

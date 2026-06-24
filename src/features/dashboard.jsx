@@ -165,6 +165,7 @@ export default function Dashboard() {
           <PnlRow label={t('businessExpenses')} value={'− ' + cur(pl.businessExp)} color={C.warning} />
           <PnlRow label={t('operatingProfit')} value={cur(pl.operatingProfit)} color={C.primary} strong />
           <PnlRow label={t('personalExpenses')} value={'− ' + cur(pl.personalExp)} color={C.warning} />
+          {pl.homeExp > 0 && <PnlRow label={`🏠 ${t('home')}`} value={'− ' + cur(pl.homeExp)} color={C.warning} />}
           <PnlRow label={t('netAfterAll')} value={cur(pl.netAfterAll)} color={pl.netAfterAll >= 0 ? C.success : C.danger} strong />
         </div>
       </Card>
