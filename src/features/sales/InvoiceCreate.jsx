@@ -140,12 +140,13 @@ export default function InvoiceCreate({ open, onClose, editing }) {
         <Field label={t('customer')} required>
           <Select value={customerId} onChange={setCustomerId} placeholder={t('selectCustomer')} options={clinicOptions} />
         </Field>
-        {customerId && (
-          <button type="button" onClick={() => setShowQuickOrder(true)}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, border: `1px solid ${C.primary}`, background: '#fff', color: C.primary, borderRadius: 9, padding: '5px 10px', fontSize: 12, fontWeight: 800, cursor: 'pointer', marginBottom: 8 }}>
-            ＋ {t('newOrder')}
-          </button>
-        )}
+        <button type="button" onClick={() => customerId && setShowQuickOrder(true)} disabled={!customerId}
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, width: '100%', boxSizing: 'border-box',
+            border: `1.5px solid ${customerId ? C.primary : C.border}`, background: customerId ? C.primary : C.surfaceAlt,
+            color: customerId ? '#fff' : C.textMuted, borderRadius: 10, padding: '9px 12px', fontSize: 13, fontWeight: 800,
+            cursor: customerId ? 'pointer' : 'not-allowed', marginBottom: 8 }}>
+          📋 ＋ {t('newOrder')}{!customerId ? ` (${t('selectCustomer')})` : ''}
+        </button>
         <Field label={t('date')}><Input type="date" value={date} onChange={setDate} /></Field>
       </div>
 
