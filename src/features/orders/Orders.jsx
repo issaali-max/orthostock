@@ -31,6 +31,7 @@ export default function Orders() {
 // ── Orders list + add/edit ───────────────────────────────────────────────────
 function OrdersTab({ app, t, lang, data, createRow, updateRow, deleteRow }) {
   const [editing, setEditing] = useState(null);       // order being added/edited
+  const [viewing, setViewing] = useState(null);       // order being viewed (read-only, with Edit button)
   const [search, setSearch] = useState('');
   const [fEmirate, setFEmirate] = useState('');
   const [fCity, setFCity] = useState('');
@@ -44,6 +45,16 @@ function OrdersTab({ app, t, lang, data, createRow, updateRow, deleteRow }) {
   const products = (data[TABLES.products] || []).filter((p) => p.isActive !== false);
   const variants = (data[TABLES.variants] || []).filter((v) => v.isActive !== false);
   const orders = useMemo(() => orderList(app), [data]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Most-recommended materials: total recommended qty + how many orders requested each.
+  const topMaterials = useMemo(() => {
+    const m = new Map();
+    for (const o of orders) for (const it of o.items) {
+      const r = m.get(it.variantId) || { variantId: it.variantId, material: it.material, qty: 0, count: 0 };
+      r.qty += num(it.qty); r.count += 1; m.set(it.variantId, r);
+    }
+    return [...m.values()].sort((a, b) => b.qty - a.qty).slice(0, 8);
+  }, [orders]);
 
   const list = useMemo(() => {
     const s = search.trim().toLowerCase();
@@ -99,10 +110,32 @@ function OrdersTab({ app, t, lang, data, createRow, updateRow, deleteRow }) {
       </Card>
 
       <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8 }}>{list.length} {t('orders')}</div>
+
+      {/* Most-recommended materials — tap one to filter by it */}
+      {topMaterials.length > 0 && (
+        <Card style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: C.text, marginBottom: 8 }}>🏆 {t('mostRecommended')}</div>
+          <div style={{ display: 'grid', gap: 7 }}>
+            {topMaterials.map((m) => (
+              <button key={m.variantId} type="button" onClick={() => setFProduct(fProduct === m.variantId ? '' : m.variantId)}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, textAlign: 'start' }}>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ fontSize: 12, fontWeight: fProduct === m.variantId ? 800 : 600, color: fProduct === m.variantId ? C.primary : C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>{m.material}</span>
+                  <span style={{ display: 'block', height: 8, background: C.surfaceAlt, borderRadius: 4, overflow: 'hidden', marginTop: 3 }}>
+                    <span style={{ display: 'block', width: `${(m.qty / topMaterials[0].qty) * 100}%`, height: '100%', background: C.primary, borderRadius: 4 }} />
+                  </span>
+                </span>
+                <span style={{ fontSize: 11.5, fontWeight: 800, color: C.text, minWidth: 64, textAlign: 'end' }}>{m.qty} <span style={{ color: C.textMuted, fontWeight: 600 }}>· {m.count}×</span></span>
+              </button>
+            ))}
+          </div>
+        </Card>
+      )}
+
       {list.length === 0 ? <EmptyState icon="📋" text={t('noOrders')} /> : (
         <div style={{ display: 'grid', gap: 8 }}>
           {list.map((o) => (
-            <Card key={o.id} onClick={() => openEdit(o)} style={{ cursor: 'pointer' }}>
+            <Card key={o.id} onClick={() => setViewing(o)} style={{ cursor: 'pointer' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
@@ -123,11 +156,46 @@ function OrdersTab({ app, t, lang, data, createRow, updateRow, deleteRow }) {
         </div>
       )}
 
+      {viewing && (
+        <OrderDetails order={viewing} t={t} lang={lang}
+          onClose={() => setViewing(null)}
+          onEdit={() => { openEdit(viewing); setViewing(null); }} />
+      )}
+
       {editing && (
         <OrderEditor editing={editing} setEditing={setEditing} customers={customers} categories={categories} products={products} variants={variants}
           t={t} lang={lang} busy={busy} onSave={save} onDelete={editing.id ? () => { remove(editing); setEditing(null); } : null} />
       )}
     </>
+  );
+}
+
+// ── Read-only order details (materials as a list) + Edit button ──────────────
+function OrderDetails({ order: o, t, lang, onClose, onEdit }) {
+  return (
+    <Modal open onClose={onClose} title={`${o.customerType === 'center' ? '🏥' : '🧑‍⚕️'} ${o.customerName}`} dismissable
+      footer={<><Btn variant="ghost" onClick={onClose}>{t('close')}</Btn>{onEdit && <Btn onClick={onEdit}>✏️ {t('edit')}</Btn>}</>}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+        <Badge tone={STATUS_TONE[o.status] || 'info'}>{t(`status_${o.status || 'new'}`)}</Badge>
+        {o.priority === 'high' && <span style={{ fontSize: 11, fontWeight: 800, color: C.danger }}>🔥 {t('high')}</span>}
+        {o.phone && <a href={`tel:${o.phone}`} style={{ fontSize: 16, textDecoration: 'none', marginInlineStart: 'auto' }}>📞</a>}
+      </div>
+      <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 4 }}>📍 {emirateLabel(o.emirate, lang) || '—'}{o.city ? ` · ${o.city}` : ''}</div>
+      <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 12 }}>📅 {t('orderDate')}: {fmtDate(o.date)}{o.plannedDate ? ` · 🚗 ${t('plannedDate')}: ${fmtDate(o.plannedDate)}` : ` · ${t('status_planning')}`}</div>
+
+      <div style={{ fontSize: 12.5, fontWeight: 800, color: C.text, marginBottom: 6 }}>📦 {t('products')} ({o.items.length})</div>
+      {o.items.length === 0 ? <div style={{ fontSize: 12, color: C.textMuted }}>{t('noProducts')}</div> : (
+        <div style={{ display: 'grid', gap: 5 }}>
+          {o.items.map((it, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, background: C.surfaceAlt, borderRadius: 9, padding: '8px 10px' }}>
+              <span style={{ fontSize: 12.5, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>📦 {it.material}{it.note ? ` — ${it.note}` : ''}</span>
+              <b style={{ color: C.primary, fontSize: 13 }}>×{it.qty}</b>
+            </div>
+          ))}
+        </div>
+      )}
+      {o.notes && <div style={{ fontSize: 12, color: C.textMid, marginTop: 10, fontStyle: 'italic' }}>📝 {o.notes}</div>}
+    </Modal>
   );
 }
 
@@ -245,16 +313,18 @@ function PlanTab({ app, t, lang }) {
   const [cursor, setCursor] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
   const [selDate, setSelDate] = useState(todayISO());
   const [editVisit, setEditVisit] = useState(null);
+  const [viewing, setViewing] = useState(null);
 
+  const customers = (data[TABLES.customers] || []).filter((c) => c.isActive !== false);
+  const orders = useMemo(() => orderList(app), [data]); // eslint-disable-line react-hooks/exhaustive-deps
   const visits = useMemo(() => (data[TABLES.visits] || []).filter((v) => v.isActive !== false), [data]);
-  const visitsByDate = useMemo(() => {
-    const m = new Map();
-    for (const v of visits) { if (!m.has(v.date)) m.set(v.date, []); m.get(v.date).push(v); }
-    return m;
-  }, [visits]);
-  const dayVisits = visitsByDate.get(selDate) || [];
 
-  // month grid (weeks starting Sunday)
+  // Days are marked if they have a scheduled visit OR an order with that planned date.
+  const visitsByDate = useMemo(() => { const m = new Map(); for (const v of visits) { if (!m.has(v.date)) m.set(v.date, []); m.get(v.date).push(v); } return m; }, [visits]);
+  const ordersByDate = useMemo(() => { const m = new Map(); for (const o of orders) { if (!o.plannedDate) continue; if (!m.has(o.plannedDate)) m.set(o.plannedDate, []); m.get(o.plannedDate).push(o); } return m; }, [orders]);
+  const dayVisits = visitsByDate.get(selDate) || [];
+  const dayOrders = ordersByDate.get(selDate) || [];
+
   const first = new Date(cursor.y, cursor.m, 1);
   const startPad = first.getDay();
   const daysInMonth = new Date(cursor.y, cursor.m + 1, 0).getDate();
@@ -265,14 +335,14 @@ function PlanTab({ app, t, lang }) {
 
   const saveVisit = async () => {
     const r = editVisit;
-    if (!r.city) return;
-    await createRow(TABLES.visits, { date: r.date || selDate, emirate: r.emirate || '', city: r.city, notes: r.notes || '', isActive: true });
+    if (!r.city && !r.customerId) return;
+    await createRow(TABLES.visits, { date: r.date || selDate, emirate: r.emirate || '', city: r.city || '', customerId: r.customerId || '', notes: r.notes || '', isActive: true });
     setEditVisit(null);
   };
+  const areaCustomers = editVisit ? customers.filter((c) => (!editVisit.emirate || c.emirate === editVisit.emirate) && (!editVisit.city || (c.city || '').trim() === editVisit.city)) : [];
 
   return (
     <>
-      {/* Calendar */}
       <Card style={{ marginBottom: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
           <button type="button" onClick={() => setCursor((c) => { const m = c.m - 1; return m < 0 ? { y: c.y - 1, m: 11 } : { ...c, m }; })} style={navBtn}>‹</button>
@@ -285,37 +355,67 @@ function PlanTab({ app, t, lang }) {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 2 }}>
           {cells.map((d, i) => {
             if (!d) return <div key={`p${i}`} />;
-            const ds = iso(d); const has = visitsByDate.has(ds); const isToday = ds === todayISO(); const isSel = ds === selDate;
+            const ds = iso(d); const hasV = visitsByDate.has(ds); const hasO = ordersByDate.has(ds); const isToday = ds === todayISO(); const isSel = ds === selDate;
             return (
               <button key={ds} type="button" onClick={() => setSelDate(ds)}
                 style={{ aspectRatio: '1', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 12.5, fontWeight: isToday ? 800 : 600,
                   background: isSel ? C.primary : (isToday ? C.surfaceAlt : 'transparent'), color: isSel ? '#fff' : C.text,
-                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1, position: 'relative' }}>
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, position: 'relative' }}>
                 {d}
-                {has && <span style={{ width: 5, height: 5, borderRadius: 3, background: isSel ? '#fff' : C.danger }} />}
+                <span style={{ display: 'flex', gap: 2, height: 5 }}>
+                  {hasV && <span style={{ width: 5, height: 5, borderRadius: 3, background: isSel ? '#fff' : C.primary }} />}
+                  {hasO && <span style={{ width: 5, height: 5, borderRadius: 3, background: isSel ? '#cfe' : C.danger }} />}
+                </span>
               </button>
             );
           })}
+        </div>
+        <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 6, fontSize: 10, color: C.textMuted }}>
+          <span><span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: 4, background: C.primary, marginInlineEnd: 3 }} />{t('visit')}</span>
+          <span><span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: 4, background: C.danger, marginInlineEnd: 3 }} />{t('orders')}</span>
         </div>
       </Card>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
         <span style={{ fontSize: 13, fontWeight: 800, color: C.text }}>🗓️ {fmtDate(selDate)}</span>
-        <Btn size="sm" onClick={() => setEditVisit({ date: selDate, emirate: '', city: '', notes: '' })}>＋ {t('planVisit')}</Btn>
+        <Btn size="sm" onClick={() => setEditVisit({ date: selDate, emirate: '', city: '', customerId: '', notes: '' })}>＋ {t('planVisit')}</Btn>
       </div>
 
-      {dayVisits.length === 0 ? <EmptyState icon="🗺️" text={t('noVisitsThisDay')} /> : (
+      {dayVisits.length === 0 && dayOrders.length === 0 ? <EmptyState icon="🗓️" text={t('noVisitsThisDay')} /> : (
         <div style={{ display: 'grid', gap: 12 }}>
-          {dayVisits.map((v) => <VisitCard key={v.id} visit={v} app={app} t={t} lang={lang} onDelete={() => deleteRow(TABLES.visits, v.id)} />)}
+          {dayVisits.map((v) => <VisitCard key={v.id} visit={v} app={app} t={t} lang={lang} onDelete={() => deleteRow(TABLES.visits, v.id)} onOpenOrder={setViewing} />)}
+          {dayOrders.length > 0 && (
+            <Card>
+              <div style={{ fontSize: 12.5, fontWeight: 800, color: C.text, marginBottom: 8 }}>📋 {t('scheduledOrders')} ({dayOrders.length})</div>
+              <div style={{ display: 'grid', gap: 6 }}>
+                {dayOrders.map((o) => (
+                  <button key={o.id} type="button" onClick={() => setViewing(o)} style={{ textAlign: 'start', border: `1px solid ${C.border}`, background: '#fff', borderRadius: 9, padding: '8px 10px', cursor: 'pointer' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontWeight: 700, color: C.text, fontSize: 12.5 }}>{o.customerType === 'center' ? '🏥' : '🧑‍⚕️'} {o.customerName} {o.priority === 'high' && '🔥'}</span>
+                      <Badge tone={STATUS_TONE[o.status] || 'info'}>{t(`status_${o.status || 'new'}`)}</Badge>
+                    </div>
+                    <div style={{ fontSize: 11, color: C.textMid, marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>📦 {o.items.map((it) => `${it.material}×${it.qty}`).join(' · ') || t('noProducts')}</div>
+                  </button>
+                ))}
+              </div>
+            </Card>
+          )}
         </div>
       )}
 
+      {viewing && <OrderDetails order={viewing} t={t} lang={lang} onClose={() => setViewing(null)} />}
+
       {editVisit && (
         <Modal open onClose={() => setEditVisit(null)} title={t('planVisit')} dismissable
-          footer={<><Btn variant="ghost" onClick={() => setEditVisit(null)}>{t('cancel')}</Btn><Btn onClick={saveVisit} disabled={!editVisit.city}>{t('save')}</Btn></>}>
+          footer={<><Btn variant="ghost" onClick={() => setEditVisit(null)}>{t('cancel')}</Btn><Btn onClick={saveVisit} disabled={!editVisit.city && !editVisit.customerId}>{t('save')}</Btn></>}>
           <Field label={t('date')}><Input type="date" value={editVisit.date} onChange={(v) => setEditVisit((r) => ({ ...r, date: v }))} /></Field>
-          <Field label={t('emirate')}><Select value={editVisit.emirate} onChange={(v) => setEditVisit((r) => ({ ...r, emirate: v, city: '' }))} placeholder="—" options={emirateOptions(lang)} /></Field>
-          <Field label={t('city')}><Select value={editVisit.city} onChange={(v) => setEditVisit((r) => ({ ...r, city: v }))} placeholder="—" options={(editVisit.emirate ? citiesOfEmirate(editVisit.emirate) : allCities()).map((c) => ({ value: c, label: c }))} /></Field>
+          <Field label={t('emirate')}><Select value={editVisit.emirate} onChange={(v) => setEditVisit((r) => ({ ...r, emirate: v, city: '', customerId: '' }))} placeholder="—" options={emirateOptions(lang)} /></Field>
+          <Field label={t('city')}><Select value={editVisit.city} onChange={(v) => setEditVisit((r) => ({ ...r, city: v, customerId: '' }))} placeholder="—" options={(editVisit.emirate ? citiesOfEmirate(editVisit.emirate) : allCities()).map((c) => ({ value: c, label: c }))} /></Field>
+          {/* Optional: target ONE specific center/doctor (lets you plan a visit even with no orders) */}
+          <Field label={`${t('center')} · ${t('optional')}`} hint={t('visitWholeCityHint')}>
+            <Select value={editVisit.customerId} onChange={(v) => setEditVisit((r) => ({ ...r, customerId: v }))} placeholder={t('wholeCity')}
+              options={[{ value: '', label: `🗺️ ${t('wholeCity')}` }, ...areaCustomers.map((c) => ({ value: c.id, label: `${c.type === 'center' ? '🏥' : '🧑‍⚕️'} ${c.name}` }))]} />
+          </Field>
           <Field label={t('notes')}><Textarea value={editVisit.notes} onChange={(v) => setEditVisit((r) => ({ ...r, notes: v }))} rows={2} /></Field>
         </Modal>
       )}
@@ -325,18 +425,33 @@ function PlanTab({ app, t, lang }) {
 
 // A scheduled visit: shows the open orders for its city (centers + materials to prepare).
 function VisitCard({ visit, app, t, lang, onDelete }) {
-  const plan = useMemo(() => visitPlan(app, { emirate: visit.emirate, city: visit.city }), [app.data, visit.emirate, visit.city]); // eslint-disable-line react-hooks/exhaustive-deps
+  const targetCust = visit.customerId ? (app.data[TABLES.customers] || []).find((c) => c.id === visit.customerId) : null;
+  const plan = useMemo(() => {
+    const p = visitPlan(app, { emirate: visit.emirate, city: visit.city });
+    if (!visit.customerId) return p;
+    // visit targets ONE specific center → keep only its group (may be empty = no orders yet)
+    const groups = p.groups.filter((g) => g.customerId === visit.customerId);
+    return { ...p, groups, centerCount: groups.length, orderCount: groups.reduce((s, g) => s + g.orders.length, 0), totalQty: groups.reduce((s, g) => s + g.totalQty, 0) };
+  }, [app.data, visit.emirate, visit.city, visit.customerId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const title = targetCust ? `${targetCust.type === 'center' ? '🏥' : '🧑‍⚕️'} ${targetCust.name}` : `🚗 ${visit.city || emirateLabel(visit.emirate, lang) || t('visit')}`;
   return (
     <Card>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
         <div>
-          <div style={{ fontWeight: 800, color: C.text }}>🚗 {visit.city || emirateLabel(visit.emirate, lang) || t('visit')}</div>
-          <div style={{ fontSize: 10.5, color: C.textMuted }}>📍 {emirateLabel(visit.emirate, lang) || '—'} · {plan.centerCount} {t('centers')} · {plan.orderCount} {t('openOrders')} · {plan.totalQty} {t('totalQty')}</div>
+          <div style={{ fontWeight: 800, color: C.text }}>{title}</div>
+          <div style={{ fontSize: 10.5, color: C.textMuted }}>📍 {emirateLabel(visit.emirate, lang) || '—'}{visit.city ? ` · ${visit.city}` : ''} · {plan.orderCount} {t('openOrders')} · {plan.totalQty} {t('totalQty')}</div>
         </div>
         <button type="button" onClick={onDelete} style={{ border: 'none', background: 'transparent', color: C.danger, fontSize: 14, cursor: 'pointer' }}>🗑</button>
       </div>
       {visit.notes && <div style={{ fontSize: 11.5, color: C.textMid, fontStyle: 'italic', marginBottom: 8 }}>📝 {visit.notes}</div>}
-      {plan.groups.length === 0 ? <div style={{ fontSize: 12, color: C.textMuted, padding: 8 }}>{t('noOpenOrders')}</div> : (
+      {/* a specific center with no orders yet → still show it so you can plan the visit */}
+      {targetCust && plan.groups.length === 0 && (
+        <div style={{ background: C.surfaceAlt, borderRadius: 9, padding: '8px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: 12, color: C.textMuted }}>{t('noOpenOrdersForCenter')}</span>
+          {targetCust.phone && <a href={`tel:${targetCust.phone}`} style={{ fontSize: 15, textDecoration: 'none' }}>📞</a>}
+        </div>
+      )}
+      {plan.groups.length > 0 && (
         <div style={{ display: 'grid', gap: 8 }}>
           {plan.groups.map((g) => (
             <div key={g.customerId} style={{ background: C.surfaceAlt, borderRadius: 9, padding: '8px 10px' }}>

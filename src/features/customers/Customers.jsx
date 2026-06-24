@@ -4,7 +4,7 @@ import { useApp } from '../../app/AppProvider.jsx';
 import { C, WEEKDAYS, emirateOptions, emirateLabel, citiesOfEmirate, allCities, TABLES } from '../../lib/constants.js';
 import { fmtCur, num, round2 } from '../../lib/money.js';
 import { fmtDate } from '../../lib/dates.js';
-import { customerStats, clinicRating, recordInvoicePayment } from '../../lib/engine.js';
+import { customerStats, clinicRating, recordInvoicePayment, orderList } from '../../lib/engine.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, PaymentModal, SearchBar, Select, Textarea } from '../../ui/components.jsx';
 
 const blank = () => ({ name: '', type: 'doctor', phone: '', emirate: '', city: '', specialty: '', trn: '', workingDays: WEEKDAYS.map((d) => d.key), notes: '', isActive: true });
@@ -162,6 +162,7 @@ function CustomerProfile({ customer, onBack, onEdit, t, lang, displayCurrency, u
   const allCustomers = (app.data[TABLES.customers] || []).filter((c) => c.isActive !== false);
   const st = customerStats(invoices, items, customer.id);
   const rating = clinicRating(allCustomers, invoices, items, customer.id);
+  const custOrders = useMemo(() => orderList(app).filter((o) => o.customerId === customer.id), [app.data, customer.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const variants = app.data[TABLES.variants] || [];
   const skuOf = (id) => variants.find((v) => v.id === id)?.sku || '—';
   const [payFor, setPayFor] = useState(null);
@@ -212,6 +213,29 @@ function CustomerProfile({ customer, onBack, onEdit, t, lang, displayCurrency, u
         <MiniStat label={t('profit')} value={fmtCur(st.profit, displayCurrency, usdRate)} color={C.success} />
         <MiniStat label={t('rating')} value={`${rating}/100`} color={C.primary} />
       </div>
+
+      {/* This customer's open orders (التواصي) */}
+      {custOrders.length > 0 && (
+        <Card style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: C.text, marginBottom: 8 }}>📋 {t('orders')} ({custOrders.length})</div>
+          <div style={{ display: 'grid', gap: 8 }}>
+            {custOrders.map((o) => (
+              <div key={o.id} style={{ background: C.surfaceAlt, borderRadius: 9, padding: '8px 10px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <Badge tone={o.status === 'delivered' ? 'success' : o.status === 'cancelled' ? 'danger' : o.status === 'ready' ? 'primary' : o.status === 'planning' ? 'warning' : 'info'}>{t(`status_${o.status || 'new'}`)}</Badge>
+                  <span style={{ fontSize: 10, color: C.textMuted }}>{fmtDate(o.date)}{o.priority === 'high' ? ' · 🔥' : ''}</span>
+                </div>
+                {o.items.map((it, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12, padding: '2px 0' }}>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>📦 {it.material}{it.note ? ` — ${it.note}` : ''}</span>
+                    <b style={{ color: C.primary }}>×{it.qty}</b>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {insight.hasAny && (
         <Card style={{ marginBottom: 14 }}>
