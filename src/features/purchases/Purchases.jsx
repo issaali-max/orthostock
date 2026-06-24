@@ -88,7 +88,7 @@ export default function Purchases() {
     .filter((p) => !pq || (p.nameEn || '').toLowerCase().includes(pq.toLowerCase()) || (p.nameAr || '').includes(pq) || (p.brand || '').toLowerCase().includes(pq.toLowerCase()));
   const variantsOfProduct = (pid) => variants.filter((v) => v.productId === pid);
   const inCart = (id) => lines.some((l) => l.variantId === id);
-  const toggle = (v) => setLines((ls) => inCart(v.id) ? ls.filter((l) => l.variantId !== v.id) : [...ls, { variantId: v.id, qty: 1, unitCost: num(v.purchasePriceLatest) || '' }]);
+  const toggle = (v) => setLines((ls) => inCart(v.id) ? ls.filter((l) => l.variantId !== v.id) : [...ls, { variantId: v.id, qty: '', unitCost: num(v.purchasePriceLatest) || '' }]);
   const setLine = (id, patch) => setLines((ls) => ls.map((l) => (l.variantId === id ? { ...l, ...patch } : l)));
   const removeLine = (id) => setLines((ls) => ls.filter((l) => l.variantId !== id));
 

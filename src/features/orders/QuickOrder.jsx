@@ -23,7 +23,7 @@ export default function QuickOrder({ app, customerId, onClose, onSaved }) {
   const catProducts = products.filter((p) => p.categoryId === catId);
   const variantsOfProduct = (pid) => variants.filter((v) => v.productId === pid);
   const inLine = (id) => lines.some((l) => l.variantId === id);
-  const toggle = (v) => setLines((ls) => inLine(v.id) ? ls.filter((l) => l.variantId !== v.id) : [...ls, { variantId: v.id, qty: 1, note: '' }]);
+  const toggle = (v) => setLines((ls) => inLine(v.id) ? ls.filter((l) => l.variantId !== v.id) : [...ls, { variantId: v.id, qty: '', note: '' }]);
   const setLine = (id, patch) => setLines((ls) => ls.map((l) => (l.variantId === id ? { ...l, ...patch } : l)));
   const delLine = (id) => setLines((ls) => ls.filter((l) => l.variantId !== id));
   const vLabel = (id) => { const v = variants.find((x) => x.id === id); if (!v) return id; const a = Object.values(v.attributes || {}).filter(Boolean); return a.length ? `${v.nameEn} · ${a.join(' · ')}` : (v.nameEn || v.sku); };

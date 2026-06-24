@@ -216,7 +216,7 @@ function OrderEditor({ editing, setEditing, customers, categories, products, var
   const catProducts = products.filter((p) => p.categoryId === catId);
   const variantsOfProduct = (pid) => variants.filter((v) => v.productId === pid);
   const inLine = (id) => lines.some((l) => l.variantId === id);
-  const toggle = (v) => set({ lines: inLine(v.id) ? lines.filter((l) => l.variantId !== v.id) : [...lines, { variantId: v.id, qty: 1, note: '' }] });
+  const toggle = (v) => set({ lines: inLine(v.id) ? lines.filter((l) => l.variantId !== v.id) : [...lines, { variantId: v.id, qty: '', note: '' }] });
   const setLine = (id, patch) => set({ lines: lines.map((l) => (l.variantId === id ? { ...l, ...patch } : l)) });
   const delLine = (id) => set({ lines: lines.filter((l) => l.variantId !== id) });
   const vLabel = (id) => { const v = variants.find((x) => x.id === id); if (!v) return id; const attrs = Object.values(v.attributes || {}).filter(Boolean); return attrs.length ? `${v.nameEn} · ${attrs.join(' · ')}` : (v.nameEn || v.sku); };

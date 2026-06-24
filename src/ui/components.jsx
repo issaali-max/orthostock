@@ -52,9 +52,16 @@ const controlStyle = {
 };
 
 export function Input({ value, onChange, type = 'text', placeholder, style, ...rest }) {
+  // For number fields, a 0 / empty value is shown as a BLANK with a "0" placeholder, so the
+  // user can type the amount straight away without first selecting and deleting a pre-filled
+  // 0. Empty therefore means 0 (callers convert with num()). Non-zero values show normally.
+  const isNum = type === 'number';
+  const display = isNum
+    ? (value === 0 || value === '' || value == null ? '' : value)
+    : (value ?? '');
   return (
     <input
-      type={type} value={value ?? ''} placeholder={placeholder}
+      type={type} value={display} placeholder={placeholder ?? (isNum ? '0' : undefined)}
       onChange={(e) => onChange?.(e.target.value)}
       style={{ ...controlStyle, ...style }}
       onFocus={(e) => { e.target.style.borderColor = C.primaryLight; }}

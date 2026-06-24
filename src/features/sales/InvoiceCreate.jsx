@@ -69,7 +69,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
   }, [open, editing?.id]); // re-init only when the modal opens or a different invoice is edited (not on every background sync)
 
   const inCart = (id) => lines.some((l) => l.variantId === id);
-  const toggle = (v) => setLines((ls) => inCart(v.id) ? ls.filter((l) => l.variantId !== v.id) : [...ls, { variantId: v.id, qty: 1, unitPrice: num(v.sellingPriceDefault) }]);
+  const toggle = (v) => setLines((ls) => inCart(v.id) ? ls.filter((l) => l.variantId !== v.id) : [...ls, { variantId: v.id, qty: '', unitPrice: num(v.sellingPriceDefault) }]);
   const setLine = (id, patch) => setLines((ls) => ls.map((l) => (l.variantId === id ? { ...l, ...patch } : l)));
   const removeLine = (id) => setLines((ls) => ls.filter((l) => l.variantId !== id));
 
