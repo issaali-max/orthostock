@@ -134,7 +134,15 @@ function OrderEditor({ editing, setEditing, customers, variants, t, lang, busy, 
   const [pick, setPick] = useState('');               // variant search text
   const set = (patch) => setEditing((r) => ({ ...r, ...patch }));
   const cust = customers.find((c) => c.id === editing.customerId);
+  // Area picker state: emirate → city → customer. Seeded from the chosen customer (when
+  // editing) so the dropdowns show the right context.
+  const [emirate, setEmirate] = useState(cust?.emirate || '');
+  const [city, setCity] = useState((cust?.city || '').trim());
   const lines = editing.lines || [];
+
+  // customers narrowed by the chosen area — pick the doctor/center from here
+  const areaCustomers = customers.filter((c) =>
+    (!emirate || c.emirate === emirate) && (!city || (c.city || '').trim() === city));
 
   const matches = pick.trim()
     ? variants.filter((v) => `${v.nameEn} ${v.sku || ''}`.toLowerCase().includes(pick.trim().toLowerCase())).slice(0, 8)
@@ -151,9 +159,19 @@ function OrderEditor({ editing, setEditing, customers, variants, t, lang, busy, 
         <Btn variant="ghost" onClick={() => setEditing(null)}>{t('cancel')}</Btn>
         <Btn onClick={onSave} disabled={busy || !editing.customerId}>{t('save')}</Btn>
       </>}>
+      {/* Area-first picker: emirate → city → doctor/center */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        <Field label={t('emirate')}>
+          <Select value={emirate} onChange={(v) => { setEmirate(v); setCity(''); set({ customerId: '' }); }} placeholder="—" options={emirateOptions(lang)} />
+        </Field>
+        <Field label={t('city')}>
+          <Select value={city} onChange={(v) => { setCity(v); set({ customerId: '' }); }} placeholder="—"
+            options={(emirate ? citiesOfEmirate(emirate) : allCities()).map((c) => ({ value: c, label: c }))} />
+        </Field>
+      </div>
       <Field label={`${t('doctor')} / ${t('center')}`}>
-        <Select value={editing.customerId} onChange={(v) => set({ customerId: v })} placeholder="—"
-          options={customers.map((c) => ({ value: c.id, label: `${c.type === 'center' ? '🏥' : '🧑‍⚕️'} ${c.name}` }))} />
+        <Select value={editing.customerId} onChange={(v) => set({ customerId: v })} placeholder={areaCustomers.length ? '—' : t('noCustomersInArea')}
+          options={areaCustomers.map((c) => ({ value: c.id, label: `${c.type === 'center' ? '🏥' : '🧑‍⚕️'} ${c.name}` }))} />
       </Field>
       {cust && <div style={{ fontSize: 11, color: C.textMuted, marginTop: -6, marginBottom: 10 }}>📍 {emirateLabel(cust.emirate, lang) || '—'}{cust.city ? ` · ${cust.city}` : ''}{cust.phone ? ` · ${cust.phone}` : ''}</div>}
 
