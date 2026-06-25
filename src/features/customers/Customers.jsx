@@ -3,7 +3,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGri
 import { useApp } from '../../app/AppProvider.jsx';
 import { C, WEEKDAYS, emirateOptions, emirateLabel, citiesOfEmirate, allCities, TABLES } from '../../lib/constants.js';
 import { fmtCur, num, round2 } from '../../lib/money.js';
-import { fmtDate } from '../../lib/dates.js';
+import { fmtDate, todayISO } from '../../lib/dates.js';
 import { customerStats, clinicRating, recordInvoicePayment, recordOpeningDebtPayment, orderList } from '../../lib/engine.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, PaymentModal, SearchBar, Select, Textarea } from '../../ui/components.jsx';
 
@@ -159,7 +159,10 @@ export default function Customers() {
 
 function CustomerProfile({ customer, onBack, onEdit, t, lang, displayCurrency, usdRate, invoices, items, app }) {
   const allCustomers = (app.data[TABLES.customers] || []).filter((c) => c.isActive !== false);
-  const st = customerStats(invoices, items, customer.id, customer);
+  // Read the LIVE record from app.data so opening-debt edits (amount/date/payments) reflect
+  // immediately — the `customer` prop is a snapshot frozen when the row was tapped (never refreshed).
+  const live = (app.data[TABLES.customers] || []).find((c) => c.id === customer.id) || customer;
+  const st = customerStats(invoices, items, customer.id, live);
   const rating = clinicRating(allCustomers, invoices, items, customer.id);
   const custOrders = useMemo(() => orderList(app).filter((o) => o.customerId === customer.id), [app.data, customer.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const variants = app.data[TABLES.variants] || [];
@@ -208,7 +211,7 @@ function CustomerProfile({ customer, onBack, onEdit, t, lang, displayCurrency, u
         <div style={{ fontSize: 28, fontWeight: 800, color: st.debt > 0 ? C.danger : C.success }}>{fmtCur(st.debt, displayCurrency, usdRate)}</div>
         {st.openingOutstanding > 0 && (
           <div style={{ fontSize: 11, color: C.textMid, marginTop: 4 }}>
-            🧾 {t('fromInvoices')}: {fmtCur(st.invoiceDebt, displayCurrency, usdRate)} · 📜 {t('oldDebt')}: {fmtCur(st.openingOutstanding, displayCurrency, usdRate)}
+            🧾 {t('fromInvoices')}: {fmtCur(st.invoiceDebt, displayCurrency, usdRate)} · 📜 {t('oldDebt')}: {fmtCur(st.openingOutstanding, displayCurrency, usdRate)}{live.openingDebtDate ? ` · 📅 ${fmtDate(live.openingDebtDate, lang)}` : ''}
           </div>
         )}
         <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
@@ -218,10 +221,10 @@ function CustomerProfile({ customer, onBack, onEdit, t, lang, displayCurrency, u
       </Card>
 
       {debtModal === 'set' && (
-        <SetOldDebtModal customer={customer} t={t} displayCurrency={displayCurrency} usdRate={usdRate}
+        <SetOldDebtModal customer={live} t={t} displayCurrency={displayCurrency} usdRate={usdRate}
           onClose={() => setDebtModal(null)}
-          onSave={async (amount, note) => { await app.updateRow(TABLES.customers, customer.id, { openingDebt: amount, openingDebtNote: note, openingPaid: num(customer.openingPaid) }); setDebtModal(null); }}
-          onDelete={async () => { if (window.confirm(t('delete') + '?')) { await app.updateRow(TABLES.customers, customer.id, { openingDebt: 0, openingPaid: 0, openingPayments: [], openingDebtNote: '' }); setDebtModal(null); } }} />
+          onSave={async (amount, note) => { await app.updateRow(TABLES.customers, customer.id, { openingDebt: amount, openingDebtNote: note, openingPaid: num(live.openingPaid), openingDebtDate: live.openingDebtDate || todayISO() }); setDebtModal(null); }}
+          onDelete={async () => { if (window.confirm(t('delete') + '?')) { await app.updateRow(TABLES.customers, customer.id, { openingDebt: 0, openingPaid: 0, openingPayments: [], openingDebtNote: '', openingDebtDate: '' }); setDebtModal(null); } }} />
       )}
       {debtModal === 'pay' && (
         <PayOldDebtModal outstanding={st.openingOutstanding} t={t} displayCurrency={displayCurrency} usdRate={usdRate}

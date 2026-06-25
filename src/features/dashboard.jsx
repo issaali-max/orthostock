@@ -108,7 +108,7 @@ export default function Dashboard() {
     const oldDebt = openingDebtTotal(customers);
     const vatDue = vatLiability(invoices, items, settings);
     return { revenue, profit, debt, oldDebt, vatDue, inventoryValue, invoiceCount: invoices.length, lowStock };
-  }, [dInv, dItems, dVar]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [dInv, dItems, dVar, dCust]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const bestEmirate = emirates[0];
   const maxEmRev = Math.max(1, ...emirates.map((e) => e.revenue));

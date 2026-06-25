@@ -1198,9 +1198,20 @@ export function receivables(app) {
     if (bal <= 0) continue;
     const cur = inv.currency || 'AED';
     const k = inv.customerId || '—';
-    byId[k] = byId[k] || { customerId: k, name: nameOf(k), AED: 0, USD: 0, invoices: 0 };
+    byId[k] = byId[k] || { customerId: k, name: nameOf(k), AED: 0, USD: 0, invoices: 0, opening: 0 };
     addCur(byId[k], cur, bal); byId[k].invoices++;
     addCur(totals, cur, bal);
+  }
+  // Old/opening debt (AED, no invoice) folded into each ACTIVE customer's receivable, so
+  // "doctor debts" — the donut slice, the drill-down list and net worth — show the FULL balance.
+  for (const c of customers) {
+    if (c.isActive === false) continue;
+    const open = round2(Math.max(0, num(c.openingDebt) - num(c.openingPaid)));
+    if (open <= 0) continue;
+    byId[c.id] = byId[c.id] || { customerId: c.id, name: c.name || '—', AED: 0, USD: 0, invoices: 0, opening: 0 };
+    byId[c.id].opening = round2(byId[c.id].opening + open);
+    addCur(byId[c.id], 'AED', open);
+    addCur(totals, 'AED', open);
   }
   const list = Object.values(byId).sort((a, b) => (b.AED + b.USD) - (a.AED + a.USD));
   return { totals, byCustomer: list };

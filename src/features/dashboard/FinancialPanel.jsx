@@ -213,7 +213,7 @@ function ReceivablesModal({ open, onClose, recv, onPick, t }) {
               <span style={{ fontSize: 18 }}>🧑‍⚕️</span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 800, color: C.text, fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</div>
-                <div style={{ fontSize: 11, color: C.textMuted }}>{d.invoices} {t('invoices')}</div>
+                <div style={{ fontSize: 11, color: C.textMuted }}>{d.invoices} {t('invoices')}{d.opening > 0.005 ? ` · 📜 ${t('oldDebt')}` : ''}</div>
               </div>
               <div style={{ textAlign: 'end' }}>
                 {d.AED > 0.005 && <div style={{ fontWeight: 800, color: C.danger, fontSize: 13 }}>{ccy(d.AED, 'AED')}</div>}
@@ -231,13 +231,22 @@ function ReceivablesModal({ open, onClose, recv, onPick, t }) {
 // ── One doctor: their unpaid invoices ──
 function DoctorModal({ open, onClose, customerId, data, t }) {
   const customer = (data[TABLES.customers] || []).find((c) => c.id === customerId);
+  const openOld = customer ? Math.max(0, num(customer.openingDebt) - num(customer.openingPaid)) : 0;
   const unpaid = (data[TABLES.invoices] || [])
     .filter((inv) => inv.customerId === customerId && inv.isActive !== false && inv.status !== 'returned' && (num(inv.total) - num(inv.paidAmount)) > 0.005)
     .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   return (
     <Modal open={open} onClose={onClose} dismissable title={customer ? `🧑‍⚕️ ${customer.name}` : ''}>
-      {unpaid.length === 0 ? <EmptyState icon="✅" text={t('noDebts')} /> : (
+      {unpaid.length === 0 && openOld <= 0.005 ? <EmptyState icon="✅" text={t('noDebts')} /> : (
         <div style={{ display: 'grid', gap: 7 }}>
+          {openOld > 0.005 && (
+            <div style={{ border: `1px solid ${C.border}`, borderRadius: 11, padding: '10px 12px', background: '#FBF6EC' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontWeight: 800, color: C.text, fontSize: 13 }}>📜 {t('oldDebt')}</span>
+                <Badge tone="danger">{t('remaining')} {ccy(openOld, 'AED')}</Badge>
+              </div>
+            </div>
+          )}
           {unpaid.map((inv) => {
             const bal = num(inv.total) - num(inv.paidAmount);
             const code = inv.currency === 'USD' ? 'USD' : 'AED';

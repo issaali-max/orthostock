@@ -156,7 +156,8 @@ export function Modal({ open, onClose, title, children, footer, width = 460, dis
       onClick={dismissable ? (e) => { if (e.target === e.currentTarget) onClose(); } : undefined}
       style={{
         position: 'fixed', inset: 0, background: 'rgba(14,29,46,0.45)', zIndex: 1000,
-        display: 'flex', alignItems: 'flex-end', justifyContent: 'center', padding: 0,
+        display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+        padding: 0, paddingTop: 'calc(env(safe-area-inset-top) + 16px)', boxSizing: 'border-box',
         overscrollBehavior: 'contain',
       }}
     >
@@ -164,9 +165,9 @@ export function Modal({ open, onClose, title, children, footer, width = 460, dis
         className="modal-sheet"
         style={{
           background: '#fff', borderRadius: '18px 18px 0 0', width: '100%', maxWidth: width,
-          // Never exceed the viewport, so the header (with the × button) is always
-          // reachable and the body scrolls instead of pushing the top off-screen.
-          maxHeight: '88vh',
+          // Bound by the overlay's padded box (real viewport − top safe area), so the
+          // header with the × button can never be pushed off-screen by a long list.
+          maxHeight: '100%',
           display: 'flex', flexDirection: 'column', boxShadow: '0 -8px 30px rgba(0,0,0,0.2)',
         }}
       >
@@ -177,7 +178,7 @@ export function Modal({ open, onClose, title, children, footer, width = 460, dis
           <strong style={{ fontSize: 15, color: C.text }}>{title}</strong>
           <button onClick={onClose} style={{ border: 'none', background: 'none', fontSize: 20, cursor: 'pointer', color: C.textMuted }}>×</button>
         </div>
-        <div className="modal-body" style={{ paddingTop: 16, paddingInline: 16, paddingBottom: 16, overflowY: 'auto', flex: 1, minHeight: 0, WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain' }}>{children}</div>
+        <div className="modal-body" style={{ paddingTop: 16, paddingInline: 16, paddingBottom: footer ? 16 : 'calc(16px + env(safe-area-inset-bottom))', overflowY: 'auto', flex: 1, minHeight: 0, WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain' }}>{children}</div>
         {footer && (
           <div style={{ padding: '12px 16px', paddingBottom: 'calc(12px + env(safe-area-inset-bottom))', borderTop: `1px solid ${C.border}`, display: 'flex', gap: 8, justifyContent: 'flex-end', flexShrink: 0 }}>
             {footer}

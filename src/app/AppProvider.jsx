@@ -18,6 +18,7 @@ const CORE_TABLES = [
   TABLES.securities, TABLES.tradeLots, TABLES.tradeSells, TABLES.cashFlows,
   TABLES.externalDebts,
   TABLES.auditLog, TABLES.supplierPayments,
+  TABLES.orders, TABLES.orderItems, TABLES.visits, TABLES.customerPrices,
 ];
 
 export function AppProvider({ children }) {
