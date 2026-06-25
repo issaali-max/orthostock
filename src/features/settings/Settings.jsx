@@ -67,6 +67,7 @@ export default function Settings() {
   const save = async () => {
     await updateSettings({
       companyName: form.companyName || 'OrthoStock', companyAddress: form.companyAddress || '', companyPhone: form.companyPhone || '', companyTrn: form.companyTrn || '',
+      companyLicenseNo: form.companyLicenseNo || '', companyStampPlace: form.companyStampPlace || '', invoiceStamp: form.invoiceStamp !== false,
       usdRate: num(form.usdRate, 3.6725) || 3.6725,
       taxEnabled: !!form.taxEnabled,
       taxRate: num(form.taxRate, 5),
@@ -204,6 +205,18 @@ export default function Settings() {
         </Field>
         <Field label={t('companyTrn')}>
           <Input value={form.companyTrn || ''} onChange={(v) => set('companyTrn', v)} />
+        </Field>
+        <Field label={t('companyLicenseNo')}>
+          <Input value={form.companyLicenseNo || ''} onChange={(v) => set('companyLicenseNo', v)} />
+        </Field>
+        <Field label={t('companyStampPlace')} hint={t('companyStampPlaceHint')}>
+          <Input value={form.companyStampPlace || ''} onChange={(v) => set('companyStampPlace', v)} />
+        </Field>
+        <Field label={t('invoiceStamp')}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: C.textMid }}>
+            <input type="checkbox" checked={form.invoiceStamp !== false} onChange={(e) => set('invoiceStamp', e.target.checked)} />
+            {t('invoiceStampHint')}
+          </label>
         </Field>
         <Field label={t('usdRate')} hint="1 USD = ? AED">
           <Input type="number" value={form.usdRate} onChange={(v) => set('usdRate', v)} />
