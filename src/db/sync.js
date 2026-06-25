@@ -19,6 +19,7 @@ import { idbGetAll, idbBulkPut, outboxAll, outboxDelete, outboxBumpTries, enqueu
 const MAX_OP_TRIES = 6; // after this many failed attempts, drop a stuck outbox op
 const SYNC_INTERVAL_MS = 25000; // periodic flush+pull cadence (your edits still push instantly via nudgeSync ~1.2s; this only governs how often the app pulls others' changes while idle)
 const SKEW_BUFFER_MS = 5 * 60 * 1000; // re-fetch last 5 min each pull to survive device clock skew
+const FULL_SYNC_INTERVAL_MS = 150000; // every 2.5 min do a FULL reconcile (catches rows the incremental window skipped under large clock skew)
 
 // Supabase connection. Reads Vercel env vars first; falls back to the project's
 // own values so sync works out-of-the-box without any Vercel configuration.
@@ -215,7 +216,7 @@ export async function flush() {
   }
 }
 
-export async function pull(onData) {
+export async function pull(onData, { full = false } = {}) {
   if (!supabase || !isOnline()) return;
   // A stuck/failing outbox op must NOT block downloads forever. We still pull, and
   // the updatedAt merge protects any unsynced local edits (local-newer rows are
@@ -223,11 +224,14 @@ export async function pull(onData) {
   // duplicates onto an already-pending queue.
   const pending = await outboxAll();
   const outboxEmpty = pending.length === 0;
-  // Incremental: only fetch rows changed since the last pull (cheap egress). A
-  // safety buffer re-fetches the most recent window so clock skew between devices
-  // can't make us miss a row. First pull (watermark 0) fetches everything.
+  // Incremental pull (full=false): only fetch rows changed since the last pull (cheap
+  // egress), with a skew buffer. BUT incremental can permanently miss a row if the two
+  // devices' clocks diverge by more than the buffer (e.g. collaborators in different
+  // countries). So a FULL pull (full=true, since=0) is run whenever the app is opened/
+  // focused and on a periodic safety net — it re-scans every row and reconciles anything
+  // the incremental window skipped. Cheap here because the dataset is small.
   const wm = Number((await metaGet('pullWatermark')) || 0);
-  const since = wm > 0 ? wm - SKEW_BUFFER_MS : 0;
+  const since = full ? 0 : (wm > 0 ? wm - SKEW_BUFFER_MS : 0);
   let maxSeen = wm, changed = 0, pushedBack = 0;
   for (const table of Object.values(TABLES)) {
     if (LOCAL_ONLY.has(table)) continue; // local-only tables are never pulled
@@ -278,7 +282,7 @@ function startRealtime() {
       .channel('orthostock-sync')
       .on('postgres_changes', { event: '*', schema: 'public' }, () => {
         clearTimeout(_rtTimer);
-        _rtTimer = setTimeout(() => { if (isOnline()) cycle(); }, 400); // guarded; slightly longer debounce coalesces bursts
+        _rtTimer = setTimeout(() => { if (isOnline()) cycle({ full: true }); }, 400); // a cloud change happened → full reconcile so skew can't hide it (debounced+coalesced)
       })
       .subscribe();
   } catch (e) { console.warn('[realtime] unavailable, relying on polling', e); }
@@ -288,17 +292,17 @@ function startRealtime() {
 // Guarded so overlapping triggers (realtime + interval + focus + nudge firing close
 // together) can't stack concurrent flush/pull passes that saturate the main thread and
 // freeze the app. A trigger that arrives mid-cycle just sets a "run again" flag.
-let _inCycle = false, _rerun = false;
-async function cycle() {
+let _inCycle = false, _rerun = false, _rerunFull = false;
+async function cycle({ full = false } = {}) {
   if (!isOnline()) return;
-  if (_inCycle) { _rerun = true; return; }
+  if (_inCycle) { _rerun = true; _rerunFull = _rerunFull || full; return; }
   _inCycle = true;
   try {
     try { await flush(); } catch { /* ignore */ }
-    try { await pull(_onData); } catch { /* ignore */ }
+    try { await pull(_onData, { full }); } catch { /* ignore */ }
   } finally {
     _inCycle = false;
-    if (_rerun) { _rerun = false; setTimeout(() => cycle(), 200); } // coalesce a queued trigger
+    if (_rerun) { const f = _rerunFull; _rerun = false; _rerunFull = false; setTimeout(() => cycle({ full: f }), 200); } // coalesce a queued trigger
   }
 }
 
@@ -310,24 +314,28 @@ export function nudgeSync() {
   _nudgeTimer = setTimeout(() => { cycle(); }, 500);
 }
 
-export function syncNow() { return cycle(); } // manual trigger (Sync now button)
+export function syncNow() { return cycle({ full: true }); } // manual trigger (Sync now button) — full reconcile
 
 export function startSync(onPulled) {
   if (started || typeof window === 'undefined') return;
   started = true;
   _onData = onPulled;
-  const kick = () => { if (isOnline()) cycle(); };
-  const setOnline = (v) => { state.online = v; emit(); if (v) kick(); };
+  // A focus/open/online/manual kick does a FULL reconcile so returning to the app always
+  // catches a collaborator's changes even if clock skew slipped them past the incremental
+  // window. The frequent 25s background poll stays incremental (cheap); a slower 2.5-min
+  // timer does a full reconcile as a safety net for an app left open in the foreground.
+  const kickFull = () => { if (isOnline()) cycle({ full: true }); };
+  const kickInc = () => { if (isOnline()) cycle({ full: false }); };
+  const setOnline = (v) => { state.online = v; emit(); if (v) kickFull(); };
   window.addEventListener('online', () => setOnline(true));
   window.addEventListener('offline', () => setOnline(false));
-  // Sync immediately when the app regains focus or becomes visible — this is what
-  // makes another device's changes appear "instantly" when you open/return to it.
-  window.addEventListener('focus', kick);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) kick(); });
-  setInterval(kick, SYNC_INTERVAL_MS); // periodic flush+pull (fallback safety net)
-  startRealtime();                     // instant cross-device propagation
+  window.addEventListener('focus', kickFull);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) kickFull(); });
+  setInterval(kickInc, SYNC_INTERVAL_MS);          // frequent incremental poll
+  setInterval(kickFull, FULL_SYNC_INTERVAL_MS);    // periodic full reconcile (safety net)
+  startRealtime();                                 // instant cross-device propagation
   refreshPending();
-  kick();
+  kickFull();
 }
 
 // Schema check: with the jsonb `data` envelope, the ONLY column that matters for
