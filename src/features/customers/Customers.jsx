@@ -4,7 +4,7 @@ import { useApp } from '../../app/AppProvider.jsx';
 import { C, WEEKDAYS, emirateOptions, emirateLabel, citiesOfEmirate, allCities, TABLES } from '../../lib/constants.js';
 import { fmtCur, num, round2 } from '../../lib/money.js';
 import { fmtDate } from '../../lib/dates.js';
-import { customerStats, clinicRating, recordInvoicePayment, orderList } from '../../lib/engine.js';
+import { customerStats, clinicRating, recordInvoicePayment, recordOpeningDebtPayment, orderList } from '../../lib/engine.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, PaymentModal, SearchBar, Select, Textarea } from '../../ui/components.jsx';
 
 const blank = () => ({ name: '', type: 'doctor', phone: '', emirate: '', city: '', specialty: '', trn: '', workingDays: WEEKDAYS.map((d) => d.key), notes: '', isActive: true });
@@ -31,7 +31,7 @@ export default function Customers() {
     if (cityFilter) rows = rows.filter((r) => (r.city || '').trim() === cityFilter);
     if (typeFilter) rows = rows.filter((r) => r.type === typeFilter);
     const withStats = rows.map((c) => {
-      const st = customerStats(invoices, items, c.id);
+      const st = customerStats(invoices, items, c.id, c);
       const margin = st.revenue > 0 ? (st.profit / st.revenue) * 100 : 0;
       const lastOrder = (st.invoices || []).reduce((m, i) => ((i.date || '') > m ? (i.date || '') : m), '');
       return { ...c, _st: st, _margin: margin, _lastOrder: lastOrder };
@@ -160,12 +160,13 @@ export default function Customers() {
 
 function CustomerProfile({ customer, onBack, onEdit, t, lang, displayCurrency, usdRate, invoices, items, app }) {
   const allCustomers = (app.data[TABLES.customers] || []).filter((c) => c.isActive !== false);
-  const st = customerStats(invoices, items, customer.id);
+  const st = customerStats(invoices, items, customer.id, customer);
   const rating = clinicRating(allCustomers, invoices, items, customer.id);
   const custOrders = useMemo(() => orderList(app).filter((o) => o.customerId === customer.id), [app.data, customer.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const variants = app.data[TABLES.variants] || [];
   const skuOf = (id) => variants.find((v) => v.id === id)?.sku || '—';
   const [payFor, setPayFor] = useState(null);
+  const [debtModal, setDebtModal] = useState(null);   // 'set' | 'pay' | null
 
   // Month-over-month sales & profit (last 6 months) + most-bought materials
   const insight = useMemo(() => {
@@ -206,7 +207,27 @@ function CustomerProfile({ customer, onBack, onEdit, t, lang, displayCurrency, u
       <Card style={{ background: st.debt > 0 ? '#FBECEC' : '#E9F6EF', border: 'none', marginBottom: 12 }}>
         <div style={{ fontSize: 12, color: C.textMid, fontWeight: 700 }}>{t('debt')}</div>
         <div style={{ fontSize: 28, fontWeight: 800, color: st.debt > 0 ? C.danger : C.success }}>{fmtCur(st.debt, displayCurrency, usdRate)}</div>
+        {st.openingOutstanding > 0 && (
+          <div style={{ fontSize: 11, color: C.textMid, marginTop: 4 }}>
+            🧾 {t('fromInvoices')}: {fmtCur(st.invoiceDebt, displayCurrency, usdRate)} · 📜 {t('oldDebt')}: {fmtCur(st.openingOutstanding, displayCurrency, usdRate)}
+          </div>
+        )}
+        <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+          <Btn size="sm" variant="ghost" onClick={() => setDebtModal('set')}>📜 {st.openingDebt > 0 ? t('editOldDebt') : t('addOldDebt')}</Btn>
+          {st.openingOutstanding > 0 && <Btn size="sm" onClick={() => setDebtModal('pay')}>💵 {t('settleOldDebt')}</Btn>}
+        </div>
       </Card>
+
+      {debtModal === 'set' && (
+        <SetOldDebtModal customer={customer} t={t} displayCurrency={displayCurrency} usdRate={usdRate}
+          onClose={() => setDebtModal(null)}
+          onSave={async (amount, note) => { await app.updateRow(TABLES.customers, customer.id, { openingDebt: amount, openingDebtNote: note, openingPaid: num(customer.openingPaid) }); setDebtModal(null); }} />
+      )}
+      {debtModal === 'pay' && (
+        <PayOldDebtModal outstanding={st.openingOutstanding} t={t} displayCurrency={displayCurrency} usdRate={usdRate}
+          onClose={() => setDebtModal(null)}
+          onRecord={async (amount) => { await recordOpeningDebtPayment(app, customer.id, amount); setDebtModal(null); }} />
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 14 }}>
         <MiniStat label={t('revenue')} value={fmtCur(st.revenue, displayCurrency, usdRate)} />
@@ -320,5 +341,40 @@ function MiniStat({ label, value, color = C.text }) {
       <div style={{ fontSize: 15, fontWeight: 800, color }}>{value}</div>
       <div style={{ fontSize: 10, color: C.textMuted, marginTop: 2 }}>{label}</div>
     </div>
+  );
+}
+
+// Set/edit a customer's old (opening) debt — a balance owed before using the app, no items.
+function SetOldDebtModal({ customer, t, displayCurrency, usdRate, onClose, onSave }) {
+  const [amount, setAmount] = useState(customer.openingDebt != null ? String(customer.openingDebt) : '');
+  const [note, setNote] = useState(customer.openingDebtNote || '');
+  const rate = displayCurrency === 'USD' ? (usdRate || 1) : 1;
+  const aed = (Number(amount) || 0) * rate; // input shown in display currency → store AED
+  return (
+    <Modal open onClose={onClose} title={`📜 ${t('oldDebt')} · ${customer.name}`} dismissable
+      footer={<><Btn variant="ghost" onClick={onClose}>{t('cancel')}</Btn><Btn onClick={() => onSave(Math.round(aed * 100) / 100, note)}>{t('save')}</Btn></>}>
+      <div style={{ fontSize: 12, color: C.textMid, marginBottom: 10 }}>{t('oldDebtHint')}</div>
+      <Field label={`${t('amount')} (${displayCurrency})`}><Input type="number" value={amount} onChange={setAmount} /></Field>
+      <Field label={t('note')}><Textarea value={note} onChange={setNote} rows={2} placeholder={t('oldDebtNotePlaceholder')} /></Field>
+    </Modal>
+  );
+}
+
+// Record a repayment against the old debt.
+function PayOldDebtModal({ outstanding, t, displayCurrency, usdRate, onClose, onRecord }) {
+  const rate = displayCurrency === 'USD' ? (usdRate || 1) : 1;
+  const [amount, setAmount] = useState('');
+  const aed = (Number(amount) || 0) * rate;
+  const outDisp = outstanding / rate;
+  return (
+    <Modal open onClose={onClose} title={`💵 ${t('settleOldDebt')}`} dismissable
+      footer={<>
+        <Btn variant="ghost" onClick={onClose}>{t('cancel')}</Btn>
+        <Btn onClick={() => onRecord(Math.round(aed * 100) / 100)} disabled={!(Number(amount) > 0)}>{t('record')}</Btn>
+      </>}>
+      <div style={{ fontSize: 12, color: C.textMid, marginBottom: 10 }}>{t('outstanding')}: {fmtCur(outstanding, displayCurrency, usdRate)}</div>
+      <Field label={`${t('amount')} (${displayCurrency})`}><Input type="number" value={amount} onChange={setAmount} /></Field>
+      <Btn size="sm" variant="ghost" onClick={() => setAmount(String(Math.round(outDisp * 100) / 100))}>{t('payFull')}</Btn>
+    </Modal>
   );
 }

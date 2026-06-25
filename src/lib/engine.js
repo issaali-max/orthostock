@@ -433,14 +433,34 @@ export async function mergeCustomers(app, keepId, dropIds) {
   return { moved, merged: ids.length };
 }
 
-export function customerStats(invoices, items, customerId) {
+export function customerStats(invoices, items, customerId, customer = null) {
   const mine = invoices.filter((i) => i.customerId === customerId && i.status !== 'returned');
   const ids = new Set(mine.map((i) => i.id));
   const myItems = items.filter((it) => ids.has(it.invoiceId));
   const revenue = mine.reduce((s, i) => s + num(i.total), 0);
   const profit = myItems.reduce((s, it) => s + num(it.lineProfit), 0);
-  const debt = mine.reduce((s, i) => s + Math.max(0, num(i.total) - num(i.paidAmount)), 0);
-  return { revenue: round2(revenue), profit: round2(profit), debt: round2(debt), count: mine.length, invoices: mine };
+  const invoiceDebt = mine.reduce((s, i) => s + Math.max(0, num(i.total) - num(i.paidAmount)), 0);
+  // Old/opening debt: a balance the customer already owed before they started using the app,
+  // recorded WITHOUT any invoice or material lines. openingPaid tracks repayments against it.
+  const openingOutstanding = customer ? Math.max(0, num(customer.openingDebt) - num(customer.openingPaid)) : 0;
+  const debt = invoiceDebt + openingOutstanding;
+  return { revenue: round2(revenue), profit: round2(profit), debt: round2(debt), invoiceDebt: round2(invoiceDebt), openingOutstanding: round2(openingOutstanding), openingDebt: round2(num(customer?.openingDebt)), count: mine.length, invoices: mine };
+}
+
+// Record a repayment against a customer's OLD/opening debt (not tied to any invoice).
+// Increments openingPaid, capped at openingDebt; keeps a payments log for history.
+export async function recordOpeningDebtPayment(app, customerId, amount, date) {
+  const c = (app.data[TABLES.customers] || []).find((x) => x.id === customerId);
+  if (!c) return null;
+  const amt = num(amount);
+  if (!(amt > 0)) return null;
+  const debt = num(c.openingDebt);
+  const newPaid = Math.min(debt, num(c.openingPaid) + amt);
+  const payments = Array.isArray(c.openingPayments) ? c.openingPayments.slice() : [];
+  payments.push({ amount: round2(amt), date: date || new Date().toISOString().slice(0, 10) });
+  const saved = await db.update(TABLES.customers, customerId, { openingPaid: round2(newPaid), openingPayments: payments });
+  await app.refresh(TABLES.customers); nudgeSync();
+  return saved;
 }
 
 // 1–100 rating relative to all customers: 60% profit, 40% volume.
