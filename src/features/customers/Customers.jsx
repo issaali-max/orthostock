@@ -126,7 +126,6 @@ export default function Customers() {
             </Field>
             <div style={{ display: 'flex', gap: 8 }}>
               <Field label={t('phone')}><Input value={editing.phone} onChange={(v) => setEditing((r) => ({ ...r, phone: v }))} /></Field>
-              <Field label={t('trn')}><Input value={editing.trn || ''} onChange={(v) => setEditing((r) => ({ ...r, trn: v }))} /></Field>
               <Field label={t('specialty')}><Input value={editing.specialty} onChange={(v) => setEditing((r) => ({ ...r, specialty: v }))} /></Field>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
@@ -221,7 +220,8 @@ function CustomerProfile({ customer, onBack, onEdit, t, lang, displayCurrency, u
       {debtModal === 'set' && (
         <SetOldDebtModal customer={customer} t={t} displayCurrency={displayCurrency} usdRate={usdRate}
           onClose={() => setDebtModal(null)}
-          onSave={async (amount, note) => { await app.updateRow(TABLES.customers, customer.id, { openingDebt: amount, openingDebtNote: note, openingPaid: num(customer.openingPaid) }); setDebtModal(null); }} />
+          onSave={async (amount, note) => { await app.updateRow(TABLES.customers, customer.id, { openingDebt: amount, openingDebtNote: note, openingPaid: num(customer.openingPaid) }); setDebtModal(null); }}
+          onDelete={async () => { if (window.confirm(t('delete') + '?')) { await app.updateRow(TABLES.customers, customer.id, { openingDebt: 0, openingPaid: 0, openingPayments: [], openingDebtNote: '' }); setDebtModal(null); } }} />
       )}
       {debtModal === 'pay' && (
         <PayOldDebtModal outstanding={st.openingOutstanding} t={t} displayCurrency={displayCurrency} usdRate={usdRate}
@@ -345,14 +345,18 @@ function MiniStat({ label, value, color = C.text }) {
 }
 
 // Set/edit a customer's old (opening) debt — a balance owed before using the app, no items.
-function SetOldDebtModal({ customer, t, displayCurrency, usdRate, onClose, onSave }) {
+function SetOldDebtModal({ customer, t, displayCurrency, usdRate, onClose, onSave, onDelete }) {
   const [amount, setAmount] = useState(customer.openingDebt != null ? String(customer.openingDebt) : '');
   const [note, setNote] = useState(customer.openingDebtNote || '');
   const rate = displayCurrency === 'USD' ? (usdRate || 1) : 1;
   const aed = (Number(amount) || 0) * rate; // input shown in display currency → store AED
   return (
     <Modal open onClose={onClose} title={`📜 ${t('oldDebt')} · ${customer.name}`} dismissable
-      footer={<><Btn variant="ghost" onClick={onClose}>{t('cancel')}</Btn><Btn onClick={() => onSave(Math.round(aed * 100) / 100, note)}>{t('save')}</Btn></>}>
+      footer={<>
+        {onDelete && num(customer.openingDebt) > 0 && <Btn variant="ghost" onClick={onDelete} style={{ color: C.danger }}>🗑 {t('delete')}</Btn>}
+        <Btn variant="ghost" onClick={onClose}>{t('cancel')}</Btn>
+        <Btn onClick={() => onSave(Math.round(aed * 100) / 100, note)}>{t('save')}</Btn>
+      </>}>
       <div style={{ fontSize: 12, color: C.textMid, marginBottom: 10 }}>{t('oldDebtHint')}</div>
       <Field label={`${t('amount')} (${displayCurrency})`}><Input type="number" value={amount} onChange={setAmount} /></Field>
       <Field label={t('note')}><Textarea value={note} onChange={setNote} rows={2} placeholder={t('oldDebtNotePlaceholder')} /></Field>

@@ -30,6 +30,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
   const [prodId, setProdId] = useState('');
   const [customerId, setCustomerId] = useState('');
   const [showQuickOrder, setShowQuickOrder] = useState(false);
+  const [taxApplied, setTaxApplied] = useState(editing?.taxApplied != null ? !!editing.taxApplied : !!settings?.taxEnabled);
   const [custEmirate, setCustEmirate] = useState('');
   const [custCity, setCustCity] = useState('');
   // city list follows the chosen emirate (fixed Arabic cities), else every city
@@ -78,7 +79,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
   const invDisc = Math.min(num(invDiscount), grossSubtotal);
   const invDiscPct = grossSubtotal > 0 ? round2(safeDiv(invDisc, grossSubtotal) * 100) : 0;
   const netSubtotal = round2(grossSubtotal - invDisc);
-  const totals = invoiceTotals([{ unitPrice: netSubtotal, qty: 1, discountAmount: 0 }], settings);
+  const totals = invoiceTotals([{ unitPrice: netSubtotal, qty: 1, discountAmount: 0 }], settings, taxApplied);
   const costTotal = round2(lines.reduce((s, l) => { const v = vById(l.variantId); return s + num(v?.purchasePriceAvg) * num(l.qty); }, 0));
   const expectedProfit = round2(netSubtotal - costTotal);
   const expectedMargin = netSubtotal > 0 ? round2((expectedProfit / netSubtotal) * 100) : 0;
@@ -99,7 +100,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
         invoiceData: {
           invoiceNumber: number, customerId: customerId || null, date,
           subtotal: netSubtotal, discountTotal: round2(invDisc), total: totals.total,
-          paidAmount: paid, paymentStatus, paymentMethod, status: 'active', currency: 'AED', notes: '', payments,
+          paidAmount: paid, paymentStatus, paymentMethod, status: 'active', currency: 'AED', notes: '', payments, taxApplied,
         },
         lines: lines.map((l) => ({ variantId: l.variantId, qty: num(l.qty), unitPrice: num(l.unitPrice) })),
         invoiceDiscount: invDisc,
@@ -272,7 +273,13 @@ export default function InvoiceCreate({ open, onClose, editing }) {
           <span style={{ color: C.textMid }}>{t('invoiceDiscount')}{invDiscPct > 0 ? ` (${fmtNum(invDiscPct)}%)` : ''}</span>
           <Input type="number" value={invDiscount} onChange={(v) => setInvDiscount(v === '' ? '' : Math.min(Math.max(0, num(v)), grossSubtotal))} style={{ width: 90, padding: 6 }} />
         </div>
-        {settings?.taxEnabled && <Row label={`${t('vat')} ${settings.taxRate}%`} value={fmtCur(totals.vat, displayCurrency, usdRate)} />}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: C.textMid, cursor: 'pointer' }}>
+            <input type="checkbox" checked={taxApplied} onChange={(e) => setTaxApplied(e.target.checked)} />
+            {t('applyVat')} {num(settings?.taxRate) || 5}%
+          </label>
+          {taxApplied && <span style={{ fontWeight: 700 }}>{fmtCur(totals.vat, displayCurrency, usdRate)}</span>}
+        </div>
         <Row label={t('finalTotal')} value={fmtCur(totals.total, displayCurrency, usdRate)} bold />
         <div style={{ borderTop: `1px dashed ${C.border}`, margin: '6px 0' }} />
         <Row label={t('totalCost')} value={fmtCur(costTotal, displayCurrency, usdRate)} />

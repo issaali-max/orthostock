@@ -163,7 +163,6 @@ function buildHtml({ invoice, items, settings, customer, variantById, lang }) {
         <div style="flex:1;border:1px solid ${LINE};border-radius:10px;padding:11px 13px">
           <div style="font-size:10.5px;color:${MUTE};letter-spacing:.5px;margin-bottom:4px">${both('customer')}</div>
           <div style="font-size:15px;font-weight:800">${esc(customer?.name || '—')}</div>
-          ${customer?.trn ? `<div style="color:${NAVY};font-weight:700;margin-top:2px;font-size:11.5px">TRN: ${esc(customer.trn)}</div>` : ''}
           ${customer?.phone ? `<div style="color:${MUTE};font-size:11.5px">${L.phone[ar ? 0 : 1]}: ${esc(customer.phone)}</div>` : ''}
           ${(customer?.city || customer?.emirate) ? `<div style="color:${MUTE};font-size:11.5px">${esc([customer.city, customer.emirate].filter(Boolean).join(', '))}</div>` : ''}
         </div>

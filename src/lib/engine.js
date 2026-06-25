@@ -485,9 +485,11 @@ export function supplierStats(purchases, supplierId) {
 }
 
 // Invoice totals (VAT on subtotal).
-export function invoiceTotals(lines, settings) {
+export function invoiceTotals(lines, settings, taxApplied) {
   const subtotal = lines.reduce((s, l) => s + num(l.unitPrice) * num(l.qty) - num(l.discountAmount), 0);
-  const vat = settings?.taxEnabled ? subtotal * safeDiv(num(settings.taxRate), 100) : 0;
+  // taxApplied (per-invoice) overrides the global setting when provided (true/false).
+  const useTax = taxApplied == null ? !!settings?.taxEnabled : !!taxApplied;
+  const vat = useTax ? subtotal * safeDiv(num(settings.taxRate), 100) : 0;
   return { subtotal: round2(subtotal), vat: round2(vat), total: round2(subtotal + vat) };
 }
 
@@ -510,10 +512,11 @@ export function invoiceBreakdown(invoice, items, settings) {
   // netSubtotal = sum of line totals (already after all discounts), matching what was stored
   const netSubtotal = round2(lines.reduce((s, l) => s + l.lineTotal, 0));
   const discountTotal = round2(num(invoice.discountTotal));
-  const taxEnabled = !!settings?.taxEnabled;
+  // Per-invoice VAT flag (taxApplied) wins; older invoices without it fall back to settings.
+  const taxEnabled = invoice.taxApplied == null ? !!settings?.taxEnabled : !!invoice.taxApplied;
   const vatRate = taxEnabled ? num(settings.taxRate) : 0;
-  // Reuse invoiceTotals' exact formula on the net subtotal
-  const t = invoiceTotals([{ unitPrice: netSubtotal, qty: 1, discountAmount: 0 }], settings);
+  // Reuse invoiceTotals' exact formula on the net subtotal, honoring this invoice's flag
+  const t = invoiceTotals([{ unitPrice: netSubtotal, qty: 1, discountAmount: 0 }], settings, taxEnabled);
   const total = round2(num(invoice.total) || t.total);
   const paid = round2(num(invoice.paidAmount));
   const remaining = round2(Math.max(0, total - paid));
@@ -522,6 +525,27 @@ export function invoiceBreakdown(invoice, items, settings) {
     vat: t.vat, total, paid, remaining,
     currency: invoice.currency || settings?.baseCurrency || 'AED',
   };
+}
+
+// Output VAT collected across all (non-returned) invoices = VAT payable to the authority.
+// Each invoice is valued with its own taxApplied flag, so invoices issued without VAT add 0.
+export function vatLiability(invoices, items, settings) {
+  const byInv = new Map();
+  for (const it of (items || [])) { if (!byInv.has(it.invoiceId)) byInv.set(it.invoiceId, []); byInv.get(it.invoiceId).push(it); }
+  let outputVat = 0;
+  for (const inv of (invoices || [])) {
+    if (inv.status === 'returned') continue;
+    outputVat += num(invoiceBreakdown(inv, byInv.get(inv.id) || [], settings).vat);
+  }
+  return round2(outputVat);
+}
+
+// Total old/opening debt outstanding across all customers (receivables not tied to invoices).
+export function openingDebtTotal(customers) {
+  return round2((customers || []).reduce((s, c) => {
+    if (c.isActive === false) return s;
+    return s + Math.max(0, num(c.openingDebt) - num(c.openingPaid));
+  }, 0));
 }
 
 // ─────────────────────────────────────────────────────────────

@@ -5,7 +5,7 @@ import { C, TABLES, SHADOW } from '../lib/constants.js';
 import { fmtCur, fmtNum, num } from '../lib/money.js';
 import { todayISO } from '../lib/dates.js';
 import RestockList from './catalogue/RestockList.jsx';
-import { pnl, monthlyTrend, periodTrend, buildAlerts, emirateStats, topProducts, topCustomers } from '../lib/engine.js';
+import { pnl, monthlyTrend, periodTrend, buildAlerts, emirateStats, topProducts, topCustomers, openingDebtTotal, vatLiability } from '../lib/engine.js';
 import FinancialPanel from './dashboard/FinancialPanel.jsx';
 import { Badge, Card, EmptyState, Modal, PageHeader } from '../ui/components.jsx';
 
@@ -15,7 +15,7 @@ const yearStart = () => `${new Date().getFullYear()}-01-01`;
 export default function Dashboard() {
   const [showRestock, setShowRestock] = useState(false);
   const app = useApp();
-  const { t, data, displayCurrency, usdRate, lang } = app;
+  const { t, data, displayCurrency, usdRate, lang, settings } = app;
   const [range, setRange] = useState('month'); // day | month | year
   const [trendMode, setTrendMode] = useState('month'); // month | year
   const [showSold, setShowSold] = useState(false);
@@ -104,7 +104,10 @@ export default function Dashboard() {
     const debt = invoices.reduce((s, i) => s + Math.max(0, num(i.total) - num(i.paidAmount)), 0);
     const inventoryValue = variants.reduce((s, v) => s + Math.max(0, num(v.stockQty)) * num(v.purchasePriceAvg), 0);
     const lowStock = variants.filter((v) => num(v.stockQty) <= 0 || (num(v.stockQty) <= num(v.stockMin) && num(v.stockMin) > 0));
-    return { revenue, profit, debt, inventoryValue, invoiceCount: invoices.length, lowStock };
+    const customers = (data[TABLES.customers] || []).filter((c) => c.isActive !== false);
+    const oldDebt = openingDebtTotal(customers);
+    const vatDue = vatLiability(invoices, items, settings);
+    return { revenue, profit, debt, oldDebt, vatDue, inventoryValue, invoiceCount: invoices.length, lowStock };
   }, [dInv, dItems, dVar]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const bestEmirate = emirates[0];
@@ -166,6 +169,8 @@ export default function Dashboard() {
         <Kpi icon="💰" label={t('revenue')} value={cur(kpi.revenue)} color={C.primary} />
         <Kpi icon="📈" label={t('profit')} value={cur(kpi.profit)} color={C.success} />
         <Kpi icon="⏳" label={t('debt')} value={cur(kpi.debt)} color={kpi.debt > 0 ? C.danger : C.success} />
+        {kpi.oldDebt > 0 && <Kpi icon="📜" label={t('oldDebt')} value={cur(kpi.oldDebt)} color={C.danger} />}
+        {kpi.vatDue > 0 && <Kpi icon="🧾" label={t('vatDue')} value={cur(kpi.vatDue)} color={C.warning} />}
         <Kpi icon="📦" label={t('inventoryValue')} value={cur(kpi.inventoryValue)} color={C.text} />
         <Kpi icon="🔻" label={t('lowStock')} value={fmtNum(kpi.lowStock.length)} color={kpi.lowStock.length ? C.warning : C.success} onClick={() => setShowRestock(true)} />
       </div>
