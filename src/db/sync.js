@@ -92,6 +92,16 @@ let state = {
 };
 const subs = new Set();
 const emit = () => subs.forEach((cb) => cb({ ...state }));
+// navigator.onLine is only a HINT — `false` is frequently a false-negative (some Macs /
+// Chrome / VPNs report offline while the network is fine). So we never let it permanently
+// block sync: real reachability is decided by whether the cloud actually answered a request.
+const markOnline = (v) => { if (state.online !== v) { state.online = v; emit(); } };
+const isMissingTable = (error) => {
+  const m = String(error?.message || error || '').toLowerCase();
+  return error?.code === 'PGRST205' || error?.code === '42P01'
+    || m.includes('does not exist') || (m.includes('relation') && m.includes('exist'))
+    || m.includes('could not find the table') || m.includes('schema cache');
+};
 
 export function subscribeSync(cb) { subs.add(cb); cb({ ...state }); return () => subs.delete(cb); }
 export function getSyncState() { return { ...state }; }
@@ -108,8 +118,7 @@ export async function refreshPending() {
 // is safe to run repeatedly and on every device — the cloud becomes the union.
 export async function pushAllLocal(onProgress) {
   if (!supabase) return { ok: false, error: 'cloud_not_configured', pushed: 0, errors: ['cloud not configured'] };
-  if (!isOnline()) return { ok: false, error: 'offline', pushed: 0, errors: ['offline'] };
-  let pushed = 0; const errors = [];
+  let pushed = 0; const errors = []; let reached = false;
   for (const table of Object.values(TABLES)) {
     if (LOCAL_ONLY.has(table)) continue; // never upload local-only tables
     let rows = [];
@@ -119,12 +128,14 @@ export async function pushAllLocal(onProgress) {
       const chunk = rows.slice(i, i + 200).map(toCloud);
       try {
         const { error } = await supabase.from(table).upsert(chunk);
-        if (error) errors.push(`${table}: ${error.message}`);
+        reached = true;                                            // the cloud answered → we're online
+        if (error) { if (!isMissingTable(error)) errors.push(`${table}: ${error.message}`); } // a not-yet-created table is not a failure
         else pushed += chunk.length;
       } catch (e) { errors.push(`${table}: ${e.message || e}`); }
     }
     onProgress?.(table);
   }
+  if (reached) markOnline(true);
   return { ok: errors.length === 0, pushed, errors };
 }
 
@@ -134,21 +145,20 @@ export const cloudReady = () => !!supabase;
 // reset doesn't resurrect on the next pull (and clears every other device too).
 export async function wipeCloud() {
   if (!supabase) return { ok: false, error: 'cloud_not_configured' };
-  if (!isOnline()) return { ok: false, error: 'offline' };
   const errors = [];
   for (const table of Object.values(TABLES)) {
     if (LOCAL_ONLY.has(table)) continue; // nothing to wipe for local-only tables
     try {
       // delete all rows (id is never null, so this matches everything)
       const { error } = await supabase.from(table).delete().not('id', 'is', null);
-      if (error) errors.push(`${table}: ${error.message}`);
+      if (error && !isMissingTable(error)) errors.push(`${table}: ${error.message}`);
     } catch (e) { errors.push(`${table}: ${e.message || e}`); }
   }
   return { ok: errors.length === 0, errors };
 }
 
 export async function flush() {
-  if (!supabase || !isOnline() || state.syncing) return;
+  if (!supabase || state.syncing) return;
   state.syncing = true; emit();
   try {
     const ops = (await outboxAll()).sort((a, b) => a.seq - b.seq);
@@ -217,7 +227,7 @@ export async function flush() {
 }
 
 export async function pull(onData, { full = false } = {}) {
-  if (!supabase || !isOnline()) return;
+  if (!supabase) return;
   // A stuck/failing outbox op must NOT block downloads forever. We still pull, and
   // the updatedAt merge protects any unsynced local edits (local-newer rows are
   // kept). We only re-queue push-backs when the outbox was empty, to avoid piling
@@ -232,13 +242,14 @@ export async function pull(onData, { full = false } = {}) {
   // the incremental window skipped. Cheap here because the dataset is small.
   const wm = Number((await metaGet('pullWatermark')) || 0);
   const since = full ? 0 : (wm > 0 ? wm - SKEW_BUFFER_MS : 0);
-  let maxSeen = wm, changed = 0, pushedBack = 0;
+  let maxSeen = wm, changed = 0, pushedBack = 0, reached = false;
   for (const table of Object.values(TABLES)) {
     if (LOCAL_ONLY.has(table)) continue; // local-only tables are never pulled
     try {
       let q = supabase.from(table).select('*');
       if (since > 0) q = q.gt('updatedAt', since);
       const { data, error } = await q;
+      reached = true;                                        // the cloud answered (even a missing-table error still means we're online)
       if (error || !Array.isArray(data) || !data.length) continue;
       const localRows = await idbGetAll(table);
       const localById = new Map(localRows.map((r) => [r.id, r]));
@@ -257,6 +268,7 @@ export async function pull(onData, { full = false } = {}) {
       if (toWrite.length) await idbBulkPut(table, toWrite);
     } catch { /* table may not exist / timed out; skip and try next */ }
   }
+  markOnline(reached);                                       // self-heal the online badge from real cloud reachability
   observeTimestamp(maxSeen); // adopt the cloud's highest stamp so our next local edit out-ranks it
   if (maxSeen > wm) await metaSet('pullWatermark', maxSeen);
   state.lastSyncAt = Date.now(); emit();
@@ -282,7 +294,7 @@ function startRealtime() {
       .channel('orthostock-sync')
       .on('postgres_changes', { event: '*', schema: 'public' }, () => {
         clearTimeout(_rtTimer);
-        _rtTimer = setTimeout(() => { if (isOnline()) cycle({ full: true }); }, 400); // a cloud change happened → full reconcile so skew can't hide it (debounced+coalesced)
+        _rtTimer = setTimeout(() => cycle({ full: true, force: true }), 400); // a cloud change happened → full reconcile so skew can't hide it (debounced+coalesced)
       })
       .subscribe();
   } catch (e) { console.warn('[realtime] unavailable, relying on polling', e); }
@@ -293,8 +305,9 @@ function startRealtime() {
 // together) can't stack concurrent flush/pull passes that saturate the main thread and
 // freeze the app. A trigger that arrives mid-cycle just sets a "run again" flag.
 let _inCycle = false, _rerun = false, _rerunFull = false;
-async function cycle({ full = false } = {}) {
-  if (!isOnline()) return;
+async function cycle({ full = false, force = false } = {}) {
+  if (!supabase) return;
+  if (!force && !state.online) return;   // background pollers respect the (self-healed) online state; forced runs always try
   if (_inCycle) { _rerun = true; _rerunFull = _rerunFull || full; return; }
   _inCycle = true;
   try {
@@ -302,19 +315,19 @@ async function cycle({ full = false } = {}) {
     try { await pull(_onData, { full }); } catch { /* ignore */ }
   } finally {
     _inCycle = false;
-    if (_rerun) { const f = _rerunFull; _rerun = false; _rerunFull = false; setTimeout(() => cycle({ full: f }), 200); } // coalesce a queued trigger
+    if (_rerun) { const f = _rerunFull; _rerun = false; _rerunFull = false; setTimeout(() => cycle({ full: f, force: true }), 200); } // coalesce a queued trigger
   }
 }
 
 // Called after a local write: pushes the change up quickly (debounced so a burst
 // of writes — e.g. an atomic invoice — results in a single sync), then pulls.
 export function nudgeSync() {
-  if (!started || !isOnline()) return;
+  if (!started || !state.online) return;
   clearTimeout(_nudgeTimer);
   _nudgeTimer = setTimeout(() => { cycle(); }, 500);
 }
 
-export function syncNow() { return cycle({ full: true }); } // manual trigger (Sync now button) — full reconcile
+export function syncNow() { return cycle({ full: true, force: true }); } // manual trigger (Sync now button) — always attempts
 
 export function startSync(onPulled) {
   if (started || typeof window === 'undefined') return;
@@ -324,11 +337,10 @@ export function startSync(onPulled) {
   // catches a collaborator's changes even if clock skew slipped them past the incremental
   // window. The frequent 25s background poll stays incremental (cheap); a slower 2.5-min
   // timer does a full reconcile as a safety net for an app left open in the foreground.
-  const kickFull = () => { if (isOnline()) cycle({ full: true }); };
-  const kickInc = () => { if (isOnline()) cycle({ full: false }); };
-  const setOnline = (v) => { state.online = v; emit(); if (v) kickFull(); };
-  window.addEventListener('online', () => setOnline(true));
-  window.addEventListener('offline', () => setOnline(false));
+  const kickFull = () => cycle({ full: true, force: true });   // always attempt — pull self-marks online from real reachability
+  const kickInc = () => { if (state.online) cycle({ full: false }); };
+  window.addEventListener('online', () => { markOnline(true); kickFull(); });
+  window.addEventListener('offline', () => markOnline(false));  // hint only; the next forced kick re-verifies
   window.addEventListener('focus', kickFull);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) kickFull(); });
   setInterval(kickInc, SYNC_INTERVAL_MS);          // frequent incremental poll
@@ -343,21 +355,22 @@ export function startSync(onPulled) {
 // verifies each table has a usable `data` column by upserting a sample envelope.
 export async function checkCloudSchema() {
   if (!supabase) return { ok: false, missing: [], errors: ['cloud_not_configured'] };
-  if (!isOnline()) return { ok: false, missing: [], errors: ['offline'] };
-  const missing = []; const errors = [];
+  const missing = []; const errors = []; let reached = false;
   for (const table of Object.values(TABLES)) {
     if (LOCAL_ONLY.has(table)) continue; // local-only tables aren't in the cloud
     let rows = [];
     try { rows = await idbGetAll(table); } catch { continue; }
     if (!rows.length) continue;
     const { error } = await supabase.from(table).upsert(toCloud(rows[0]));
+    reached = true;
     if (error) {
       const m = /Could not find the '([^']+)' column/i.exec(error.message || '');
       if (m && m[1] === 'data') missing.push({ table, column: 'data' });
       else if (m) { /* a legacy flat column is missing — harmless, data carries it */ }
-      else errors.push(`${table}: ${error.message}`);
+      else errors.push(`${table}: ${error.message}`); // e.g. a table that hasn't been created yet (visits)
     }
   }
+  if (reached) markOnline(true);
   return { ok: missing.length === 0 && errors.length === 0, missing, errors };
 }
 
