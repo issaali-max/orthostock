@@ -8,6 +8,7 @@ import { Badge, Btn, Card, EmptyState, PageHeader, PaymentModal, SearchBar } fro
 import InvoiceCreate from './InvoiceCreate.jsx';
 import InvoiceDetail from './InvoiceDetail.jsx';
 import InvoiceTrash from './InvoiceTrash.jsx';
+import FreeRestockModal from './FreeRestockModal.jsx';
 
 export default function Invoices() {
   const app = useApp();
@@ -17,6 +18,7 @@ export default function Invoices() {
   const [payFor, setPayFor] = useState(null);  // invoice being paid
   const [detail, setDetail] = useState(null);   // invoice whose details are open
   const [showTrash, setShowTrash] = useState(false); // recycle bin
+  const [showFree, setShowFree] = useState(false);   // هدية لي (free restock)
   const customers = data[TABLES.customers] || [];
   const custName = (id) => customers.find((c) => c.id === id)?.name || '—';
   const cur = (v) => fmtCur(v, displayCurrency, usdRate);
@@ -29,7 +31,7 @@ export default function Invoices() {
 
   return (
     <div>
-      <PageHeader title={t('invoices')} action={<div style={{ display: 'flex', gap: 8 }}><Btn variant="light" onClick={() => setShowTrash(true)}>🗑</Btn><Btn onClick={() => setModal('new')}>＋ {t('newInvoice')}</Btn></div>} />
+      <PageHeader title={t('invoices')} action={<div style={{ display: 'flex', gap: 8 }}><Btn variant="light" onClick={() => setShowTrash(true)}>🗑</Btn><Btn variant="light" onClick={() => setShowFree(true)}>🎁 {t('giftToMe')}</Btn><Btn onClick={() => setModal('new')}>＋ {t('newInvoice')}</Btn></div>} />
       <SearchBar value={q} onChange={setQ} placeholder={t('search')} />
       {list.length === 0 ? <EmptyState icon="🧾" text={t('noInvoices')} /> : (
         <div style={{ display: 'grid', gap: 10 }}>
@@ -62,6 +64,7 @@ export default function Invoices() {
       <InvoiceCreate open={!!modal} editing={modal === 'new' ? null : modal} onClose={() => setModal(null)} />
       {detail && <InvoiceDetail invoice={detail} onClose={() => setDetail(null)} onEdit={(inv) => setModal(inv)} />}
       {showTrash && <InvoiceTrash onClose={() => setShowTrash(false)} />}
+      <FreeRestockModal open={showFree} onClose={() => setShowFree(false)} />
       <PaymentModal open={!!payFor} invoice={payFor} t={t} cur={cur}
         onClose={() => setPayFor(null)}
         onRecord={(amount) => recordInvoicePayment(app, payFor.id, amount)} />
