@@ -54,8 +54,19 @@ export default function InvoiceCreate({ open, onClose, editing }) {
     setProdId('');
     if (editing) {
       const its = (data[TABLES.invoiceItems] || []).filter((it) => it.invoiceId === editing.id);
-      // reconstruct the pre-distribution unit price from listPrice/discount when possible
-      setLines(its.map((it) => ({ variantId: it.variantId, qty: num(it.qty), gift: !!it.gift, unitPrice: it.gift ? 0 : (num(it.listPrice) > 0 ? round2(num(it.listPrice) - safeDiv(num(it.discountAmount), num(it.qty))) : num(it.unitPrice)) })));
+      // reconstruct cart lines: merge the paid item and the gift item of the same material
+      // back into one line carrying { qty, unitPrice, giftQty }.
+      const byVar = new Map();
+      its.forEach((it) => {
+        const e = byVar.get(it.variantId) || { variantId: it.variantId, qty: 0, giftQty: 0, unitPrice: 0 };
+        if (it.gift) { e.giftQty = round2(e.giftQty + num(it.qty)); }
+        else {
+          e.qty = round2(e.qty + num(it.qty));
+          e.unitPrice = num(it.listPrice) > 0 ? round2(num(it.listPrice) - safeDiv(num(it.discountAmount), num(it.qty))) : num(it.unitPrice);
+        }
+        byVar.set(it.variantId, e);
+      });
+      setLines([...byVar.values()].map((e) => ({ ...e, unitPrice: e.qty > 0 ? e.unitPrice : num(vById(e.variantId)?.sellingPriceDefault) })));
       setCustomerId(editing.customerId || '');
       { const _c = customers.find((c) => c.id === editing.customerId); setCustEmirate(_c?.emirate || ''); setCustCity(_c?.city || ''); }
       setDate(editing.date || todayISO());
@@ -70,17 +81,17 @@ export default function InvoiceCreate({ open, onClose, editing }) {
   }, [open, editing?.id]); // re-init only when the modal opens or a different invoice is edited (not on every background sync)
 
   const inCart = (id) => lines.some((l) => l.variantId === id);
-  const toggle = (v) => setLines((ls) => inCart(v.id) ? ls.filter((l) => l.variantId !== v.id) : [...ls, { variantId: v.id, qty: '', unitPrice: num(v.sellingPriceDefault) }]);
+  const toggle = (v) => setLines((ls) => inCart(v.id) ? ls.filter((l) => l.variantId !== v.id) : [...ls, { variantId: v.id, qty: '', unitPrice: num(v.sellingPriceDefault), giftQty: '' }]);
   const setLine = (id, patch) => setLines((ls) => ls.map((l) => (l.variantId === id ? { ...l, ...patch } : l)));
   const removeLine = (id) => setLines((ls) => ls.filter((l) => l.variantId !== id));
 
   const grossSubtotal = lines.reduce((s, l) => s + num(l.unitPrice) * num(l.qty), 0);
-  const lineDiscountTotal = lines.reduce((s, l) => { const v = vById(l.variantId); const list = num(v?.sellingPriceDefault); return s + (l.gift ? 0 : Math.max(0, (list - num(l.unitPrice)) * num(l.qty))); }, 0);
+  const lineDiscountTotal = lines.reduce((s, l) => { const v = vById(l.variantId); const list = num(v?.sellingPriceDefault); return s + Math.max(0, (list - num(l.unitPrice)) * num(l.qty)); }, 0);
   const invDisc = Math.min(num(invDiscount), grossSubtotal);
   const invDiscPct = grossSubtotal > 0 ? round2(safeDiv(invDisc, grossSubtotal) * 100) : 0;
   const netSubtotal = round2(grossSubtotal - invDisc);
   const totals = invoiceTotals([{ unitPrice: netSubtotal, qty: 1, discountAmount: 0 }], settings, taxApplied);
-  const costTotal = round2(lines.reduce((s, l) => { const v = vById(l.variantId); return s + num(v?.purchasePriceAvg) * num(l.qty); }, 0));
+  const costTotal = round2(lines.reduce((s, l) => { const v = vById(l.variantId); return s + num(v?.purchasePriceAvg) * (num(l.qty) + num(l.giftQty)); }, 0));
   const expectedProfit = round2(netSubtotal - costTotal);
   const expectedMargin = netSubtotal > 0 ? round2((expectedProfit / netSubtotal) * 100) : 0;
 
@@ -89,7 +100,8 @@ export default function InvoiceCreate({ open, onClose, editing }) {
 
   const save = async () => {
     if (lines.length === 0) return;
-    if (lines.some((l) => !(num(l.qty) > 0))) { showToast(t('qty') + ' > 0', 'error'); return; }
+    const usable = lines.filter((l) => num(l.qty) > 0 || num(l.giftQty) > 0);
+    if (usable.length === 0) { showToast(t('qty') + ' > 0', 'error'); return; }
     setBusy(true);
     try {
       const number = editing ? editing.invoiceNumber : await nextNumber(TABLES.invoices, 'INV', 'invoiceNumber');
@@ -102,7 +114,14 @@ export default function InvoiceCreate({ open, onClose, editing }) {
           subtotal: netSubtotal, discountTotal: round2(invDisc), total: totals.total,
           paidAmount: paid, paymentStatus, paymentMethod, status: 'active', currency: 'AED', notes: '', payments, taxApplied,
         },
-        lines: lines.map((l) => ({ variantId: l.variantId, qty: num(l.qty), unitPrice: l.gift ? 0 : num(l.unitPrice), gift: !!l.gift })),
+        // One cart line can carry BOTH a paid qty and a gift qty for the same material —
+        // split here into a normal item (priced) and a gift item (price 0, cost still charged).
+        lines: usable.flatMap((l) => {
+          const out = [];
+          if (num(l.qty) > 0) out.push({ variantId: l.variantId, qty: num(l.qty), unitPrice: num(l.unitPrice) });
+          if (num(l.giftQty) > 0) out.push({ variantId: l.variantId, qty: num(l.giftQty), unitPrice: 0, gift: true });
+          return out;
+        }),
         invoiceDiscount: invDisc,
       });
       showToast(`${number} ✓`, 'success');
@@ -237,31 +256,24 @@ export default function InvoiceCreate({ open, onClose, editing }) {
             const list = num(v?.sellingPriceDefault);
             const cost = num(v?.purchasePriceAvg);
             const stock = num(v?.stockQty);
-            const isGift = !!l.gift;
-            const disc = isGift ? 0 : Math.max(0, (list - num(l.unitPrice)) * num(l.qty));
-            const loss = !isGift && num(l.unitPrice) < cost && num(l.unitPrice) > 0;
-            const lowStk = num(l.qty) > stock;
-            const toggleGift = () => setLine(l.variantId, isGift ? { gift: false, unitPrice: list } : { gift: true, unitPrice: 0 });
+            const giftQty = num(l.giftQty);
+            const disc = Math.max(0, (list - num(l.unitPrice)) * num(l.qty));
+            const loss = num(l.unitPrice) < cost && num(l.unitPrice) > 0;
+            const lowStk = (num(l.qty) + giftQty) > stock;
             return (
-              <div key={l.variantId} style={{ border: `1px solid ${isGift ? C.success : C.border}`, borderRadius: 10, padding: '6px 8px', background: isGift ? '#E9F6EF' : '#fff' }}>
+              <div key={l.variantId} style={{ border: `1px solid ${giftQty > 0 ? C.success : C.border}`, borderRadius: 10, padding: '6px 8px', background: giftQty > 0 ? '#F1FAF5' : '#fff' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ flex: 1, fontSize: 12, fontWeight: 700, color: C.text, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{variantLabel(v)}</span>
-                  <button type="button" onClick={toggleGift} title={t('giftToCenter')}
-                    style={{ width: 30, height: 30, borderRadius: 7, cursor: 'pointer', fontSize: 14, lineHeight: '14px',
-                      border: `1px solid ${isGift ? C.success : C.border}`, background: isGift ? C.success : '#fff' }}>🎁</button>
                   <Input type="number" value={l.qty} onChange={(val) => setLine(l.variantId, { qty: num(val) })} style={{ width: 54, padding: 6 }} />
-                  {isGift ? (
-                    <div style={{ width: 72, padding: 6, textAlign: 'center', fontSize: 11, fontWeight: 800, color: C.success, border: `1px dashed ${C.success}`, borderRadius: 7, boxSizing: 'border-box' }}>🎁 {t('free')}</div>
-                  ) : (
-                    <Input type="number" value={l.unitPrice} onChange={(val) => setLine(l.variantId, { unitPrice: num(val) })} style={{ width: 72, padding: 6 }} />
-                  )}
+                  <Input type="number" value={l.unitPrice} onChange={(val) => setLine(l.variantId, { unitPrice: num(val) })} style={{ width: 72, padding: 6 }} />
                   <button onClick={() => removeLine(l.variantId)} style={{ border: 'none', background: 'none', color: C.danger, cursor: 'pointer', fontSize: 18, width: 24 }}>×</button>
                 </div>
-                {isGift && (
-                  <div style={{ fontSize: 10, color: C.success, marginTop: 3, textAlign: 'end', fontWeight: 700 }}>
-                    {t('giftToCenter')} · {t('giftAtCost')}: {fmtCur(round2(cost * num(l.qty)), displayCurrency, usdRate)}
-                  </div>
-                )}
+                {/* هدية للمركز: كمية مجانية لنفس المادة — تُخصم من المخزون والربح بسعر 0 */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5 }}>
+                  <span style={{ flex: 1, fontSize: 11, fontWeight: 800, color: giftQty > 0 ? C.success : C.textMuted, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>🎁 {t('giftToCenter')}{giftQty > 0 ? ` · ${t('giftAtCost')} ${fmtCur(round2(cost * giftQty), displayCurrency, usdRate)}` : ''}</span>
+                  <Input type="number" value={l.giftQty} onChange={(val) => setLine(l.variantId, { giftQty: num(val) })} placeholder="0" style={{ width: 72, padding: 6 }} />
+                  <span style={{ width: 24 }} />
+                </div>
                 {disc > 0 && (
                   <div style={{ fontSize: 10, color: C.warning, marginTop: 3, textAlign: 'end' }}>
                     {t('defaultPrice')} {fmtCur(list, displayCurrency, usdRate)} · {t('discount')} {fmtCur(disc, displayCurrency, usdRate)}
