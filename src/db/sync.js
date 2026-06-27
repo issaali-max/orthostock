@@ -13,7 +13,7 @@
 // ─────────────────────────────────────────────────────────────
 import { createClient } from '@supabase/supabase-js';
 import { TABLES } from '../lib/constants.js';
-import { observeTimestamp } from '../lib/clock.js';
+import { observeTimestamp, nextTimestamp } from '../lib/clock.js';
 import { idbGetAll, idbBulkPut, outboxAll, outboxDelete, outboxBumpTries, enqueueMutation, metaSet, metaGet } from './local.js';
 
 const MAX_OP_TRIES = 6; // after this many failed attempts, drop a stuck outbox op
@@ -141,6 +141,24 @@ export async function pushAllLocal(onProgress) {
 
 export const cloudReady = () => !!supabase;
 
+// RECOVERY: make THIS device the single source of truth. Re-stamps every local row with a
+// fresh, top-ranking timestamp (so the good data out-ranks any stale copy still sitting on
+// another device), wipes the cloud, then uploads everything. Use on the device that holds
+// the correct data (after restoring a good snapshot there if needed).
+export async function forcePushOverwrite(onProgress) {
+  if (!supabase) return { ok: false, pushed: 0, errors: ['cloud_not_configured'] };
+  for (const table of Object.values(TABLES)) {
+    if (LOCAL_ONLY.has(table)) continue;
+    let rows = []; try { rows = await idbGetAll(table); } catch { continue; }
+    if (!rows.length) continue;
+    const stamped = rows.map((r) => ({ ...r, updatedAt: nextTimestamp() })); // freshest stamp → wins everywhere
+    try { await idbBulkPut(table, stamped); } catch { /* ignore */ }
+  }
+  const w = await wipeCloud();
+  if (!w.ok && w.errors?.length) return { ok: false, pushed: 0, errors: w.errors };
+  return await pushAllLocal(onProgress);
+}
+
 // Wipe EVERY row from EVERY table in the cloud. Used by "Delete ALL data" so a
 // reset doesn't resurrect on the next pull (and clears every other device too).
 export async function wipeCloud() {
@@ -242,7 +260,7 @@ export async function pull(onData, { full = false } = {}) {
   // the incremental window skipped. Cheap here because the dataset is small.
   const wm = Number((await metaGet('pullWatermark')) || 0);
   const since = full ? 0 : (wm > 0 ? wm - SKEW_BUFFER_MS : 0);
-  let maxSeen = wm, changed = 0, pushedBack = 0, reached = false;
+  let maxSeen = wm, changed = 0, reached = false;
   for (const table of Object.values(TABLES)) {
     if (LOCAL_ONLY.has(table)) continue; // local-only tables are never pulled
     try {
@@ -262,8 +280,9 @@ export async function pull(onData, { full = false } = {}) {
         const lu = Number(local?.updatedAt || 0);
         if (!local) { toWrite.push(rec); changed++; }                    // brand-new row → download
         else if (cu > lu) { toWrite.push(mergePreserve(local, rec)); changed++; } // cloud newer → cloud wins, but never blank a field with an empty cloud value
-        else if (lu > cu && outboxEmpty) { await enqueueMutation({ type: 'update', table, id: local.id, row: local }); pushedBack++; } // local newer → correct cloud
-        // equal timestamps (cu === lu) → keep local: this is usually the echo of our own push.
+        // local-newer / equal → KEEP LOCAL, but NEVER auto-push it up here. A long-offline or
+        // clock-skewed device must not clobber the cloud during a read (that resurrected old,
+        // deleted rows on every device). Legitimate local edits travel up via the outbox only.
       }
       if (toWrite.length) await idbBulkPut(table, toWrite);
     } catch { /* table may not exist / timed out; skip and try next */ }
@@ -272,7 +291,6 @@ export async function pull(onData, { full = false } = {}) {
   observeTimestamp(maxSeen); // adopt the cloud's highest stamp so our next local edit out-ranks it
   if (maxSeen > wm) await metaSet('pullWatermark', maxSeen);
   state.lastSyncAt = Date.now(); emit();
-  if (pushedBack > 0) { await refreshPending(); flush(); }
   if (onData && changed > 0) onData(); // refresh UI only when something actually changed
 }
 

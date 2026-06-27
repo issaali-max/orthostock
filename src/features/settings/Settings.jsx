@@ -4,7 +4,7 @@ import { C, TABLES } from '../../lib/constants.js';
 import { Badge, Btn, Card, Field, Input, Modal, PageHeader, Select } from '../../ui/components.jsx';
 import { resetStore, dbMode } from '../../db/db.js';
 import { isHashed, makeHashedPassword } from '../../lib/auth.js';
-import { subscribeSync, pushAllLocal, pull, cloudReady, wipeCloud, checkCloudSchema, missingColumnsSql } from '../../db/sync.js';
+import { subscribeSync, pushAllLocal, pull, cloudReady, wipeCloud, checkCloudSchema, missingColumnsSql, forcePushOverwrite } from '../../db/sync.js';
 import { exportBackup, importBackup } from '../../lib/backup.js';
 import { exportExcel, importExcel } from '../../lib/excel.js';
 import { dataHealth, mergeCustomers, reconcileStock } from '../../lib/engine.js';
@@ -118,6 +118,32 @@ export default function Settings() {
     }
     await resetStore();
     window.location.reload();
+  };
+
+  // RECOVERY — pull a clean copy down to THIS device (use on devices showing stale data).
+  const doRebuildFromCloud = async () => {
+    if (!cloudReady() || syncing) return;
+    if (!window.confirm('☁️⬇ سيمسح بيانات هذا الجهاز ويُنزّل نسخة نظيفة من السحابة.\nClears THIS device, then downloads a fresh copy from the cloud.\n\nاستخدمه على الأجهزة التي تعرض بيانات قديمة. متابعة؟')) return;
+    setSyncing(true);
+    try {
+      await resetStore();
+      await pull(() => {}, { full: true });
+      showToast('☁️⬇ ✓', 'success');
+      setTimeout(() => window.location.reload(), 600);
+    } catch (e) { showToast(`${e.message || e}`, 'error'); setSyncing(false); }
+  };
+  // RECOVERY — make THIS device the source of truth (overwrites cloud + every other device).
+  const doOverwriteCloud = async () => {
+    if (!cloudReady() || syncing) return;
+    const word = window.prompt('☁️⬆ خطر: يكتب بيانات هذا الجهاز فوق السحابة وكل الأجهزة الأخرى.\nOVERWRITES the cloud (and every other device) with THIS device only.\n\nاستخدمه فقط على الجهاز الذي يحمل البيانات الصحيحة.\nاكتب  تأكيد  أو  OVERWRITE  للمتابعة:');
+    if (word !== 'تأكيد' && word !== 'OVERWRITE') return;
+    setSyncing(true);
+    try {
+      const r = await forcePushOverwrite();
+      if (r.errors && r.errors.length) showToast(`⬆ ${r.pushed} · ⚠ ${r.errors[0]}`, 'error');
+      else showToast(`☁️⬆ ${r.pushed} ✓`, 'success');
+    } catch (e) { showToast(`${e.message || e}`, 'error'); }
+    finally { setSyncing(false); }
   };
 
   const doExportExcel = async () => {
@@ -290,6 +316,18 @@ export default function Settings() {
                 <div style={{ marginTop: 8, color: C.success, fontWeight: 700, fontSize: 12 }}>✓ {t('schemaOk')}</div>
               )
             )}
+          </div>
+        )}
+        {cloudReady() && (
+          <div style={{ marginTop: 12, borderTop: `1px solid ${C.surfaceAlt}`, paddingTop: 10 }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: C.textMid, marginBottom: 6 }}>🛟 {t('recoveryTools') || 'أدوات الاسترجاع / Recovery'}</div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <Btn size="sm" variant="light" onClick={doRebuildFromCloud} disabled={syncing}>☁️⬇ {t('rebuildFromCloud') || 'إعادة بناء من السحابة'}</Btn>
+              <Btn size="sm" variant="outline" onClick={doOverwriteCloud} disabled={syncing} style={{ color: C.danger }}>☁️⬆ {t('overwriteCloud') || 'كتابة فوق السحابة من هذا الجهاز'}</Btn>
+            </div>
+            <div style={{ fontSize: 10.5, color: C.textMuted, marginTop: 6, lineHeight: 1.5 }}>
+              {t('recoveryHint') || 'الجهاز الذي يحمل البيانات الصحيحة: «كتابة فوق السحابة». بقية الأجهزة: «إعادة بناء من السحابة».'}
+            </div>
           </div>
         )}
       </Card>
