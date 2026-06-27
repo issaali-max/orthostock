@@ -14,7 +14,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { TABLES } from '../lib/constants.js';
 import { observeTimestamp, nextTimestamp } from '../lib/clock.js';
-import { idbGetAll, idbBulkPut, outboxAll, outboxDelete, outboxBumpTries, enqueueMutation, metaSet, metaGet } from './local.js';
+import { idbGetAll, idbBulkPut, idbClear, outboxAll, outboxDelete, outboxBumpTries, enqueueMutation, metaSet, metaGet } from './local.js';
 
 const MAX_OP_TRIES = 6; // after this many failed attempts, drop a stuck outbox op
 const SYNC_INTERVAL_MS = 25000; // periodic flush+pull cadence (your edits still push instantly via nudgeSync ~1.2s; this only governs how often the app pulls others' changes while idle)
@@ -157,6 +157,32 @@ export async function forcePushOverwrite(onProgress) {
   const w = await wipeCloud();
   if (!w.ok && w.errors?.length) return { ok: false, pushed: 0, errors: w.errors };
   return await pushAllLocal(onProgress);
+}
+
+// RECOVERY (one tap, race-free): restore a local daily snapshot AND make it the truth
+// everywhere. Pauses ALL auto-sync first (so nothing pulls the bad cloud back mid-restore),
+// loads the snapshot into local storage re-stamped to out-rank every existing row, wipes the
+// cloud, uploads, then resumes sync. Other devices then just "Rebuild from cloud".
+export async function restoreSnapshotToCloud(key, onProgress) {
+  if (!supabase) return { ok: false, pushed: 0, errors: ['cloud_not_configured'] };
+  const snap = await metaGet(key);
+  if (!snap) return { ok: false, pushed: 0, errors: ['snapshot_not_found'] };
+  _paused = true;
+  try {
+    for (const table of Object.values(TABLES)) {
+      if (!Array.isArray(snap[table])) continue;               // only touch tables the snapshot actually holds
+      try {
+        await idbClear(table);
+        const rows = snap[table];
+        if (rows.length) await idbBulkPut(table, rows.map((r) => ({ ...r, updatedAt: nextTimestamp() }))); // freshest stamp → wins everywhere
+      } catch { /* ignore a single table, continue */ }
+    }
+    const w = await wipeCloud();
+    if (!w.ok && w.errors?.length) return { ok: false, pushed: 0, errors: w.errors };
+    return await pushAllLocal(onProgress);
+  } finally {
+    _paused = false;
+  }
 }
 
 // Wipe EVERY row from EVERY table in the cloud. Used by "Delete ALL data" so a
@@ -323,8 +349,9 @@ function startRealtime() {
 // together) can't stack concurrent flush/pull passes that saturate the main thread and
 // freeze the app. A trigger that arrives mid-cycle just sets a "run again" flag.
 let _inCycle = false, _rerun = false, _rerunFull = false;
+let _paused = false; // hard-stop ALL auto sync (used during recovery so nothing pulls the bad cloud back mid-restore)
 async function cycle({ full = false, force = false } = {}) {
-  if (!supabase) return;
+  if (!supabase || _paused) return;
   if (!force && !state.online) return;   // background pollers respect the (self-healed) online state; forced runs always try
   if (_inCycle) { _rerun = true; _rerunFull = _rerunFull || full; return; }
   _inCycle = true;
@@ -340,7 +367,7 @@ async function cycle({ full = false, force = false } = {}) {
 // Called after a local write: pushes the change up quickly (debounced so a burst
 // of writes — e.g. an atomic invoice — results in a single sync), then pulls.
 export function nudgeSync() {
-  if (!started || !state.online) return;
+  if (!started || _paused || !state.online) return;
   clearTimeout(_nudgeTimer);
   _nudgeTimer = setTimeout(() => { cycle(); }, 500);
 }

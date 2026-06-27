@@ -4,7 +4,7 @@ import { C, TABLES } from '../../lib/constants.js';
 import { Badge, Btn, Card, Field, Input, Modal, PageHeader, Select } from '../../ui/components.jsx';
 import { resetStore, dbMode } from '../../db/db.js';
 import { isHashed, makeHashedPassword } from '../../lib/auth.js';
-import { subscribeSync, pushAllLocal, pull, cloudReady, wipeCloud, checkCloudSchema, missingColumnsSql, forcePushOverwrite } from '../../db/sync.js';
+import { subscribeSync, pushAllLocal, pull, cloudReady, wipeCloud, checkCloudSchema, missingColumnsSql, forcePushOverwrite, restoreSnapshotToCloud } from '../../db/sync.js';
 import { exportBackup, importBackup } from '../../lib/backup.js';
 import { exportExcel, importExcel } from '../../lib/excel.js';
 import { dataHealth, mergeCustomers, reconcileStock } from '../../lib/engine.js';
@@ -95,6 +95,18 @@ export default function Settings() {
     catch { showToast(t('restoreFailed'), 'error'); }
   };
   const doDownloadSnap = async (key) => { const m = await import('../../lib/backup.js'); await m.downloadSnapshot(key); };
+  // RECOVERY — one tap: make THIS backup the source of truth on the cloud + every device.
+  const doRestoreToAll = async (key) => {
+    if (!cloudReady() || syncing) return;
+    if (!window.confirm('↺☁️ سيجعل هذه النسخة هي المصدر على السحابة وكل الأجهزة، وتُمسح البيانات الحالية.\nMakes THIS backup the source of truth on the cloud and EVERY device (current data is replaced).\n\nتأكد أنها تحتوي البيانات الصحيحة. متابعة؟')) return;
+    setSyncing(true);
+    try {
+      const r = await restoreSnapshotToCloud(key);
+      if (r.errors && r.errors.length) { showToast(`⚠ ${r.errors[0]}`, 'error'); setSyncing(false); return; }
+      showToast(`↺☁️ ${r.pushed} ✓`, 'success');
+      setTimeout(() => window.location.reload(), 800);
+    } catch (e) { showToast(`${e.message || e}`, 'error'); setSyncing(false); }
+  };
 
   const doImport = async (e) => {
     const file = e.target.files?.[0];
@@ -383,10 +395,11 @@ export default function Settings() {
               <div key={b.key} style={{ display: 'flex', alignItems: 'center', gap: 8, background: C.surfaceAlt, borderRadius: 10, padding: '7px 10px' }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text }}>{b.day}{b.reason === 'manual' ? ' •' : ''}</div>
-                  <div style={{ fontSize: 10.5, color: C.textMuted }}>{b.rows} {t('items')}</div>
+                  <div style={{ fontSize: 10.5, color: C.textMuted }}>{b.rows} {t('items')}{b.at ? ` · ${new Date(b.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}</div>
                 </div>
                 <button onClick={() => doDownloadSnap(b.key)} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 16 }} title={t('download')}>⬇️</button>
-                <Btn size="sm" variant="light" onClick={() => doRestoreSnap(b.key)}>↩ {t('restore')}</Btn>
+                <Btn size="sm" variant="light" onClick={() => doRestoreSnap(b.key)} title={t('restore')}>↩</Btn>
+                <Btn size="sm" onClick={() => doRestoreToAll(b.key)} disabled={!cloudReady() || syncing} title={t('restoreToAll') || 'استرجاع إلى كل الأجهزة'}>↺☁️</Btn>
               </div>
             ))}
           </div>
