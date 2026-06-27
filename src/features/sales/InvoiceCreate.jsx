@@ -46,6 +46,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
   const [paidAmount, setPaid] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [invDiscount, setInvDiscount] = useState(''); // amount off the subtotal
+  const [giftMode, setGiftMode] = useState(false);    // show per-line gift inputs only when enabled
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -66,7 +67,9 @@ export default function InvoiceCreate({ open, onClose, editing }) {
         }
         byVar.set(it.variantId, e);
       });
-      setLines([...byVar.values()].map((e) => ({ ...e, unitPrice: e.qty > 0 ? e.unitPrice : num(vById(e.variantId)?.sellingPriceDefault) })));
+      const _rebuilt = [...byVar.values()].map((e) => ({ ...e, unitPrice: e.qty > 0 ? e.unitPrice : num(vById(e.variantId)?.sellingPriceDefault) }));
+      setLines(_rebuilt);
+      setGiftMode(_rebuilt.some((l) => num(l.giftQty) > 0));
       setCustomerId(editing.customerId || '');
       { const _c = customers.find((c) => c.id === editing.customerId); setCustEmirate(_c?.emirate || ''); setCustCity(_c?.city || ''); }
       setDate(editing.date || todayISO());
@@ -76,7 +79,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
       setInvDiscount(editing.discountTotal ? num(editing.discountTotal) : '');
       setCatId(firstCat);
     } else {
-      setLines([]); setCatId(firstCat); setCustomerId(''); setCustEmirate(''); setCustCity(''); setDate(todayISO()); setStatus('unpaid'); setPaid(''); setInvDiscount(''); setPaymentMethod('cash');
+      setLines([]); setCatId(firstCat); setCustomerId(''); setCustEmirate(''); setCustCity(''); setDate(todayISO()); setStatus('unpaid'); setPaid(''); setInvDiscount(''); setPaymentMethod('cash'); setGiftMode(false);
     }
   }, [open, editing?.id]); // re-init only when the modal opens or a different invoice is edited (not on every background sync)
 
@@ -248,6 +251,12 @@ export default function InvoiceCreate({ open, onClose, editing }) {
       {/* Selected lines with per-line discount display */}
       {lines.length > 0 && (
         <div style={{ display: 'grid', gap: 6, marginBottom: 10 }}>
+          <button type="button"
+            onClick={() => { if (giftMode) { setGiftMode(false); setLines((ls) => ls.map((l) => ({ ...l, giftQty: '' }))); } else setGiftMode(true); }}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, alignSelf: 'flex-start', padding: '5px 12px', borderRadius: 999, cursor: 'pointer', fontSize: 12, fontWeight: 800, marginBottom: 2,
+              border: `1px solid ${giftMode ? C.success : C.border}`, background: giftMode ? C.success : '#fff', color: giftMode ? '#fff' : C.textMid }}>
+            🎁 {t('giftToCenter')} {giftMode ? '✓' : '＋'}
+          </button>
           <div style={{ display: 'flex', gap: 6, fontSize: 10, color: C.textMuted, fontWeight: 700, padding: '0 4px' }}>
             <span style={{ flex: 1 }}>{t('name')}</span><span style={{ width: 54, textAlign: 'center' }}>{t('qty')}</span><span style={{ width: 72, textAlign: 'center' }}>{t('price')}</span><span style={{ width: 24 }} />
           </div>
@@ -269,11 +278,13 @@ export default function InvoiceCreate({ open, onClose, editing }) {
                   <button onClick={() => removeLine(l.variantId)} style={{ border: 'none', background: 'none', color: C.danger, cursor: 'pointer', fontSize: 18, width: 24 }}>×</button>
                 </div>
                 {/* هدية للمركز: كمية مجانية لنفس المادة — تُخصم من المخزون والربح بسعر 0 */}
+                {giftMode && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5 }}>
                   <span style={{ flex: 1, fontSize: 11, fontWeight: 800, color: giftQty > 0 ? C.success : C.textMuted, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>🎁 {t('giftToCenter')}{giftQty > 0 ? ` · ${t('giftAtCost')} ${fmtCur(round2(cost * giftQty), displayCurrency, usdRate)}` : ''}</span>
                   <Input type="number" value={l.giftQty} onChange={(val) => setLine(l.variantId, { giftQty: num(val) })} placeholder="0" style={{ width: 72, padding: 6 }} />
                   <span style={{ width: 24 }} />
                 </div>
+                )}
                 {disc > 0 && (
                   <div style={{ fontSize: 10, color: C.warning, marginTop: 3, textAlign: 'end' }}>
                     {t('defaultPrice')} {fmtCur(list, displayCurrency, usdRate)} · {t('discount')} {fmtCur(disc, displayCurrency, usdRate)}
