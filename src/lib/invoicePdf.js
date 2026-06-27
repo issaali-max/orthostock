@@ -109,6 +109,7 @@ function buildHtml({ invoice, items, settings, customer, variantById, lang }) {
     const v = variantById(l.variantId);
     const code = esc(v?.sku || '');
     const name = esc(v ? variantLabel(v) : '—');
+    const giftTag = l.gift ? ` <span style="color:#1E8E5A;font-weight:800;font-size:.82em">· 🎁 ${ar ? 'هدية' : 'Gift'}</span>` : '';
     const lineTotal = l.lineTotal;
     const lineNet = taxOn ? Math.round(lineTotal * (1 + b.vatRate / 100) * 100) / 100 : lineTotal;
     const zebra = i % 2 ? 'background:#F7F9FC;' : '';
@@ -116,7 +117,7 @@ function buildHtml({ invoice, items, settings, customer, variantById, lang }) {
       <tr style="${zebra}">
         <td style="text-align:center;padding:7px 6px;border-bottom:1px solid #eef1f5;color:${MUTE}">${i + 1}</td>
         <td style="text-align:center;padding:7px 6px;border-bottom:1px solid #eef1f5;color:${MUTE};font-size:.92em">${code}</td>
-        <td style="text-align:${ar ? 'right' : 'left'};padding:7px 8px;border-bottom:1px solid #eef1f5;font-weight:600">${name}</td>
+        <td style="text-align:${ar ? 'right' : 'left'};padding:7px 8px;border-bottom:1px solid #eef1f5;font-weight:600">${name}${giftTag}</td>
         <td style="text-align:center;padding:7px 6px;border-bottom:1px solid #eef1f5">${l.qty.toFixed(2)}</td>
         <td style="text-align:center;padding:7px 6px;border-bottom:1px solid #eef1f5">${m(l.qty > 0 ? lineTotal / l.qty : l.unitPrice)}</td>
         ${taxOn ? `<td style="text-align:center;padding:7px 6px;border-bottom:1px solid #eef1f5;color:${MUTE}">${b.vatRate}%</td>` : ''}

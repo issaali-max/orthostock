@@ -80,7 +80,7 @@ export default function InvoiceDetail({ invoice, onClose, onEdit }) {
               return (
                 <div key={i} style={{ display: 'flex', padding: '8px 10px', fontSize: 12.5, borderTop: i ? `1px solid ${C.surfaceAlt}` : 'none', alignItems: 'center' }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, color: C.text }}>{v ? variantLabel(v) : '—'}</div>
+                    <div style={{ fontWeight: 700, color: C.text }}>{v ? variantLabel(v) : '—'}{l.gift && <span style={{ marginInlineStart: 6, fontSize: 10.5, fontWeight: 800, color: C.success, background: C.success + '18', borderRadius: 6, padding: '1px 6px' }}>🎁 {t('giftToCenter')}</span>}</div>
                     {v?.sku && <div style={{ fontSize: 10.5, color: C.textMuted }}>{v.sku}</div>}
                   </div>
                   <div style={{ width: 44, textAlign: 'center' }}>{l.qty}</div>

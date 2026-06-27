@@ -4,7 +4,7 @@ import { useApp } from '../../app/AppProvider.jsx';
 import { C, WEEKDAYS, emirateOptions, emirateLabel, citiesOfEmirate, allCities, TABLES } from '../../lib/constants.js';
 import { fmtCur, num, round2 } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
-import { customerStats, clinicRating, recordInvoicePayment, recordOpeningDebtPayment, orderList } from '../../lib/engine.js';
+import { customerStats, clinicRating, recordInvoicePayment, recordOpeningDebtPayment, orderList, giftsToCenters } from '../../lib/engine.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, PaymentModal, SearchBar, Select, Textarea } from '../../ui/components.jsx';
 
 const blank = () => ({ name: '', type: 'doctor', phone: '', emirate: '', city: '', specialty: '', trn: '', workingDays: WEEKDAYS.map((d) => d.key), notes: '', isActive: true });
@@ -165,6 +165,7 @@ function CustomerProfile({ customer, onBack, onEdit, t, lang, displayCurrency, u
   const st = customerStats(invoices, items, customer.id, live);
   const rating = clinicRating(allCustomers, invoices, items, customer.id);
   const custOrders = useMemo(() => orderList(app).filter((o) => o.customerId === customer.id), [app.data, customer.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const custGifts = useMemo(() => giftsToCenters(app, { customerId: customer.id }), [app.data, customer.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const variants = app.data[TABLES.variants] || [];
   const skuOf = (id) => variants.find((v) => v.id === id)?.sku || '—';
   const [payFor, setPayFor] = useState(null);
@@ -255,6 +256,27 @@ function CustomerProfile({ customer, onBack, onEdit, t, lang, displayCurrency, u
                     <b style={{ color: C.primary }}>×{it.qty}</b>
                   </div>
                 ))}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* Gifts given to this center (هدية للمركز) */}
+      {custGifts.rows.length > 0 && (
+        <Card style={{ marginBottom: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+            <span style={{ fontSize: 13, fontWeight: 800, color: C.text }}>🎁 {t('giftsToCenter')}</span>
+            <span style={{ fontSize: 12, color: C.textMuted, fontWeight: 700 }}>{custGifts.totalQty} · {t('giftAtCost')} {fmtCur(custGifts.totalValue, displayCurrency, usdRate)}</span>
+          </div>
+          <div style={{ display: 'grid', gap: 6 }}>
+            {custGifts.rows.map((r) => (
+              <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#E9F6EF', borderRadius: 10, padding: '8px 10px' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>🎁 {r.material}</div>
+                  <div style={{ fontSize: 10.5, color: C.textMuted }}>{r.invoiceNumber} · {fmtDate(r.date)} · {r.qty} × {fmtCur(r.unitCost, displayCurrency, usdRate)}</div>
+                </div>
+                <b style={{ color: C.success, fontSize: 12.5 }}>{fmtCur(r.value, displayCurrency, usdRate)}</b>
               </div>
             ))}
           </div>

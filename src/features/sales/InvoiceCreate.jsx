@@ -55,7 +55,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
     if (editing) {
       const its = (data[TABLES.invoiceItems] || []).filter((it) => it.invoiceId === editing.id);
       // reconstruct the pre-distribution unit price from listPrice/discount when possible
-      setLines(its.map((it) => ({ variantId: it.variantId, qty: num(it.qty), unitPrice: num(it.listPrice) > 0 ? round2(num(it.listPrice) - safeDiv(num(it.discountAmount), num(it.qty))) : num(it.unitPrice) })));
+      setLines(its.map((it) => ({ variantId: it.variantId, qty: num(it.qty), gift: !!it.gift, unitPrice: it.gift ? 0 : (num(it.listPrice) > 0 ? round2(num(it.listPrice) - safeDiv(num(it.discountAmount), num(it.qty))) : num(it.unitPrice)) })));
       setCustomerId(editing.customerId || '');
       { const _c = customers.find((c) => c.id === editing.customerId); setCustEmirate(_c?.emirate || ''); setCustCity(_c?.city || ''); }
       setDate(editing.date || todayISO());
@@ -75,7 +75,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
   const removeLine = (id) => setLines((ls) => ls.filter((l) => l.variantId !== id));
 
   const grossSubtotal = lines.reduce((s, l) => s + num(l.unitPrice) * num(l.qty), 0);
-  const lineDiscountTotal = lines.reduce((s, l) => { const v = vById(l.variantId); const list = num(v?.sellingPriceDefault); return s + Math.max(0, (list - num(l.unitPrice)) * num(l.qty)); }, 0);
+  const lineDiscountTotal = lines.reduce((s, l) => { const v = vById(l.variantId); const list = num(v?.sellingPriceDefault); return s + (l.gift ? 0 : Math.max(0, (list - num(l.unitPrice)) * num(l.qty))); }, 0);
   const invDisc = Math.min(num(invDiscount), grossSubtotal);
   const invDiscPct = grossSubtotal > 0 ? round2(safeDiv(invDisc, grossSubtotal) * 100) : 0;
   const netSubtotal = round2(grossSubtotal - invDisc);
@@ -102,7 +102,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
           subtotal: netSubtotal, discountTotal: round2(invDisc), total: totals.total,
           paidAmount: paid, paymentStatus, paymentMethod, status: 'active', currency: 'AED', notes: '', payments, taxApplied,
         },
-        lines: lines.map((l) => ({ variantId: l.variantId, qty: num(l.qty), unitPrice: num(l.unitPrice) })),
+        lines: lines.map((l) => ({ variantId: l.variantId, qty: num(l.qty), unitPrice: l.gift ? 0 : num(l.unitPrice), gift: !!l.gift })),
         invoiceDiscount: invDisc,
       });
       showToast(`${number} ✓`, 'success');
@@ -237,17 +237,31 @@ export default function InvoiceCreate({ open, onClose, editing }) {
             const list = num(v?.sellingPriceDefault);
             const cost = num(v?.purchasePriceAvg);
             const stock = num(v?.stockQty);
-            const disc = Math.max(0, (list - num(l.unitPrice)) * num(l.qty));
-            const loss = num(l.unitPrice) < cost && num(l.unitPrice) > 0;
+            const isGift = !!l.gift;
+            const disc = isGift ? 0 : Math.max(0, (list - num(l.unitPrice)) * num(l.qty));
+            const loss = !isGift && num(l.unitPrice) < cost && num(l.unitPrice) > 0;
             const lowStk = num(l.qty) > stock;
+            const toggleGift = () => setLine(l.variantId, isGift ? { gift: false, unitPrice: list } : { gift: true, unitPrice: 0 });
             return (
-              <div key={l.variantId} style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: '6px 8px' }}>
+              <div key={l.variantId} style={{ border: `1px solid ${isGift ? C.success : C.border}`, borderRadius: 10, padding: '6px 8px', background: isGift ? '#E9F6EF' : '#fff' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ flex: 1, fontSize: 12, fontWeight: 700, color: C.text, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{variantLabel(v)}</span>
+                  <button type="button" onClick={toggleGift} title={t('giftToCenter')}
+                    style={{ width: 30, height: 30, borderRadius: 7, cursor: 'pointer', fontSize: 14, lineHeight: '14px',
+                      border: `1px solid ${isGift ? C.success : C.border}`, background: isGift ? C.success : '#fff' }}>🎁</button>
                   <Input type="number" value={l.qty} onChange={(val) => setLine(l.variantId, { qty: num(val) })} style={{ width: 54, padding: 6 }} />
-                  <Input type="number" value={l.unitPrice} onChange={(val) => setLine(l.variantId, { unitPrice: num(val) })} style={{ width: 72, padding: 6 }} />
+                  {isGift ? (
+                    <div style={{ width: 72, padding: 6, textAlign: 'center', fontSize: 11, fontWeight: 800, color: C.success, border: `1px dashed ${C.success}`, borderRadius: 7, boxSizing: 'border-box' }}>🎁 {t('free')}</div>
+                  ) : (
+                    <Input type="number" value={l.unitPrice} onChange={(val) => setLine(l.variantId, { unitPrice: num(val) })} style={{ width: 72, padding: 6 }} />
+                  )}
                   <button onClick={() => removeLine(l.variantId)} style={{ border: 'none', background: 'none', color: C.danger, cursor: 'pointer', fontSize: 18, width: 24 }}>×</button>
                 </div>
+                {isGift && (
+                  <div style={{ fontSize: 10, color: C.success, marginTop: 3, textAlign: 'end', fontWeight: 700 }}>
+                    {t('giftToCenter')} · {t('giftAtCost')}: {fmtCur(round2(cost * num(l.qty)), displayCurrency, usdRate)}
+                  </div>
+                )}
                 {disc > 0 && (
                   <div style={{ fontSize: 10, color: C.warning, marginTop: 3, textAlign: 'end' }}>
                     {t('defaultPrice')} {fmtCur(list, displayCurrency, usdRate)} · {t('discount')} {fmtCur(disc, displayCurrency, usdRate)}

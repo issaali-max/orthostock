@@ -63,7 +63,7 @@ export async function saveInvoiceAtomic(app, { editingId, invoiceData, lines, in
     for (const it of oldItems) if (vById.has(it.variantId)) stock.set(it.variantId, round2(ensure(it.variantId) + num(it.qty)));
   }
 
-  const gross = lines.reduce((s, l) => s + num(l.unitPrice) * num(l.qty), 0);
+  const gross = lines.reduce((s, l) => s + (l.gift ? 0 : num(l.unitPrice) * num(l.qty)), 0);
   const invDisc = Math.max(0, num(invoiceDiscount));
   const factor = gross > 0 ? Math.max(0, (gross - invDisc) / gross) : 1;
 
@@ -75,14 +75,16 @@ export async function saveInvoiceAtomic(app, { editingId, invoiceData, lines, in
   for (const l of lines) {
     const v = vById.get(l.variantId);
     const avgCost = num(v?.purchasePriceAvg);
-    const listPrice = num(v?.sellingPriceDefault);
-    const rawUnit = num(l.unitPrice); const qty = num(l.qty);
-    const effUnit = round2(rawUnit * factor);
-    const lineDisc = Math.max(0, round2((listPrice - rawUnit) * qty));
+    const isGift = !!l.gift;                                      // هدية للمركز: sells at 0 but cost is still charged
+    const listPrice = isGift ? 0 : num(v?.sellingPriceDefault);
+    const rawUnit = isGift ? 0 : num(l.unitPrice); const qty = num(l.qty);
+    const effUnit = isGift ? 0 : round2(rawUnit * factor);
+    const lineDisc = isGift ? 0 : Math.max(0, round2((listPrice - rawUnit) * qty));
     specs.push({ op: 'insert', table: TABLES.invoiceItems, row: {
       invoiceId: invId, variantId: l.variantId, qty, listPrice, unitPrice: effUnit,
-      discountAmount: lineDisc, discountPct: listPrice > 0 ? round2((1 - rawUnit / listPrice) * 100) : 0,
+      discountAmount: lineDisc, discountPct: isGift ? 0 : (listPrice > 0 ? round2((1 - rawUnit / listPrice) * 100) : 0),
       avgCostAtSale: avgCost, lineProfit: round2((effUnit - avgCost) * qty), total: round2(effUnit * qty),
+      gift: isGift,
     } });
     if (v) {
       const after = round2(ensure(l.variantId) - qty);
@@ -370,6 +372,43 @@ export function freeRestocks(app, supplierId) {
   return { rows, centers, totalQty, totalValue: round2(totalValue) };
 }
 
+// Report of all GIFTS TO CENTERS (هدية للمركز): invoice lines sold at price 0 that still
+// cost me — deducted from stock AND from profit (lineProfit = −cost). Grouped per center
+// (the invoice's customer), with qty and cost value (avgCostAtSale × qty). Filterable by
+// date range and a single customer. The MIRROR of freeRestocks (which is stock/profit IN).
+export function giftsToCenters(app, { from, to, customerId } = {}) {
+  const data = app.data || app;
+  const inRange = (iso) => (!iso ? true : (!from || iso >= from) && (!to || iso <= to));
+  const variants = new Map((data[TABLES.variants] || []).map((v) => [v.id, v]));
+  const customers = new Map((data[TABLES.customers] || []).map((c) => [c.id, c]));
+  const invoices = new Map();
+  for (const inv of (data[TABLES.invoices] || [])) {
+    if (inv.isActive === false || inv.status === 'returned') continue;
+    if (!inRange(inv.date)) continue;
+    if (customerId && inv.customerId !== customerId) continue;
+    invoices.set(inv.id, inv);
+  }
+  const rows = [];
+  const byCenter = new Map(); // centerName -> { center, qty, value }
+  let totalQty = 0; let totalValue = 0;
+  for (const it of (data[TABLES.invoiceItems] || [])) {
+    if (!it.gift || it.isActive === false) continue;
+    const inv = invoices.get(it.invoiceId);
+    if (!inv) continue;
+    const qty = num(it.qty);
+    const value = round2(num(it.avgCostAtSale) * qty);
+    const center = inv.customerId ? (customers.get(inv.customerId)?.name || '—') : '—';
+    totalQty += qty; totalValue = round2(totalValue + value);
+    const g = byCenter.get(center) || { center, qty: 0, value: 0 };
+    g.qty += qty; g.value = round2(g.value + value); byCenter.set(center, g);
+    const v = variants.get(it.variantId);
+    rows.push({ id: it.invoiceId + it.variantId, date: inv.date, center, invoiceNumber: inv.invoiceNumber || '—', material: v?.nameEn || it.variantId, qty, unitCost: round2(num(it.avgCostAtSale)), value });
+  }
+  rows.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  const centers = [...byCenter.values()].sort((a, b) => b.value - a.value);
+  return { rows, centers, totalQty, totalValue: round2(totalValue) };
+}
+
 // ── Customer (clinic/doctor) lifetime stats ──
 // Data-integrity health check. Surfaces the exact problems that would make a
 // customer's debt/history look "lost": invoices whose customer no longer exists
@@ -507,6 +546,7 @@ export function invoiceBreakdown(invoice, items, settings) {
       listPrice, unitPrice: unit,
       discountAmount: round2(num(it.discountAmount)),
       lineTotal: round2(lineTotal),
+      gift: !!it.gift,
     };
   });
   // netSubtotal = sum of line totals (already after all discounts), matching what was stored
