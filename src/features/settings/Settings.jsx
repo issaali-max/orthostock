@@ -202,9 +202,9 @@ export default function Settings() {
   const odBackupNow = async () => {
     setOdBusy(true);
     try {
-      await backupToOneDrive(od.clientId || odClientId.trim());
+      const date = await backupToOneDrive(od.clientId || odClientId.trim(), { lang: form?.lang || 'ar' });
       const at = new Date().toISOString();
-      await updateSettings({ oneDrive: { ...od, clientId: od.clientId || odClientId.trim(), lastBackupAt: at } });
+      await updateSettings({ oneDrive: { ...od, clientId: od.clientId || odClientId.trim(), lastBackupAt: at, lastBackupDate: date } });
       showToast('✓ OneDrive', 'success');
     } catch (e) { console.error(e); showToast('Backup failed', 'error'); }
     finally { setOdBusy(false); }

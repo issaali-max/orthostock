@@ -6,9 +6,10 @@ import { VitePWA } from 'vite-plugin-pwa';
 // offline and can be added to the home screen. The app's own data layer is
 // already offline-first (IndexedDB + Supabase sync); the SW covers the shell.
 const BUILD_ID = new Date().toISOString().slice(0, 16).replace('T', ' ');
+const BUILD_SHA = process.env.VERCEL_GIT_COMMIT_SHA || process.env.GITHUB_SHA || 'dev';
 
 export default defineConfig({
-  define: { __BUILD_ID__: JSON.stringify(BUILD_ID) },
+  define: { __BUILD_ID__: JSON.stringify(BUILD_ID), __BUILD_SHA__: JSON.stringify(BUILD_SHA) },
   plugins: [
     react(),
     VitePWA({

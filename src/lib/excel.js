@@ -82,7 +82,7 @@ function buildSheet(wb, name, columns, items, mapFn, errors) {
 
 // scope: 'all' (default) | 'materials' | 'customers' | 'suppliers' — lets the
 // owner export just one section for quick bulk edits, or the full workbook.
-export async function exportExcel(data, lang = 'ar', scope = 'all') {
+export async function exportExcel(data, lang = 'ar', scope = 'all', opts = {}) {
   const want = (s) => scope === 'all' || scope === s;
   const ExcelJS = await getExcelJS();
   const wb = new ExcelJS.Workbook();
@@ -187,9 +187,12 @@ export async function exportExcel(data, lang = 'ar', scope = 'all') {
     { header: 'UnitCost', key: 'cost', width: 12, money: true },
     { header: 'LineTotal', key: 'lt', width: 13, money: true, formula: (r) => `IF($D${r}="","",$D${r}*$E${r})` },
     { header: 'LineProfit', key: 'lp', width: 13, money: true, formula: (r) => `IF($D${r}="","",($E${r}-$F${r})*$D${r})` },
+    { header: 'Date', key: 'date', width: 14 },
+    { header: 'Customer', key: 'cust', width: 24 },
+    { header: 'Gift', key: 'gift', width: 8 },
   ], items.map((it) => {
     const inv = invoices.find((x) => x.id === it.invoiceId);
-    return { no: inv?.invoiceNumber || '', sku: varSku(it.variantId), name: varName(vars.find((v) => v.id === it.variantId) || {}), qty: num(it.qty), price: num(it.unitPrice), cost: num(it.avgCostAtSale) };
+    return { no: inv?.invoiceNumber || '', sku: varSku(it.variantId), name: varName(vars.find((v) => v.id === it.variantId) || {}), qty: num(it.qty), price: num(it.unitPrice), cost: num(it.avgCostAtSale), date: inv?.date || '', cust: custName(inv?.customerId), gift: it.gift ? 'YES' : '' };
   }));
 
   if (want('materials')) buildSheet(wb, 'Materials', [
@@ -317,6 +320,7 @@ export async function exportExcel(data, lang = 'ar', scope = 'all') {
   }
 
   const buf = await wb.xlsx.writeBuffer();
+  if (opts.returnBuffer) return { buf, skipped: exportErrors.length, errors: exportErrors };
   const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
