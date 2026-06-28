@@ -4,6 +4,7 @@ import { C, TABLES } from '../../lib/constants.js';
 import { fmtCur, num } from '../../lib/money.js';
 import { fmtDate } from '../../lib/dates.js';
 import { recordInvoicePayment } from '../../lib/engine.js';
+import { byInvoiceNewest } from '../../lib/sort.js';
 import { Badge, Btn, Card, EmptyState, PageHeader, PaymentModal, SearchBar } from '../../ui/components.jsx';
 import InvoiceCreate from './InvoiceCreate.jsx';
 import InvoiceDetail from './InvoiceDetail.jsx';
@@ -24,7 +25,7 @@ export default function Invoices() {
   const cur = (v) => fmtCur(v, displayCurrency, usdRate);
 
   const list = useMemo(() => {
-    const rows = (data[TABLES.invoices] || []).slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    const rows = (data[TABLES.invoices] || []).slice().sort(byInvoiceNewest);
     const s = q.trim().toLowerCase();
     return s ? rows.filter((r) => `${r.invoiceNumber} ${custName(r.customerId)}`.toLowerCase().includes(s)) : rows;
   }, [data, q]); // eslint-disable-line react-hooks/exhaustive-deps

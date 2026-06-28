@@ -4,7 +4,7 @@ import { C, TABLES } from '../../lib/constants.js';
 import { Badge, Btn, Card, Field, Input, Modal, PageHeader, Select } from '../../ui/components.jsx';
 import { resetStore, dbMode } from '../../db/db.js';
 import { isHashed, makeHashedPassword } from '../../lib/auth.js';
-import { subscribeSync, pushAllLocal, pull, cloudReady, wipeCloud, checkCloudSchema, missingColumnsSql, forcePushOverwrite, restoreSnapshotToCloud } from '../../db/sync.js';
+import { subscribeSync, pushAllLocal, pull, cloudReady, wipeCloud, checkCloudSchema, missingColumnsSql, forcePushOverwrite, restoreSnapshotToCloud, fullRestoreFromBackup } from '../../db/sync.js';
 import { exportBackup, importBackup } from '../../lib/backup.js';
 import { exportExcel, importExcel } from '../../lib/excel.js';
 import { dataHealth, mergeCustomers, reconcileStock } from '../../lib/engine.js';
@@ -110,12 +110,18 @@ export default function Settings() {
 
   const doImport = async (e) => {
     const file = e.target.files?.[0];
+    if (e.target) e.target.value = '';
     if (!file) return;
+    if (!window.confirm('⚠️ استرجاع كامل (Full Restore):\nيستبدل كل البيانات على هذا الجهاز والسحابة بمحتوى الملف بالضبط — بما فيه المحذوفات وبيانات الشركة. تُحفظ نسخة pre-restore للحالة الحالية أولاً.\n\nFull replace of ALL data (and the cloud) with this file. A pre-restore snapshot is saved first.\n\nمتابعة؟')) return;
+    setSyncing(true);
     try {
-      const n = await importBackup(file);
-      showToast(`${n} ${t('items')}`, 'success');
-      setTimeout(() => window.location.reload(), 600);
-    } catch { showToast('Import failed', 'error'); }
+      const parsed = JSON.parse(await file.text());
+      try { const bk = await import('../../lib/backup.js'); await bk.createSnapshot('pre-restore', { unique: true }); } catch { /* non-fatal */ }
+      const r = await fullRestoreFromBackup(parsed);
+      if (!r.ok && r.errors?.length) { showToast(`⚠ ${r.errors[0]}`, 'error'); setSyncing(false); return; }
+      showToast(`↺ ${r.restored} ${t('items')} ✓`, 'success');
+      setTimeout(() => window.location.reload(), 900);
+    } catch { showToast('Import failed', 'error'); setSyncing(false); }
   };
   const doReset = async () => {
     // Destructive: wipes EVERY table (customers, invoices, debts, stock...).

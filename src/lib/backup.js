@@ -50,21 +50,23 @@ export async function listBackups() {
   return (await L.metaGet(BK_INDEX)) || [];
 }
 
-export async function createSnapshot(reason = 'auto') {
+export async function createSnapshot(reason = 'auto', opts = {}) {
   const snap = await collectBackup();
   const day = new Date().toISOString().slice(0, 10);
-  const key = `${BK_PREFIX}${day}`;
+  const key = opts.unique ? `${BK_PREFIX}${reason}-${Date.now()}` : `${BK_PREFIX}${day}`;
   const rows = Object.values(TABLES).reduce((n, t) => n + (Array.isArray(snap[t]) ? snap[t].length : 0), 0);
   await L.metaSet(key, snap);
   let index = (await L.metaGet(BK_INDEX)) || [];
   index = index.filter((b) => b.key !== key);                 // replace today's if it exists
   index.unshift({ key, at: Date.now(), day, rows, reason });
-  // trim to KEEP, deleting dropped snapshot data
-  const drop = index.slice(KEEP);
+  // trim only the rolling auto snapshots; keep manual & pre-restore safety copies
+  const auto = index.filter((b) => b.reason === 'auto' || b.reason === 'daily');
+  const drop = auto.slice(KEEP);
+  const dropKeys = new Set(drop.map((d) => d.key));
   for (const d of drop) { try { await L.idbDelete('meta', d.key); } catch { /* ignore */ } }
-  index = index.slice(0, KEEP);
+  index = index.filter((b) => !dropKeys.has(b.key));
   await L.metaSet(BK_INDEX, index);
-  await L.metaSet('lastAutoBackupAt', Date.now());
+  if (reason === 'auto' || reason === 'daily') await L.metaSet('lastAutoBackupAt', Date.now());
   return { key, rows };
 }
 

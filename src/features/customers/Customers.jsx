@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 import { useApp } from '../../app/AppProvider.jsx';
 import { C, WEEKDAYS, emirateOptions, emirateLabel, citiesOfEmirate, allCities, TABLES } from '../../lib/constants.js';
+import { byInvoiceNewest } from '../../lib/sort.js';
 import { fmtCur, num, round2 } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
 import { customerStats, clinicRating, recordInvoicePayment, recordOpeningDebtPayment, orderList, giftsToCenters } from '../../lib/engine.js';
@@ -323,7 +324,7 @@ function CustomerProfile({ customer, onBack, onEdit, t, lang, displayCurrency, u
       <div style={{ fontSize: 13, fontWeight: 800, color: C.text, marginBottom: 8 }}>{t('history')}</div>
       {st.invoices.length === 0 ? <EmptyState icon="🧾" text={t('noInvoices')} /> : (
         <div style={{ display: 'grid', gap: 8 }}>
-          {st.invoices.slice().reverse().map((inv) => {
+          {st.invoices.slice().sort(byInvoiceNewest).map((inv) => {
             const lines = items.filter((it) => it.invoiceId === inv.id);
             const remaining = round2(num(inv.total) - num(inv.paidAmount));
             return (

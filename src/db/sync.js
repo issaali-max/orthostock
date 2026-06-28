@@ -159,6 +159,35 @@ export async function forcePushOverwrite(onProgress) {
   return await pushAllLocal(onProgress);
 }
 
+// RECOVERY (true Full Restore / Replace): take a parsed JSON backup and make the app EXACTLY
+// match it — on this device AND the cloud (so it can't be undone by a later merge). Clears each
+// table present in the backup and rewrites it re-stamped to out-rank everything; soft-deleted
+// rows (isActive:false) and company/settings are included, so deletes stay deleted and company
+// info returns. Pauses sync throughout so nothing pulls the old cloud back mid-restore.
+export async function fullRestoreFromBackup(parsed) {
+  if (!parsed || typeof parsed !== 'object') return { ok: false, restored: 0, errors: ['bad_file'] };
+  _paused = true;
+  try {
+    let restored = 0;
+    for (const table of Object.values(TABLES)) {
+      if (!Array.isArray(parsed[table])) continue;            // only tables the backup actually holds
+      try {
+        await idbClear(table);
+        const rows = parsed[table];
+        if (rows.length) await idbBulkPut(table, rows.map((r) => ({ ...r, updatedAt: nextTimestamp() })));
+        restored += rows.length;
+      } catch { /* skip one table, continue */ }
+    }
+    if (supabase) {                                            // make the restored state the cloud truth
+      const w = await wipeCloud();
+      if (!w.ok && w.errors?.length) return { ok: false, restored, errors: w.errors };
+      const r = await pushAllLocal();
+      return { ok: r.ok, restored, errors: r.errors };
+    }
+    return { ok: true, restored, errors: [] };
+  } finally { _paused = false; }
+}
+
 // RECOVERY (one tap, race-free): restore a local daily snapshot AND make it the truth
 // everywhere. Pauses ALL auto-sync first (so nothing pulls the bad cloud back mid-restore),
 // loads the snapshot into local storage re-stamped to out-rank every existing row, wipes the
