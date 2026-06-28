@@ -139,19 +139,8 @@ export function AppProvider({ children }) {
     return () => { cancelled = true; clearTimeout(t); clearInterval(timer); };
   }, []);
 
-  // Daily OneDrive auto-backup (silent; only if enabled, connected, and due — after 9 PM Stockholm).
-  useEffect(() => {
-    const od = settings?.oneDrive;
-    if (!od?.auto || !od.clientId) return;
-    let cancelled = false;
-    const run = () => import('../lib/onedrive.js')
-      .then(({ autoBackupIfDue }) => { if (!cancelled) return autoBackupIfDue(settings, ({ at, date }) => updateSettings({ oneDrive: { ...od, lastBackupAt: at, lastBackupDate: date } }), lang); })
-      .catch(() => {});
-    run();
-    const timer = setInterval(run, 30 * 60 * 1000); // re-check while the app stays open, so the 9 PM window is caught
-    return () => { cancelled = true; clearInterval(timer); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings?.oneDrive?.auto, settings?.oneDrive?.clientId]);
+  // Daily OneDrive auto-backup removed — the Supabase cloud backup above is the one system.
+
 
   // ── Auth: try Supabase Auth first (gives the session RLS needs). If it doesn't
   // succeed, ALWAYS fall back to the local gate — the local gate only unlocks the

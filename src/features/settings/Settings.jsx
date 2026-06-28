@@ -4,11 +4,10 @@ import { C, TABLES } from '../../lib/constants.js';
 import { Badge, Btn, Card, Field, Input, Modal, PageHeader, Select } from '../../ui/components.jsx';
 import { resetStore, dbMode } from '../../db/db.js';
 import { isHashed, makeHashedPassword } from '../../lib/auth.js';
-import { subscribeSync, pushAllLocal, pull, cloudReady, wipeCloud, checkCloudSchema, missingColumnsSql, forcePushOverwrite, restoreSnapshotToCloud, fullRestoreFromBackup } from '../../db/sync.js';
+import { subscribeSync, pushAllLocal, pull, cloudReady, wipeCloud, forcePushOverwrite, restoreSnapshotToCloud, fullRestoreFromBackup } from '../../db/sync.js';
 import { exportBackup, importBackup } from '../../lib/backup.js';
 import { exportExcel, importExcel } from '../../lib/excel.js';
 import { dataHealth, mergeCustomers, reconcileStock } from '../../lib/engine.js';
-import { connectOneDrive, disconnectOneDrive, getOneDriveAccount, backupToOneDrive } from '../../lib/onedrive.js';
 import { num, fmtCur } from '../../lib/money.js';
 
 
@@ -20,7 +19,6 @@ export default function Settings() {
   const [userEdit, setUserEdit] = useState(null);
   const [showAudit, setShowAudit] = useState(false);
   const [showHealth, setShowHealth] = useState(false);
-  const [schemaResult, setSchemaResult] = useState(null);       // { done, total, failed }  const app = useApp();
   const [importReport, setImportReport] = useState(null);
   const [exportScope, setExportScope] = useState('all');
   const [syncing, setSyncing] = useState(false);
@@ -218,37 +216,6 @@ export default function Settings() {
     finally { e.target.value = ''; }
   };
 
-  const od = settings.oneDrive || {};
-  const [odClientId, setOdClientId] = useState(od.clientId || '');
-  const [odBusy, setOdBusy] = useState(false);
-  useEffect(() => { setOdClientId(settings.oneDrive?.clientId || ''); }, [settings.oneDrive?.clientId]);
-
-  const odConnect = async () => {
-    if (!odClientId.trim()) { showToast(t('oneDriveClientId'), 'error'); return; }
-    setOdBusy(true);
-    try {
-      const account = await connectOneDrive(odClientId.trim());
-      await updateSettings({ oneDrive: { ...od, clientId: odClientId.trim(), connected: true, account } });
-      showToast(`✓ ${account}`, 'success');
-    } catch (e) { console.error(e); showToast('Connect failed', 'error'); }
-    finally { setOdBusy(false); }
-  };
-  const odDisconnect = async () => {
-    await disconnectOneDrive(od.clientId);
-    await updateSettings({ oneDrive: { ...od, connected: false, account: '' } });
-  };
-  const odBackupNow = async () => {
-    setOdBusy(true);
-    try {
-      const date = await backupToOneDrive(od.clientId || odClientId.trim(), { lang: form?.lang || 'ar' });
-      const at = new Date().toISOString();
-      await updateSettings({ oneDrive: { ...od, clientId: od.clientId || odClientId.trim(), lastBackupAt: at, lastBackupDate: date } });
-      showToast('✓ OneDrive', 'success');
-    } catch (e) { console.error(e); showToast('Backup failed', 'error'); }
-    finally { setOdBusy(false); }
-  };
-  const odToggleAuto = async (on) => { await updateSettings({ oneDrive: { ...od, clientId: od.clientId || odClientId.trim(), auto: on } }); };
-
   const syncTone = !sync.configured ? 'neutral' : !sync.online ? 'warning' : sync.pending ? 'info' : 'success';
   const syncLabel = !sync.configured ? 'Offline only (no cloud)'
     : !sync.online ? `Offline — ${sync.pending} queued`
@@ -315,28 +282,6 @@ export default function Settings() {
       </Card>
 
       <Card style={{ marginTop: 16 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 4 }}>☁️ {t('oneDrive')}
-          {od.connected && <Badge tone="success" >{t('connected')}</Badge>}
-        </div>
-        <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 10 }}>{t('oneDriveHint')}</div>
-        <Field label={t('oneDriveClientId')}>
-          <Input value={odClientId} onChange={setOdClientId} placeholder="00000000-0000-0000-0000-000000000000" />
-        </Field>
-        {od.connected && od.account && <div style={{ fontSize: 12, color: C.textMid, marginBottom: 8 }}>👤 {od.account}</div>}
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-          {!od.connected
-            ? <Btn onClick={odConnect} disabled={odBusy}>🔗 {t('connect')}</Btn>
-            : <><Btn onClick={odBackupNow} disabled={odBusy}>⬆ {t('backupNow')}</Btn>
-              <Btn variant="outline" onClick={odDisconnect} style={{ color: C.danger }}>{t('disconnect')}</Btn></>}
-        </div>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: C.textMid }}>
-          <input type="checkbox" checked={!!od.auto} onChange={(e) => odToggleAuto(e.target.checked)} disabled={!od.connected} />
-          {t('autoBackup')}
-        </label>
-        {od.lastBackupAt && <div style={{ fontSize: 11, color: C.textMuted, marginTop: 6 }}>{t('lastBackup')}: {new Date(od.lastBackupAt).toLocaleString()}</div>}
-      </Card>
-
-      <Card style={{ marginTop: 16 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 4 }}>☁️ {t('cloudSync')}</div>
         <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 10 }}>
           {cloudReady() ? t('cloudOn') : t('cloudOff')}
@@ -344,30 +289,6 @@ export default function Settings() {
         <Btn onClick={doSyncNow} variant={cloudReady() ? 'primary' : 'light'} disabled={!cloudReady() || syncing}>
           {syncing ? `⏳ ${t('syncing')}` : `⟳ ${t('syncNow')}`}
         </Btn>
-        {cloudReady() && (
-          <div style={{ marginTop: 10 }}>
-            <button onClick={async () => {
-              setSchemaResult({ checking: true });
-              const r = await checkCloudSchema();
-              setSchemaResult(r);
-            }} style={{ border: `1px solid ${C.border}`, background: '#fff', borderRadius: 8, padding: '6px 12px', fontSize: 12, fontWeight: 800, color: C.primary, cursor: 'pointer' }}>🔌 {t('checkSchema')}</button>
-            {schemaResult && !schemaResult.checking && (
-              schemaResult.missing?.length || schemaResult.errors?.length ? (
-                <div style={{ marginTop: 8, background: '#FBECEC', borderRadius: 8, padding: 10, fontSize: 11.5 }}>
-                  {schemaResult.missing?.length > 0 && <>
-                    <div style={{ fontWeight: 800, color: C.danger, marginBottom: 4 }}>⚠ {t('missingColumns')} ({schemaResult.missing.length})</div>
-                    {schemaResult.missing.map((mc, i) => <div key={i} style={{ color: C.textMid }}>{mc.table}.{mc.column}</div>)}
-                    <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: '#fff', borderRadius: 6, padding: 8, marginTop: 6, fontSize: 10.5 }}>{missingColumnsSql(schemaResult.missing)}</pre>
-                    <Btn size="sm" variant="light" onClick={() => { navigator.clipboard?.writeText(missingColumnsSql(schemaResult.missing)); showToast(t('copied'), 'success'); }}>📋 {t('copySql')}</Btn>
-                  </>}
-                  {schemaResult.errors?.length > 0 && schemaResult.errors.map((e, i) => <div key={i} style={{ color: C.danger, marginTop: 4 }}>{e}</div>)}
-                </div>
-              ) : (
-                <div style={{ marginTop: 8, color: C.success, fontWeight: 700, fontSize: 12 }}>✓ {t('schemaOk')}</div>
-              )
-            )}
-          </div>
-        )}
         {cloudReady() && (
           <div style={{ marginTop: 12, borderTop: `1px solid ${C.surfaceAlt}`, paddingTop: 10 }}>
             <div style={{ fontSize: 11, fontWeight: 800, color: C.textMid, marginBottom: 6 }}>🛟 {t('recoveryTools') || 'أدوات الاسترجاع / Recovery'}</div>
@@ -449,31 +370,9 @@ export default function Settings() {
         </div>
       </Card>
 
-      {/* Automatic daily local backups (rolling 7) */}
-      <Card style={{ marginTop: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>🛟 {t('autoBackupTitle')}</div>
-            <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>{t('autoBackupNote')}</div>
-          </div>
-          <Btn size="sm" variant="light" onClick={doSnapshotNow}>{t('backupNow')}</Btn>
-        </div>
-        {snaps.length > 0 && (
-          <div style={{ display: 'grid', gap: 6, marginTop: 10 }}>
-            {snaps.map((b) => (
-              <div key={b.key} style={{ display: 'flex', alignItems: 'center', gap: 8, background: C.surfaceAlt, borderRadius: 10, padding: '7px 10px' }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text }}>{b.day}{b.reason === 'manual' ? ' •' : ''}</div>
-                  <div style={{ fontSize: 10.5, color: C.textMuted }}>{b.rows} {t('items')}{b.at ? ` · ${new Date(b.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}</div>
-                </div>
-                <button onClick={() => doDownloadSnap(b.key)} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 16 }} title={t('download')}>⬇️</button>
-                <Btn size="sm" variant="light" onClick={() => doRestoreSnap(b.key)} title={t('restore')}>↩</Btn>
-                <Btn size="sm" onClick={() => doRestoreToAll(b.key)} disabled={!cloudReady() || syncing} title={t('restoreToAll') || 'استرجاع إلى كل الأجهزة'}>↺☁️</Btn>
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
+      {/* Local daily snapshots still run silently as an offline safety net (and feed
+          pre-restore copies); their management card was removed to keep one clear backup
+          system — the cloud Backup & Restore above. */}
 
       <Card style={{ marginTop: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
