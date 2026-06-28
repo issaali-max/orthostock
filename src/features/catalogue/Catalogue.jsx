@@ -8,6 +8,7 @@ import { BandGrid } from '../../ui/BandGrid.jsx';
 import { isGridWorthy } from '../../lib/bandGrid.js';
 import RestockList from './RestockList.jsx';
 import StockTake from './StockTake.jsx';
+import BandGenerator from './BandGenerator.jsx';
 import { logStockMovement } from '../../lib/engine.js';
 import { fmtDate } from '../../lib/dates.js';
 import {
@@ -34,6 +35,7 @@ export default function Catalogue() {
   const [archFilter, setArchFilter] = useState('');
   const [editMode, setEditMode] = useState(false);
   const [edit, setEdit] = useState(null);
+  const [genGroup, setGenGroup] = useState(null);
   const [flat, setFlat] = useState(false); // default: browse by category (flat all-materials view removed)
   const [flatStatus, setFlatStatus] = useState('');
   const [flatBrand, setFlatBrand] = useState('');
@@ -452,7 +454,10 @@ export default function Catalogue() {
                     </div>
                   )}
                   {editMode && (
-                    <button onClick={() => addToGroup(p.id)} style={{ width: '100%', border: 'none', borderTop: `1px solid ${C.surfaceAlt}`, background: C.primary + '0d', color: C.primary, padding: '10px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer' }}>＋ {t('addMaterial')}</button>
+                    <div style={{ display: 'flex', borderTop: `1px solid ${C.surfaceAlt}` }}>
+                      <button onClick={() => addToGroup(p.id)} style={{ flex: 1, border: 'none', background: C.primary + '0d', color: C.primary, padding: '10px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer' }}>＋ {t('addMaterial')}</button>
+                      <button onClick={() => setGenGroup(p)} style={{ flex: 1, border: 'none', borderInlineStart: `1px solid ${C.surfaceAlt}`, background: C.primary + '0d', color: C.primary, padding: '10px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer' }}>🧬 {t('genSizes') || 'توليد مقاسات'}</button>
+                    </div>
                   )}
                 </div>
                 {editToolbar()}
@@ -462,6 +467,7 @@ export default function Catalogue() {
         </div>
       )}
       {Edit}
+      {genGroup && <BandGenerator app={app} t={t} group={genGroup} existingVariants={variants.filter((v) => v.productId === genGroup.id && v.isActive !== false)} onClose={() => setGenGroup(null)} />}
     </div>
   );
 }

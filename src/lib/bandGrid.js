@@ -7,6 +7,32 @@
 
 export const POSITIONS = ['UR', 'UL', 'LR', 'LL'];
 export const POSITION_LABEL = { UR: '↗ UR', UL: '↖ UL', LR: '↘ LR', LL: '↙ LL' };
+export const POSITION_WORDS = { UR: 'Upper Right', UL: 'Upper Left', LR: 'Lower Right', LL: 'Lower Left' };
+
+// Build an inclusive numeric size list (e.g. 31 → 44 step 0.5). Float-safe; returns strings
+// using a dot decimal so the parser reads them ("31", "31.5", …).
+export function sizeList(from, to, step) {
+  const a = parseFloat(String(from).replace(',', '.')), b = parseFloat(String(to).replace(',', '.')), s = parseFloat(String(step).replace(',', '.'));
+  if (isNaN(a) || isNaN(b) || isNaN(s) || s <= 0 || b < a) return [];
+  const out = []; const n = Math.round((b - a) / s);
+  for (let i = 0; i <= n && i <= 1000; i++) { const v = Math.round((a + i * s) * 100) / 100; out.push(String(v)); }
+  return out;
+}
+
+// Plan which (size × position) materials to create for a group, skipping any that already
+// exist (matched via the same parser, so comma/dot and word/code variants all dedupe).
+export function planBandGeneration({ from, to, step, base, positions, existingVariants }) {
+  const sizes = sizeList(from, to, step);
+  const pos = (positions && positions.length) ? positions : POSITIONS;
+  const have = new Set();
+  for (const v of existingVariants || []) { const p = parseBand(v); if (p.size != null && p.position) have.add(`${p.size}|${p.position}`); }
+  const plan = [];
+  for (const size of sizes) for (const position of pos) {
+    if (have.has(`${size}|${position}`)) continue;
+    plan.push({ size, position, nameEn: `${base} ${POSITION_WORDS[position]} ${size}`.replace(/\s+/g, ' ').trim(), attributes: { size, position } });
+  }
+  return { sizes, plan, total: sizes.length * pos.length, skip: sizes.length * pos.length - plan.length };
+}
 
 const ARCH_UPPER = /(upper|\btop\b|علوي|عُلوي|övre)/i;
 const ARCH_LOWER = /(lower|bottom|سفلي|nedre)/i;
@@ -32,8 +58,8 @@ export function parseBand(v) {
     if (SIDE_RIGHT.test(hay)) side = 'R';
     else if (SIDE_LEFT.test(hay)) side = 'L';
   }
-  const numM = name.match(/(\d+(?:\.\d+)?)/) || attrTxt.match(/(\d+(?:\.\d+)?)/);
-  const size = numM ? numM[1] : null;
+  const numM = name.match(/(\d+(?:[.,]\d+)?)/) || attrTxt.match(/(\d+(?:[.,]\d+)?)/);
+  const size = numM ? numM[1].replace(',', '.') : null;
   const position = arch && side ? `${arch}${side}` : null; // UR/UL/LR/LL or null
   return { size, position, arch, side };
 }
