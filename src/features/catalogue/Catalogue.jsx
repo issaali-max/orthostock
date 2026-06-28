@@ -86,6 +86,28 @@ export default function Catalogue() {
       groupId: inGroup ? v.productId : '', groupName: '', groupMode: inGroup ? 'existing' : 'none',
     });
   };
+  // Add a NEW material straight into an existing group — group + category pre-selected, so it
+  // saves directly under that group and shows up there immediately.
+  const addToGroup = (gid) => {
+    const prod = products.find((p) => p.id === gid);
+    openEdit(TABLES.variants, 'variant', {
+      ...blankVariant(gid), categoryId: prod?.categoryId || flatCat || catId || '', brand: prod?.brand || '',
+      image_path: prod?.image_path || prod?.image_url || '',
+      groupId: gid, groupName: prod?.nameEn || '', groupMode: 'existing',
+    });
+  };
+  // Shared grid cell renderers (stock view): number = stock, red = 0/missing, orange = low.
+  const bandStockCell = ({ variant: v }) => {
+    if (!v) return <span style={{ color: C.textMuted, fontSize: 13 }}>·</span>; // missing size/position
+    const stock = num(v.stockQty);
+    const low = stock <= num(v.stockMin) && num(v.stockMin) > 0;
+    const col = stock <= 0 ? C.danger : low ? C.warning : C.success;
+    return <button onClick={editMode ? () => editVariant(v) : undefined} title={v.nameEn || v.sku}
+      style={{ width: '100%', minWidth: 40, border: `1.5px solid ${col}44`, background: col + '14', color: col, borderRadius: 8, padding: '8px 2px', fontSize: 14, fontWeight: 800, cursor: editMode ? 'pointer' : 'default' }}>{fmtNum(stock)}</button>;
+  };
+  const bandStockOther = (v) => (
+    <button key={v.id} onClick={editMode ? () => editVariant(v) : undefined} style={{ border: `1px solid ${C.border}`, background: '#fff', borderRadius: 8, padding: '6px 10px', fontSize: 11.5, fontWeight: 700, color: C.text, cursor: editMode ? 'pointer' : 'default' }}>{v.nameEn || v.sku} · {fmtNum(num(v.stockQty))}</button>
+  );
   const saveEdit = async () => {
     const fn = edit.table === TABLES.categories ? saveCategory : edit.table === TABLES.products ? saveProduct : saveVariant;
     const isVariant = edit.table === TABLES.variants && edit.rec.id;
@@ -225,25 +247,16 @@ export default function Catalogue() {
         {vlist.length === 0 ? <EmptyState icon="📦" text={t('noData')} /> : (
           <div style={{ display: 'grid', gap: 8 }}>
             {(() => {
-              const gridCell = ({ variant: v }) => {
-                if (!v) return <span style={{ color: C.textMuted, fontSize: 13 }}>·</span>; // missing size/position
-                const stock = num(v.stockQty);
-                const low = stock <= num(v.stockMin) && num(v.stockMin) > 0;
-                const col = stock <= 0 ? C.danger : low ? C.warning : C.success;
-                return <button onClick={editMode ? () => editVariant(v) : undefined} title={v.nameEn || v.sku}
-                  style={{ width: '100%', minWidth: 40, border: `1.5px solid ${col}44`, background: col + '14', color: col, borderRadius: 8, padding: '8px 2px', fontSize: 14, fontWeight: 800, cursor: editMode ? 'pointer' : 'default' }}>{fmtNum(stock)}</button>;
-              };
-              const gridOther = (v) => {
-                const stock = num(v.stockQty);
-                return <button key={v.id} onClick={editMode ? () => editVariant(v) : undefined} style={{ border: `1px solid ${C.border}`, background: '#fff', borderRadius: 8, padding: '6px 10px', fontSize: 11.5, fontWeight: 700, color: C.text, cursor: editMode ? 'pointer' : 'default' }}>{v.nameEn || v.sku} · {fmtNum(stock)}</button>;
-              };
               const body = (rows) => isGridWorthy(rows)
-                ? <BandGrid variants={rows} maxHeight={340} renderCell={gridCell} renderOther={gridOther} />
+                ? <BandGrid variants={rows} maxHeight={340} renderCell={bandStockCell} renderOther={bandStockOther} />
                 : <div style={{ display: 'grid', gap: 8 }}>{rows.map(renderVarCard)}</div>;
               return groups
                 ? groups.map((g) => (
                   <div key={g.gid}>
-                    <div style={{ fontSize: 12, fontWeight: 800, color: C.primary, margin: '4px 2px 6px' }}>▸ {g.name} ({g.rows.length})</div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, margin: '4px 2px 6px' }}>
+                      <div style={{ fontSize: 12, fontWeight: 800, color: C.primary }}>▸ {g.name} ({g.rows.length})</div>
+                      {editMode && <button onClick={() => addToGroup(g.gid)} style={{ border: `1px solid ${C.primary}`, background: C.primary + '12', color: C.primary, borderRadius: 999, padding: '3px 12px', fontSize: 11.5, fontWeight: 800, cursor: 'pointer' }}>＋ {t('addMaterial')}</button>}
+                    </div>
                     {body(g.rows)}
                   </div>
                 ))
@@ -408,7 +421,11 @@ export default function Catalogue() {
                   </div>
                 )}
                 <div>
-                  {vs.map((v, i) => {
+                  {isGridWorthy(vs) ? (
+                    <div style={{ padding: 10 }}>
+                      <BandGrid variants={vs} maxHeight={320} renderCell={bandStockCell} renderOther={bandStockOther} />
+                    </div>
+                  ) : vs.map((v, i) => {
                     const attrs = Object.entries(v.attributes || {}).filter(([, val]) => val);
                     return (
                       <div key={v.id} onClick={editMode ? () => editVariant(v) : undefined}
@@ -433,6 +450,9 @@ export default function Catalogue() {
                     <div style={{ padding: '14px 16px', borderTop: `1px solid ${C.surfaceAlt}`, fontSize: 12.5, color: C.textMuted, textAlign: 'center' }}>
                       {t('emptyGroupHint')}
                     </div>
+                  )}
+                  {editMode && (
+                    <button onClick={() => addToGroup(p.id)} style={{ width: '100%', border: 'none', borderTop: `1px solid ${C.surfaceAlt}`, background: C.primary + '0d', color: C.primary, padding: '10px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer' }}>＋ {t('addMaterial')}</button>
                   )}
                 </div>
                 {editToolbar()}
