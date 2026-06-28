@@ -83,6 +83,38 @@ export default function Settings() {
   const [snaps, setSnaps] = useState([]);
   const loadSnaps = async () => { const m = await import('../../lib/backup.js'); setSnaps(await m.listBackups()); };
   useEffect(() => { loadSnaps(); }, []);
+
+  // Cloud Backup & Restore (Supabase Storage) — the primary backup system
+  const [cloudBks, setCloudBks] = useState([]);
+  const [cloudUsage, setCloudUsage] = useState(0);
+  const [cloudBusy, setCloudBusy] = useState(false);
+  const loadCloudBks = async () => {
+    try { const m = await import('../../lib/cloudBackup.js'); if (!m.cloudBackupReady()) return; const u = await m.storageUsage(); setCloudBks(u.list); setCloudUsage(u.total); } catch { /* offline */ }
+  };
+  useEffect(() => { loadCloudBks(); }, []);
+  const doCloudBackupNow = async () => {
+    setCloudBusy(true);
+    try { const m = await import('../../lib/cloudBackup.js'); await m.createCloudBackup('manual'); await loadCloudBks(); showToast('☁️ ✓', 'success'); }
+    catch (e) { showToast(`⚠ ${e.message || e}`, 'error'); }
+    finally { setCloudBusy(false); }
+  };
+  const humanSizeLocal = (n) => { if (!n && n !== 0) return '—'; if (n < 1024) return `${n} B`; if (n < 1048576) return `${(n / 1024).toFixed(1)} KB`; return `${(n / 1048576).toFixed(2)} MB`; };
+  const doCloudDownload = async (id) => { try { const m = await import('../../lib/cloudBackup.js'); await m.downloadCloudBackup(id); } catch (e) { showToast(`⚠ ${e.message || e}`, 'error'); } };
+  const doCloudDelete = async (id) => {
+    if (!window.confirm('🗑️ حذف هذه النسخة نهائياً من السحابة؟\nDelete this backup permanently?')) return;
+    try { const m = await import('../../lib/cloudBackup.js'); await m.deleteCloudBackup(id); await loadCloudBks(); } catch (e) { showToast(`⚠ ${e.message || e}`, 'error'); }
+  };
+  const doCloudRestore = async (b) => {
+    if (!window.confirm(`⚠️ استرجاع كامل (Full Restore)\nالنسخة: ${b.stockholm} · ${b.type}\nالجداول: ${b.table_count} · السجلات: ${b.record_count} · الحجم: ${(b.size / 1024).toFixed(0)} KB\n\nيستبدل كل البيانات على كل الأجهزة بهذه النسخة بالضبط (بما فيها المحذوفات وبيانات الشركة). تُحفظ نسخة pre-restore أولاً.\n\nFull replace of ALL data on every device. A pre-restore backup is saved first. متابعة؟`)) return;
+    setCloudBusy(true);
+    try {
+      const m = await import('../../lib/cloudBackup.js');
+      const r = await m.restoreCloudBackup(b.backup_id);
+      if (!r.ok && r.errors?.length) { showToast(`⚠ ${r.errors[0]}`, 'error'); setCloudBusy(false); return; }
+      showToast(`↺ ${r.restored} ✓`, 'success');
+      setTimeout(() => window.location.reload(), 900);
+    } catch (e) { showToast(`⚠ ${e.message || e}`, 'error'); setCloudBusy(false); }
+  };
   const doSnapshotNow = async () => {
     const m = await import('../../lib/backup.js');
     await m.createSnapshot('manual'); await loadSnaps();
@@ -366,6 +398,37 @@ export default function Settings() {
           <Btn variant="outline" onClick={() => xlsxRef.current?.click()}>⬆ {t('importExcel')}</Btn>
           <input ref={xlsxRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={doImportExcel} style={{ display: 'none' }} />
         </div>
+      </Card>
+
+      <Card style={{ marginTop: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 800, color: C.text }}>☁️ Backup &amp; Restore</div>
+            <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>نسخة يومية تلقائية ٨:٠٠ ص بتوقيت السويد · مضغوطة ومُتحقَّقة · {cloudBks.length} نسخة · {humanSizeLocal(cloudUsage)}</div>
+          </div>
+          <Btn size="sm" onClick={doCloudBackupNow} disabled={cloudBusy || !cloudReady()}>＋ {cloudBusy ? '…' : 'نسخة الآن'}</Btn>
+        </div>
+        {!cloudReady() && <div style={{ fontSize: 11.5, color: C.warning }}>غير متصل بالسحابة — تظهر النسخ عند الاتصال.</div>}
+        {cloudReady() && cloudBks.length === 0 && <div style={{ fontSize: 11.5, color: C.textMuted }}>لا توجد نسخ بعد. اضغط «نسخة الآن» أو انتظر النسخة اليومية. (يلزم إنشاء bucket باسم <b>backups</b> في Supabase.)</div>}
+        {cloudUsage > 40 * 1048576 && <div style={{ fontSize: 11, color: C.warning, marginTop: 4 }}>⚠️ النسخ تستهلك مساحة كبيرة ({humanSizeLocal(cloudUsage)}). احذف نسخاً قديمة إن لزم.</div>}
+        {sync.configured && !sync.online && <div style={{ fontSize: 11, color: C.warning, marginTop: 4 }}>⚠️ هذا الجهاز غير متزامن الآن — قد تكون النسخة من بيانات قديمة.</div>}
+        {cloudBks.length > 0 && (
+          <div style={{ display: 'grid', gap: 6, marginTop: 10 }}>
+            {cloudBks.map((b) => (
+              <div key={b.backup_id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: C.surfaceAlt, borderRadius: 10, padding: '7px 10px' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text }}>
+                    {b.stockholm} <span style={{ fontSize: 10, fontWeight: 800, color: b.type === 'daily' ? C.primary : b.type === 'pre-restore' ? C.warning : C.textMid }}>· {b.type}</span>
+                  </div>
+                  <div style={{ fontSize: 10.5, color: C.textMuted }}>{b.table_count} جداول · {b.record_count} سجل · {humanSizeLocal(b.size)} · {b.status === 'valid' ? '✓' : b.status}</div>
+                </div>
+                <button onClick={() => doCloudDownload(b.backup_id)} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 16 }} title="Download">⬇️</button>
+                <Btn size="sm" onClick={() => doCloudRestore(b)} disabled={cloudBusy} title="Full Restore">↺</Btn>
+                <button onClick={() => doCloudDelete(b.backup_id)} style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 15, opacity: b.type === 'pre-restore' ? 1 : 0.7 }} title="Delete">🗑️</button>
+              </div>
+            ))}
+          </div>
+        )}
       </Card>
 
       <Card style={{ marginTop: 16 }}>

@@ -127,6 +127,18 @@ export function AppProvider({ children }) {
     });
   }, [loadAll]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Daily Supabase cloud backup — targets 08:00 Europe/Stockholm; falls back to the first
+  // app open after 08:00 (once per Stockholm-day). Independent of OneDrive.
+  useEffect(() => {
+    let cancelled = false;
+    const run = () => import('../lib/cloudBackup.js')
+      .then(({ autoDailyCloudBackup }) => { if (!cancelled) return autoDailyCloudBackup(); })
+      .catch(() => {});
+    const t = setTimeout(run, 4000);                 // shortly after load (let sync settle)
+    const timer = setInterval(run, 30 * 60 * 1000);  // catch the 08:00 window while open
+    return () => { cancelled = true; clearTimeout(t); clearInterval(timer); };
+  }, []);
+
   // Daily OneDrive auto-backup (silent; only if enabled, connected, and due — after 9 PM Stockholm).
   useEffect(() => {
     const od = settings?.oneDrive;
