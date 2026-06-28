@@ -319,6 +319,23 @@ export async function exportExcel(data, lang = 'ar', scope = 'all', opts = {}) {
     ], (data[TABLES.customerPrices] || []).map((cp) => ({ cust: custName(cp.customerId), sku: varSku(cp.variantId), price: num(cp.price) })));
   }
 
+  // Company / business details (editable Field→Value; re-imported by importExcel).
+  if (scope === 'all') {
+    const s = (data[TABLES.settings] || [])[0] || {};
+    buildSheet(wb, 'Company', [
+      { header: 'Field', key: 'k', width: 22 },
+      { header: 'Value', key: 'v', width: 44 },
+    ], [
+      { k: 'companyName', v: s.companyName || '' },
+      { k: 'companyPhone', v: s.companyPhone || '' },
+      { k: 'companyAddress', v: s.companyAddress || '' },
+      { k: 'companyTrn', v: s.companyTrn || '' },
+      { k: 'companyLicenseNo', v: s.companyLicenseNo || '' },
+      { k: 'companyStampPlace', v: s.companyStampPlace || '' },
+      { k: 'invoiceStamp', v: s.invoiceStamp ? 'YES' : '' },
+    ]);
+  }
+
   const buf = await wb.xlsx.writeBuffer();
   if (opts.returnBuffer) return { buf, skipped: exportErrors.length, errors: exportErrors };
   const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -527,6 +544,30 @@ export async function importExcel(file, data) {
       else { const saved = await db.insert(TABLES.suppliers, rec).catch(() => null); if (saved) { byName.set(key, saved); byId.set(String(saved.id), saved); summary.suppliersAdded++; } else summary.skipped++; }
      } catch (e) { summary.errors.push(`Suppliers row ${row.number}: ${e.message}`); summary.skipped++; }
     }
+  }
+
+  // ── Company sheet: restore company/business details into settings ──
+  const wsCo = wb.getWorksheet('Company');
+  if (wsCo) {
+    try {
+      const idx = headerIndex(wsCo);
+      const ALLOWED = new Set(['companyName', 'companyPhone', 'companyAddress', 'companyTrn', 'companyLicenseNo', 'companyStampPlace', 'invoiceStamp']);
+      const patch = {};
+      wsCo.eachRow((row, n) => {
+        if (n === 1) return;
+        const k = norm(cellVal(row, idx, 'Field'));
+        if (!ALLOWED.has(k)) return;
+        const raw = cellVal(row, idx, 'Value');
+        if (k === 'invoiceStamp') patch.invoiceStamp = /^(yes|y|نعم|true|1|✓)$/i.test(norm(raw));
+        else patch[k] = norm(raw);
+      });
+      if (Object.keys(patch).length) {
+        const cur = (data[TABLES.settings] || [])[0];
+        if (cur) await db.update(TABLES.settings, cur.id, patch);
+        else await db.insert(TABLES.settings, { id: 'singleton', ...patch });
+        summary.companyUpdated = 1;
+      }
+    } catch (e) { summary.errors.push(`Company: ${e.message}`); }
   }
 
   return summary;
