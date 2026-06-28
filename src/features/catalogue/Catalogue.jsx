@@ -4,6 +4,8 @@ import { C, RADIUS, SHADOW, TABLES } from '../../lib/constants.js';
 import { StoredImage } from '../../ui/StoredImage.jsx';
 import { fmtCur, fmtNum, num } from '../../lib/money.js';
 import { Badge, Btn, EmptyState, Modal, PageHeader, SearchBar } from '../../ui/components.jsx';
+import { BandGrid } from '../../ui/BandGrid.jsx';
+import { isGridWorthy } from '../../lib/bandGrid.js';
 import RestockList from './RestockList.jsx';
 import StockTake from './StockTake.jsx';
 import { logStockMovement } from '../../lib/engine.js';
@@ -222,14 +224,31 @@ export default function Catalogue() {
         </div>
         {vlist.length === 0 ? <EmptyState icon="📦" text={t('noData')} /> : (
           <div style={{ display: 'grid', gap: 8 }}>
-            {groups
-              ? groups.map((g) => (
-                <div key={g.gid}>
-                  <div style={{ fontSize: 12, fontWeight: 800, color: C.primary, margin: '4px 2px 6px' }}>▸ {g.name} ({g.rows.length})</div>
-                  <div style={{ display: 'grid', gap: 8 }}>{g.rows.map(renderVarCard)}</div>
-                </div>
-              ))
-              : vlist.map(renderVarCard)}
+            {(() => {
+              const gridCell = ({ variant: v }) => {
+                if (!v) return <span style={{ color: C.textMuted, fontSize: 13 }}>·</span>; // missing size/position
+                const stock = num(v.stockQty);
+                const low = stock <= num(v.stockMin) && num(v.stockMin) > 0;
+                const col = stock <= 0 ? C.danger : low ? C.warning : C.success;
+                return <button onClick={editMode ? () => editVariant(v) : undefined} title={v.nameEn || v.sku}
+                  style={{ width: '100%', minWidth: 40, border: `1.5px solid ${col}44`, background: col + '14', color: col, borderRadius: 8, padding: '8px 2px', fontSize: 14, fontWeight: 800, cursor: editMode ? 'pointer' : 'default' }}>{fmtNum(stock)}</button>;
+              };
+              const gridOther = (v) => {
+                const stock = num(v.stockQty);
+                return <button key={v.id} onClick={editMode ? () => editVariant(v) : undefined} style={{ border: `1px solid ${C.border}`, background: '#fff', borderRadius: 8, padding: '6px 10px', fontSize: 11.5, fontWeight: 700, color: C.text, cursor: editMode ? 'pointer' : 'default' }}>{v.nameEn || v.sku} · {fmtNum(stock)}</button>;
+              };
+              const body = (rows) => isGridWorthy(rows)
+                ? <BandGrid variants={rows} maxHeight={340} renderCell={gridCell} renderOther={gridOther} />
+                : <div style={{ display: 'grid', gap: 8 }}>{rows.map(renderVarCard)}</div>;
+              return groups
+                ? groups.map((g) => (
+                  <div key={g.gid}>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: C.primary, margin: '4px 2px 6px' }}>▸ {g.name} ({g.rows.length})</div>
+                    {body(g.rows)}
+                  </div>
+                ))
+                : body(vlist);
+            })()}
           </div>
         )}
         {Edit}
