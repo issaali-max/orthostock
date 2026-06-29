@@ -25,7 +25,7 @@ export default function BandGenerator({ app, t, group, existingVariants, onClose
   const [listText, setListText] = useState('');
   const [positions, setPositions] = useState(schemePositions);
   const [price, setPrice] = useState('');
-  const [wholesale, setWholesale] = useState('');
+  const [buy, setBuy] = useState(''); // purchase price = wholesale = cost (one number)
   const [stockMin, setStockMin] = useState('');
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(0);
@@ -59,9 +59,9 @@ export default function BandGenerator({ app, t, group, existingVariants, onClose
       try {
         await db.insert(TABLES.variants, {
           productId: group.id, sku: nextSku(), nameEn: item.nameEn, attributes: item.attributes,
-          sellingPriceDefault: num(price), sellingPriceWholesale: num(wholesale), stockMin: num(stockMin), stockQty: 0,
+          sellingPriceDefault: num(price), sellingPriceWholesale: num(buy), stockMin: num(stockMin), stockQty: 0,
           unit: 'piece', notes: '', isActive: true, supplierId: '',
-          purchasePriceLatest: 0, purchasePriceAvg: 0, purchasePriceMin: 0, purchasePriceMax: 0,
+          purchasePriceLatest: num(buy), purchasePriceAvg: num(buy), purchasePriceMin: num(buy), purchasePriceMax: num(buy),
         });
         made += 1;
       } catch { /* skip a failed row */ }
@@ -112,7 +112,7 @@ export default function BandGenerator({ app, t, group, existingVariants, onClose
 
         <div style={{ display: 'flex', gap: 8 }}>
           <Field label={`${t('sellingPrice')} (${t('optional')})`}><Input value={price} onChange={setPrice} placeholder="0" inputMode="decimal" /></Field>
-          <Field label={`${t('wholesalePrice')} (${t('optional')})`}><Input value={wholesale} onChange={setWholesale} placeholder="0" inputMode="decimal" /></Field>
+          <Field label={`${t('purchasePrice') || 'سعر الشراء = الجملة'} (${t('optional')})`}><Input value={buy} onChange={setBuy} placeholder="0" inputMode="decimal" /></Field>
         </div>
         <Field label={`${t('stockMin')} (${t('optional')})`}><Input value={stockMin} onChange={setStockMin} placeholder="0" inputMode="numeric" /></Field>
 

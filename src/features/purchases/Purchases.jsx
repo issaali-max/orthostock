@@ -1,5 +1,7 @@
 import { useMemo, useState, useEffect } from 'react';
 import { useApp } from '../../app/AppProvider.jsx';
+import { BandGrid } from '../../ui/BandGrid.jsx';
+import { isGridWorthy } from '../../lib/bandGrid.js';
 import { C, TABLES } from '../../lib/constants.js';
 import { fmtCur, fmtNum, num, round2 } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
@@ -225,8 +227,30 @@ export default function Purchases() {
               ))}
             </div>
 
-            {/* Step 3: variants of the product */}
+            {/* Step 3: variants — a size×position grid for sized bands/wires, else buttons */}
             {prodId ? (
+              isGridWorthy(variantsOfProduct(prodId)) ? (
+                <div style={{ marginBottom: 10 }}>
+                  <BandGrid variants={variantsOfProduct(prodId)} maxHeight={250}
+                    renderCell={({ variant: v }) => {
+                      if (!v) return <span style={{ color: C.textMuted, fontSize: 13 }}>·</span>;
+                      const on = inCart(v.id); const stock = num(v.stockQty);
+                      return (
+                        <button onClick={() => toggle(v)} title={v.nameEn || v.sku} style={{
+                          width: '100%', minWidth: 40, border: `1.5px solid ${on ? C.success : C.border}`,
+                          background: on ? C.success : '#fff', color: on ? '#fff' : C.text,
+                          borderRadius: 8, padding: '7px 2px', fontSize: 12, fontWeight: 800, cursor: 'pointer',
+                        }}>{on ? '✓' : fmtNum(stock)}</button>
+                      );
+                    }}
+                    renderOther={(v) => {
+                      const on = inCart(v.id);
+                      return <button key={v.id} onClick={() => toggle(v)} style={{ border: `1.5px solid ${on ? C.success : C.border}`, background: on ? C.success : '#fff', color: on ? '#fff' : C.text, borderRadius: 8, padding: '6px 10px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}>{on ? '✓ ' : ''}{v.nameEn || v.sku}</button>;
+                    }}
+                  />
+                  <div style={{ fontSize: 10, color: C.textMuted, marginTop: 4, textAlign: 'center' }}>الرقم = المخزون · اضغط لإضافة للشراء</div>
+                </div>
+              ) : (
               <div style={{ maxHeight: 220, overflowY: 'auto', border: `1px solid ${C.border}`, borderRadius: 10, padding: 8, marginBottom: 10 }}>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                   {variantsOfProduct(prodId).map((v) => {
@@ -245,6 +269,7 @@ export default function Purchases() {
                   {variantsOfProduct(prodId).length === 0 && <div style={{ fontSize: 12, color: C.textMuted, padding: 8 }}>{t('noData')}</div>}
                 </div>
               </div>
+              )
             ) : (
               <div style={{ fontSize: 12, color: C.textMuted, textAlign: 'center', padding: 12, border: `1px dashed ${C.border}`, borderRadius: 10, marginBottom: 10 }}>{t('products')} ↑</div>
             )}

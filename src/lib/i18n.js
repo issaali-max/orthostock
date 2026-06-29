@@ -26,7 +26,7 @@ export const DICT = {
     phone: 'الهاتف', whatsapp: 'واتساب', city: 'المدينة', currency: 'العملة',
     notes: 'ملاحظات', category: 'الفئة', unit: 'الوحدة', sku: 'رمز الصنف (SKU)',
     sellingPrice: 'سعر البيع الافتراضي', wholesalePrice: 'سعر الجملة', avgCost: 'متوسط التكلفة', margin: 'الهامش', costPrice: 'سعر التكلفة',
-    genSizes: 'توليد مقاسات', fromSize: 'من مقاس', toSize: 'إلى مقاس', stepSize: 'الخطوة', positions: 'المواضع', generate: 'توليد', optional: 'اختياري',
+    genSizes: 'توليد مقاسات', fromSize: 'من مقاس', toSize: 'إلى مقاس', stepSize: 'الخطوة', positions: 'المواضع', generate: 'توليد', optional: 'اختياري', purchasePrice: 'سعر الشراء = الجملة',
     stock: 'المخزون', stockMin: 'الحد الأدنى للمخزون',
     // categories attributes
     attributes: 'الخصائص', attributeKey: 'المفتاح', attributeLabel: 'التسمية', options: 'الخيارات',
@@ -110,7 +110,7 @@ export const DICT = {
     phone: 'Phone', whatsapp: 'WhatsApp', city: 'City', currency: 'Currency',
     notes: 'Notes', category: 'Category', unit: 'Unit', sku: 'SKU',
     sellingPrice: 'Default selling price', wholesalePrice: 'Wholesale price', avgCost: 'Average cost', margin: 'Margin', costPrice: 'Cost price',
-    genSizes: 'Generate sizes', fromSize: 'From size', toSize: 'To size', stepSize: 'Step', positions: 'Positions', generate: 'Generate', optional: 'optional',
+    genSizes: 'Generate sizes', fromSize: 'From size', toSize: 'To size', stepSize: 'Step', positions: 'Positions', generate: 'Generate', optional: 'optional', purchasePrice: 'Purchase = wholesale',
     stock: 'Stock', stockMin: 'Min stock level',
     attributes: 'Attributes', attributeKey: 'Key', attributeLabel: 'Label', options: 'Options',
     addAttribute: 'Add attribute', addOption: 'Add option',
