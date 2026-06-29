@@ -297,7 +297,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
             return (
               <div key={l.variantId} style={{ border: `1px solid ${giftQty > 0 ? C.success : C.border}`, borderRadius: 10, padding: '6px 8px', background: giftQty > 0 ? '#F1FAF5' : '#fff' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ flex: 1, fontSize: 12, fontWeight: 700, color: C.text, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{variantLabel(v)}</span>
+                  <span style={{ flex: 1, fontSize: 12, fontWeight: 700, color: C.text, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.nameEn || variantLabel(v)}</span>
                   <Input type="number" value={l.qty} onChange={(val) => setLine(l.variantId, { qty: num(val) })} style={{ width: 54, padding: 6 }} />
                   <Input type="number" value={l.unitPrice} onChange={(val) => setLine(l.variantId, { unitPrice: num(val) })} style={{ width: 72, padding: 6 }} />
                   <button onClick={() => removeLine(l.variantId)} style={{ border: 'none', background: 'none', color: C.danger, cursor: 'pointer', fontSize: 18, width: 24 }}>×</button>

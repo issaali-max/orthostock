@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { C } from '../lib/constants.js';
-import { buildBandGrid, POSITIONS, POSITION_LABEL } from '../lib/bandGrid.js';
+import { buildBandGrid } from '../lib/bandGrid.js';
 
 // Split a long size list into a few contiguous ranges for the filter chips.
 function makeRanges(sizes) {
@@ -41,18 +41,18 @@ export function BandGrid({ variants, renderCell, renderOther, maxHeight = 300 })
           <thead>
             <tr>
               <th style={{ ...th, insetInlineStart: 0, zIndex: 1 }}>مقاس</th>
-              {POSITIONS.map((p) => <th key={p} style={th}>{POSITION_LABEL[p]}</th>)}
+              {g.positions.map((p) => <th key={p} style={th}>{g.positionLabel[p]}</th>)}
             </tr>
           </thead>
           <tbody>
             {shownSizes.map((s) => (
               <tr key={s}>
                 <td style={sizeTd}>{s}</td>
-                {POSITIONS.map((p) => <td key={p} style={td}>{renderCell({ size: s, position: p, variant: g.cell(s, p) })}</td>)}
+                {g.positions.map((p) => <td key={p} style={td}>{renderCell({ size: s, position: p, variant: g.cell(s, p) })}</td>)}
               </tr>
             ))}
             {shownSizes.length === 0 && (
-              <tr><td colSpan={5} style={{ padding: 14, textAlign: 'center', color: C.textMuted, fontSize: 12 }}>—</td></tr>
+              <tr><td colSpan={g.positions.length + 1} style={{ padding: 14, textAlign: 'center', color: C.textMuted, fontSize: 12 }}>—</td></tr>
             )}
           </tbody>
         </table>

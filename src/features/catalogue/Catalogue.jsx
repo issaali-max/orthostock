@@ -9,6 +9,7 @@ import { isGridWorthy } from '../../lib/bandGrid.js';
 import RestockList from './RestockList.jsx';
 import StockTake from './StockTake.jsx';
 import BandGenerator from './BandGenerator.jsx';
+import { StockCell } from '../../ui/StockCell.jsx';
 import { logStockMovement } from '../../lib/engine.js';
 import { fmtDate } from '../../lib/dates.js';
 import {
@@ -98,15 +99,8 @@ export default function Catalogue() {
       groupId: gid, groupName: prod?.nameEn || '', groupMode: 'existing',
     });
   };
-  // Shared grid cell renderers (stock view): number = stock, red = 0/missing, orange = low.
-  const bandStockCell = ({ variant: v }) => {
-    if (!v) return <span style={{ color: C.textMuted, fontSize: 13 }}>·</span>; // missing size/position
-    const stock = num(v.stockQty);
-    const low = stock <= num(v.stockMin) && num(v.stockMin) > 0;
-    const col = stock <= 0 ? C.danger : low ? C.warning : C.success;
-    return <button onClick={editMode ? () => editVariant(v) : undefined} title={v.nameEn || v.sku}
-      style={{ width: '100%', minWidth: 40, border: `1.5px solid ${col}44`, background: col + '14', color: col, borderRadius: 8, padding: '8px 2px', fontSize: 14, fontWeight: 800, cursor: editMode ? 'pointer' : 'default' }}>{fmtNum(stock)}</button>;
-  };
+  // Shared grid renderers (stock view): inline-editable stock cell + an "other" chip.
+  const bandStockCell = ({ variant: v }) => <StockCell variant={v} app={app} editMode={editMode} onEditFull={editVariant} />;
   const bandStockOther = (v) => (
     <button key={v.id} onClick={editMode ? () => editVariant(v) : undefined} style={{ border: `1px solid ${C.border}`, background: '#fff', borderRadius: 8, padding: '6px 10px', fontSize: 11.5, fontWeight: 700, color: C.text, cursor: editMode ? 'pointer' : 'default' }}>{v.nameEn || v.sku} · {fmtNum(num(v.stockQty))}</button>
   );
