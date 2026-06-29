@@ -59,7 +59,7 @@ export default function BandGenerator({ app, t, group, existingVariants, onClose
       try {
         await db.insert(TABLES.variants, {
           productId: group.id, sku: nextSku(), nameEn: item.nameEn, attributes: item.attributes,
-          sellingPriceDefault: num(price), sellingPriceWholesale: num(buy), stockMin: num(stockMin), stockQty: 0,
+          sellingPriceDefault: num(price), stockMin: num(stockMin), stockQty: 0,
           unit: 'piece', notes: '', isActive: true, supplierId: '',
           purchasePriceLatest: num(buy), purchasePriceAvg: num(buy), purchasePriceMin: num(buy), purchasePriceMax: num(buy),
         });
@@ -112,7 +112,7 @@ export default function BandGenerator({ app, t, group, existingVariants, onClose
 
         <div style={{ display: 'flex', gap: 8 }}>
           <Field label={`${t('sellingPrice')} (${t('optional')})`}><Input value={price} onChange={setPrice} placeholder="0" inputMode="decimal" /></Field>
-          <Field label={`${t('purchasePrice') || 'سعر الشراء = الجملة'} (${t('optional')})`}><Input value={buy} onChange={setBuy} placeholder="0" inputMode="decimal" /></Field>
+          <Field label={`${t('costPrice')} (${t('optional')})`}><Input value={buy} onChange={setBuy} placeholder="0" inputMode="decimal" /></Field>
         </div>
         <Field label={`${t('stockMin')} (${t('optional')})`}><Input value={stockMin} onChange={setStockMin} placeholder="0" inputMode="numeric" /></Field>
 

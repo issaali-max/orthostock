@@ -17,7 +17,7 @@ export const blankProduct = (categoryId = '') => ({ nameEn: '', brand: '', categ
 export const blankVariant = (productId = '') => ({
   productId, categoryId: '', sku: '', nameEn: '', attributes: {}, image_path: '', image_url: '',
   purchasePriceLatest: '', purchasePriceAvg: '', purchasePriceMin: '', purchasePriceMax: '',
-  sellingPriceDefault: '', sellingPriceWholesale: '', stockQty: '', stockMin: '', supplierId: '', unit: 'piece', notes: '', isActive: true,
+  sellingPriceDefault: '', stockQty: '', stockMin: '', supplierId: '', unit: 'piece', notes: '', isActive: true,
 });
 
 // ── Save helpers (app = useApp()) ──
@@ -145,7 +145,7 @@ export async function saveVariant(app, rec) {
   const payload = {
     productId, sku, nameEn: (rec.nameEn || '').trim(),
     attributes: rec.attributes || {}, image_path: rec.image_path || rec.image_url || '',
-    sellingPriceDefault: num(rec.sellingPriceDefault), sellingPriceWholesale: num(rec.sellingPriceWholesale), stockMin: num(rec.stockMin),
+    sellingPriceDefault: num(rec.sellingPriceDefault), stockMin: num(rec.stockMin),
     unit: rec.unit || 'piece', notes: rec.notes || '', isActive: true, supplierId: rec.supplierId || '',
     purchasePriceLatest: num(rec.purchasePriceLatest), purchasePriceAvg: num(rec.purchasePriceAvg),
     purchasePriceMin: num(rec.purchasePriceMin), purchasePriceMax: num(rec.purchasePriceMax),
@@ -341,9 +341,6 @@ export function VariantForm({ rec, setRec, t, products, categories, variants = [
       <div style={{ display: 'flex', gap: 8 }}>
         <Field label={t('sellingPrice')}><Input type="number" value={rec.sellingPriceDefault} onChange={(v) => set('sellingPriceDefault', v)} /></Field>
         <Field label={t('costPrice')}><Input type="number" value={rec.purchasePriceAvg} onChange={(v) => { set('purchasePriceAvg', v); set('purchasePriceLatest', v); }} /></Field>
-      </div>
-      <div style={{ display: 'flex', gap: 8 }}>
-        <Field label={t('wholesalePrice') || 'سعر الجملة'}><Input type="number" value={rec.sellingPriceWholesale} onChange={(v) => set('sellingPriceWholesale', v)} /></Field>
       </div>
       <div style={{ display: 'flex', gap: 8 }}>
         <Field label={t('stock')}><Input type="number" value={rec.stockQty} onChange={(v) => set('stockQty', v)} /></Field>

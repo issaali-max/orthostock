@@ -111,6 +111,7 @@ export function AppProvider({ children }) {
 
   useEffect(() => { loadAll(); }, [loadAll]);
   useEffect(() => { import('../lib/backup.js').then((m) => m.maybeAutoBackup()).catch(() => {}); }, []); // daily local safety snapshot
+  useEffect(() => { import('../lib/migrate.js').then((m) => m.migrateWholesaleToCost()).then(() => refresh(TABLES.variants)).catch(() => {}); }, [refresh]); // one-time: wholesale → cost
 
 
   // Start offline<->cloud sync once; re-pull refreshes the UI caches.
