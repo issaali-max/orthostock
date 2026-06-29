@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect } from 'react';
 import { useApp } from '../../app/AppProvider.jsx';
 import { BandGrid } from '../../ui/BandGrid.jsx';
+import PurchasePlanning from './PurchasePlanning.jsx';
 import { isGridWorthy } from '../../lib/bandGrid.js';
 import { C, TABLES } from '../../lib/constants.js';
 import { fmtCur, fmtNum, num, round2 } from '../../lib/money.js';
@@ -20,6 +21,7 @@ export default function Purchases() {
   const { t, data, displayCurrency, usdRate, showToast } = app;
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [busy, setBusy] = useState(false);
   const [supplierId, setSupplierId] = useState('');
@@ -126,7 +128,7 @@ export default function Purchases() {
 
   return (
     <div>
-      <PageHeader title={t('purchases')} action={<Btn onClick={startNew}>＋ {t('newPurchase')}</Btn>} />
+      <PageHeader title={t('purchases')} action={<div style={{ display: 'flex', gap: 8 }}><Btn variant="light" onClick={() => setPlanOpen(true)}>🛒 {t('purchasePlan')}</Btn><Btn onClick={startNew}>＋ {t('newPurchase')}</Btn></div>} />
       <SearchBar value={q} onChange={setQ} placeholder={t('search')} />
       {list.length === 0 ? <EmptyState icon="📥" text={t('noPurchases')} /> : (
         <div style={{ display: 'grid', gap: 10 }}>
@@ -317,6 +319,7 @@ export default function Purchases() {
         </div>
         </>)}
       </Modal>
+      {planOpen && <PurchasePlanning onClose={() => setPlanOpen(false)} />}
     </div>
   );
 }
