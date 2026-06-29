@@ -19,10 +19,11 @@ function makeRanges(sizes) {
 // its own renderCell({ size, position, variant }) — `variant` is undefined for a gap
 // (a missing size/position). Unparsed variants are rendered via renderOther so nothing is
 // hidden. When there are many sizes, range chips appear to narrow the view.
-export function BandGrid({ variants, renderCell, renderOther, maxHeight = 300 }) {
+export function BandGrid({ variants, renderCell, renderOther, maxHeight = 300, fields }) {
   const g = useMemo(() => buildBandGrid(variants), [variants]);
   const ranges = useMemo(() => makeRanges(g.sizes), [g.sizes]);
   const [range, setRange] = useState(null); // null = all
+  const [field, setField] = useState(fields?.[0]?.key);
   const shownSizes = range ? g.sizes.filter((s) => range.set.has(s)) : g.sizes;
   const th = { padding: '6px 4px', fontSize: 11, fontWeight: 800, color: C.textMid, background: C.surfaceAlt, position: 'sticky', top: 0, textAlign: 'center', whiteSpace: 'nowrap' };
   const sizeTd = { padding: '4px 6px', fontSize: 12, fontWeight: 800, color: C.text, background: C.surfaceAlt, textAlign: 'center', position: 'sticky', insetInlineStart: 0 };
@@ -30,6 +31,14 @@ export function BandGrid({ variants, renderCell, renderOther, maxHeight = 300 })
   const chip = (active) => ({ border: `1px solid ${active ? C.primary : C.border}`, background: active ? C.primary : '#fff', color: active ? '#fff' : C.textMid, borderRadius: 999, padding: '3px 12px', fontSize: 11.5, fontWeight: 800, cursor: 'pointer', whiteSpace: 'nowrap' });
   return (
     <div>
+      {fields && fields.length > 1 && (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+          {fields.map((f) => {
+            const on = field === f.key;
+            return <button key={f.key} onClick={() => setField(f.key)} style={{ flex: 1, border: `1.5px solid ${on ? C.primary : C.border}`, background: on ? C.primary : '#fff', color: on ? '#fff' : C.textMid, borderRadius: 8, padding: '6px', fontSize: 12, fontWeight: 800, cursor: 'pointer' }}>{f.label}</button>;
+          })}
+        </div>
+      )}
       {ranges.length > 0 && (
         <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 6 }}>
           <button onClick={() => setRange(null)} style={chip(!range)}>الكل ({g.sizes.length})</button>
@@ -48,7 +57,7 @@ export function BandGrid({ variants, renderCell, renderOther, maxHeight = 300 })
             {shownSizes.map((s) => (
               <tr key={s}>
                 <td style={sizeTd}>{s}</td>
-                {g.positions.map((p) => <td key={p} style={td}>{renderCell({ size: s, position: p, variant: g.cell(s, p) })}</td>)}
+                {g.positions.map((p) => <td key={p} style={td}>{renderCell({ size: s, position: p, variant: g.cell(s, p), field })}</td>)}
               </tr>
             ))}
             {shownSizes.length === 0 && (

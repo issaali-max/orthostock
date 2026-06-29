@@ -99,8 +99,9 @@ export default function Catalogue() {
       groupId: gid, groupName: prod?.nameEn || '', groupMode: 'existing',
     });
   };
-  // Shared grid renderers (stock view): inline-editable stock cell + an "other" chip.
-  const bandStockCell = ({ variant: v }) => <StockCell variant={v} app={app} editMode={editMode} onEditFull={editVariant} />;
+  // Shared grid renderers (stock view): inline-editable cell (stock or min) + an "other" chip.
+  const bandStockCell = ({ variant: v, field }) => <StockCell variant={v} app={app} editMode={editMode} onEditFull={editVariant} field={field} />;
+  const bandFields = editMode ? [{ key: 'stock', label: `✎ ${t('stock')}` }, { key: 'min', label: `✎ ${t('stockMin')}` }] : undefined;
   const bandStockOther = (v) => (
     <button key={v.id} onClick={editMode ? () => editVariant(v) : undefined} style={{ border: `1px solid ${C.border}`, background: '#fff', borderRadius: 8, padding: '6px 10px', fontSize: 11.5, fontWeight: 700, color: C.text, cursor: editMode ? 'pointer' : 'default' }}>{v.nameEn || v.sku} · {fmtNum(num(v.stockQty))}</button>
   );
@@ -244,7 +245,7 @@ export default function Catalogue() {
           <div style={{ display: 'grid', gap: 8 }}>
             {(() => {
               const body = (rows) => isGridWorthy(rows)
-                ? <BandGrid variants={rows} maxHeight={340} renderCell={bandStockCell} renderOther={bandStockOther} />
+                ? <BandGrid variants={rows} maxHeight={340} renderCell={bandStockCell} renderOther={bandStockOther} fields={bandFields} />
                 : <div style={{ display: 'grid', gap: 8 }}>{rows.map(renderVarCard)}</div>;
               return groups
                 ? groups.map((g) => (
@@ -419,7 +420,7 @@ export default function Catalogue() {
                 <div>
                   {isGridWorthy(vs) ? (
                     <div style={{ padding: 10 }}>
-                      <BandGrid variants={vs} maxHeight={320} renderCell={bandStockCell} renderOther={bandStockOther} />
+                      <BandGrid variants={vs} maxHeight={320} renderCell={bandStockCell} renderOther={bandStockOther} fields={bandFields} />
                     </div>
                   ) : vs.map((v, i) => {
                     const attrs = Object.entries(v.attributes || {}).filter(([, val]) => val);

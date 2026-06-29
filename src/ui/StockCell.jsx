@@ -3,32 +3,39 @@ import { C, TABLES } from '../lib/constants.js';
 import { num, fmtNum } from '../lib/money.js';
 import * as db from '../db/db.js';
 
-// One grid cell for the stock view. In edit mode it's a number input you type straight into
-// (saved on blur / Enter — no page opens). A long-press opens the full material editor for
-// price, min-stock, name, etc. An empty cell (no variant) is a gap = a missing size/position.
-export function StockCell({ variant: v, app, editMode, onEditFull }) {
+// One grid cell for the stock view. `field` selects which number this cell edits:
+//   'stock' → stockQty   |   'min' → stockMin
+// In edit mode it's an input you type straight into (saved on blur / Enter — no page opens).
+// A long-press opens the full material editor. An empty cell (no variant) is a gap.
+export function StockCell({ variant: v, app, editMode, onEditFull, field = 'stock' }) {
   const [val, setVal] = useState('');
   const press = useRef(null);
-  useEffect(() => { setVal(v ? String(num(v.stockQty)) : ''); }, [v?.id, v?.stockQty]);
+  const key = field === 'min' ? 'stockMin' : 'stockQty';
+  useEffect(() => { setVal(v ? String(num(v[key])) : ''); }, [v?.id, v?.[key], key]);
 
   if (!v) return <span style={{ color: C.textMuted, fontSize: 13 }}>·</span>;
 
-  const stock = num(editMode ? val : v.stockQty);
-  const low = stock <= num(v.stockMin) && num(v.stockMin) > 0;
-  const col = stock <= 0 ? C.danger : low ? C.warning : C.success;
+  // colour: stock view = red/orange/green by level; min view = neutral primary tint.
+  let col;
+  if (field === 'min') {
+    col = C.primary;
+  } else {
+    const stock = num(editMode ? val : v.stockQty);
+    const low = stock <= num(v.stockMin) && num(v.stockMin) > 0;
+    col = stock <= 0 ? C.danger : low ? C.warning : C.success;
+  }
 
   const commit = async () => {
     const n = num(val);
-    if (n === num(v.stockQty)) return;
-    try { await db.update(TABLES.variants, v.id, { stockQty: n }); await app.refresh?.(TABLES.variants); } catch { /* ignore */ }
+    if (n === num(v[key])) return;
+    try { await db.update(TABLES.variants, v.id, { [key]: n }); await app.refresh?.(TABLES.variants); } catch { /* ignore */ }
   };
 
-  // long-press → full editor
   const startPress = () => { if (onEditFull) press.current = setTimeout(() => onEditFull(v), 500); };
   const cancelPress = () => { if (press.current) { clearTimeout(press.current); press.current = null; } };
 
   if (!editMode) {
-    return <div title={v.nameEn || v.sku} style={{ minWidth: 40, border: `1.5px solid ${col}44`, background: col + '14', color: col, borderRadius: 8, padding: '8px 2px', fontSize: 14, fontWeight: 800, textAlign: 'center' }}>{fmtNum(num(v.stockQty))}</div>;
+    return <div title={v.nameEn || v.sku} style={{ minWidth: 40, border: `1.5px solid ${col}44`, background: col + '14', color: col, borderRadius: 8, padding: '8px 2px', fontSize: 14, fontWeight: 800, textAlign: 'center' }}>{fmtNum(num(v[key]))}</div>;
   }
   return (
     <input
