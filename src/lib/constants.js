@@ -93,6 +93,7 @@ export const TABLES = {
   orders: 'orders',
   orderItems: 'orderItems',
   visits: 'visits',
+  projects: 'projects',
 };
 
 // A small set of icon glyphs offered for categories (kept simple — emoji,

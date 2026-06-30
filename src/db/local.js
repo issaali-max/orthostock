@@ -9,7 +9,7 @@
 import { TABLES } from '../lib/constants.js';
 
 const DB_NAME = 'orthostock';
-export const DB_VERSION = 6; // bump whenever TABLES gains a store, so onupgradeneeded recreates missing stores (v6: visits)
+export const DB_VERSION = 7; // bump whenever TABLES gains a store (v7: projects)
 const STORES = [...Object.values(TABLES), 'outbox', 'meta'];
 
 let _open;

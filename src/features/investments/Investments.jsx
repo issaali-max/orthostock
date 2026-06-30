@@ -354,10 +354,10 @@ export default function Investments() {
       <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
         <TabBtn active={tab === 'portfolio'} onClick={() => setTab('portfolio')}>📈 {t('portfolio')}</TabBtn>
         <TabBtn active={tab === 'cash'} onClick={() => setTab('cash')}>💵 {t('cashTab')}</TabBtn>
-        <TabBtn active={tab === 'debts'} onClick={() => setTab('debts')}>🤝 {t('extDebts')}</TabBtn>
+        <TabBtn active={tab === 'projects'} onClick={() => setTab('projects')}>🏗️ {t('projects')}</TabBtn>
       </div>
 
-      {tab === 'debts' ? <ExternalDebts app={app} /> : tab === 'portfolio' ? (
+      {tab === 'projects' ? <Projects app={app} /> : tab === 'portfolio' ? (
         stats.positions.length === 0 ? <EmptyState icon="📈" text={t('noSecurities')} /> : (
           <div style={{ display: 'grid', gap: 10 }}>
             {active.length > 0 && <div style={{ fontSize: 12, fontWeight: 800, color: C.textMid }}>{t('activeStocks')}</div>}
@@ -501,103 +501,92 @@ function TabBtn({ active, onClick, children }) {
 }
 
 
-// ── External debts: people who owe the owner money (outside the business) ──
-function ExternalDebts({ app }) {
-  const { t, data, displayCurrency, usdRate, createRow, updateRow, showToast } = app;
-  const [openP, setOpenP] = useState(null);   // person being viewed
-  const [addP, setAddP] = useState(null);     // new person form
-  const [txn, setTxn] = useState(null);       // new txn form {type, amount, date, note}
-  const cur = (v) => fmtCur(v, displayCurrency, usdRate);
-  const money = (v, ccy) => `${ccy === 'USD' ? 'USD' : 'AED'} ${num(v).toFixed(2)}`; // original currency, never converted
-  const people = (data[TABLES.externalDebts] || []).filter((p) => p.isActive !== false);
-  const balance = (p) => (p.txns || []).reduce((s, x) => s + (x.type === 'collect' ? -num(x.amount) : num(x.amount)), 0);
-  const total = people.reduce((s, p) => s + (p.currency === 'USD' ? balance(p) * num(usdRate) : balance(p)), 0); // AED base for the header
-  const saveTxn = async () => {
-    if (!num(txn.amount)) return;
-    const p = people.find((x) => x.id === openP);
-    await updateRow(TABLES.externalDebts, p.id, { txns: [...(p.txns || []), { type: txn.type, amount: num(txn.amount), date: txn.date || todayISO(), note: txn.note || '' }] });
-    setTxn(null); showToast(t('saved'), 'success');
+// ── Off-market investment projects (e.g. a villa-building venture): capital in, expected
+// return, timeframe — tracked simply, separate from the stock portfolio. ──
+function Projects({ app }) {
+  const { t, data, displayCurrency, usdRate, createRow, updateRow, deleteRow, showToast } = app;
+  const [edit, setEdit] = useState(null);
+  const cur = (v, c) => `${fmtNum(round2(num(v)))} ${c}`;
+
+  const projects = (data[TABLES.projects] || []).filter((p) => p.isActive !== false)
+    .sort((a, b) => (b.startDate || '').localeCompare(a.startDate || ''));
+
+  const aed = (amount, c) => (c === 'USD' ? num(amount) * (num(usdRate) || 3.6725) : num(amount));
+  const totalIn = projects.reduce((s, p) => s + aed(p.amount, p.currency), 0);
+  const totalReturn = projects.reduce((s, p) => s + aed(p.expectedReturn, p.currency), 0);
+
+  const blank = () => ({ name: '', amount: '', expectedReturn: '', currency: 'AED', startDate: todayISO(), durationMonths: '', status: 'active', note: '' });
+  const save = async () => {
+    const r = edit; if (!r.name.trim() || !(num(r.amount) > 0)) return;
+    const payload = {
+      name: r.name.trim(), amount: num(r.amount), expectedReturn: num(r.expectedReturn),
+      currency: r.currency === 'USD' ? 'USD' : 'AED', startDate: r.startDate || todayISO(),
+      durationMonths: num(r.durationMonths), status: r.status || 'active', note: r.note || '', isActive: true,
+    };
+    if (r.id) await updateRow(TABLES.projects, r.id, payload); else await createRow(TABLES.projects, payload);
+    setEdit(null); showToast(t('saved'), 'success');
   };
-  // Delete a single lend/collect entry (txns have no id, so remove by its index in the
-  // stored array — the list is shown reversed, callers pass the original index).
-  const delTxn = async (p, origIndex) => {
-    const next = (p.txns || []).filter((_, idx) => idx !== origIndex);
-    await updateRow(TABLES.externalDebts, p.id, { txns: next });
-    showToast(t('deleted'), 'success');
-  };
-  // Delete the whole person record (and all their entries).
-  const delPerson = async (p) => {
-    if (!window.confirm(t('confirmDelete'))) return;
-    await deleteRow(TABLES.externalDebts, p.id);
-    setOpenP(null); setTxn(null); showToast(t('deleted'), 'success');
-  };
-  const person = people.find((x) => x.id === openP);
+  const remove = async () => { if (!window.confirm(t('confirmDelete'))) return; await deleteRow(TABLES.projects, edit.id); setEdit(null); };
+
+  const statusTone = { active: 'info', completed: 'success', onhold: 'warning' };
+  const fmtRoi = (p) => { const a = num(p.amount); return a > 0 ? Math.round((num(p.expectedReturn) / a) * 100) : 0; };
+
   return (
     <div>
-      <div style={{ background: C.primary, color: '#fff', borderRadius: 14, padding: 14, textAlign: 'center', marginBottom: 12 }}>
-        <div style={{ fontSize: 12, opacity: .85 }}>{t('extDebtsTotal')}</div>
-        <div style={{ fontSize: 24, fontWeight: 800 }}>{cur(total)}</div>
-        <div style={{ fontSize: 11, opacity: .8 }}>{people.length} {t('persons')}</div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+        <StatCard label={`${t('invested')} (${t('projects')})`} value={fmtCur(totalIn, displayCurrency, usdRate)} color={C.primary} />
+        <StatCard label={t('expectedReturn')} value={fmtCur(totalReturn, displayCurrency, usdRate)} color={C.success} />
       </div>
-      <Btn size="sm" onClick={() => setAddP({ personName: '', phone: '', notes: '', currency: 'AED' })}>＋ {t('addPerson')}</Btn>
-      <div style={{ display: 'grid', gap: 8, marginTop: 10 }}>
-        {people.length === 0 && <EmptyState icon="🤝" text={t('noData')} />}
-        {people.map((p) => (
-          <div key={p.id} onClick={() => setOpenP(p.id)} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: `1px solid ${C.border}`, borderRadius: 12, padding: '10px 14px', cursor: 'pointer' }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 800, color: C.text, fontSize: 14 }}>{p.personName}</div>
-              {p.notes && <div style={{ fontSize: 11, color: C.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.notes}</div>}
-            </div>
-            <div style={{ fontWeight: 800, color: balance(p) > 0 ? C.danger : C.success }}>{money(balance(p), p.currency)}</div>
-          </div>
-        ))}
-      </div>
+      <Btn onClick={() => setEdit(blank())} style={{ width: '100%', marginBottom: 12 }}>＋ {t('addProject')}</Btn>
 
-      <Modal open={!!addP} onClose={() => setAddP(null)} title={`🤝 ${t('addPerson')}`}
-        footer={<Btn onClick={async () => { if (!addP.personName.trim()) return; await createRow(TABLES.externalDebts, { ...addP, txns: [], isActive: true }); setAddP(null); showToast(t('saved'), 'success'); }}>{t('save')}</Btn>}>
-        {addP && (<div>
-          <Field label={t('name')} required><Input value={addP.personName} onChange={(v) => setAddP((r) => ({ ...r, personName: v }))} /></Field>
-          <Field label={t('currency')} required>
-            <Select value={addP.currency === 'USD' ? 'USD' : 'AED'} onChange={(v) => setAddP((r) => ({ ...r, currency: v }))}
-              options={[{ value: 'AED', label: 'AED' }, { value: 'USD', label: 'USD' }]} />
-          </Field>
-          <Field label={t('phone')}><Input value={addP.phone} onChange={(v) => setAddP((r) => ({ ...r, phone: v }))} /></Field>
-          <Field label={t('notes')}><Input value={addP.notes} onChange={(v) => setAddP((r) => ({ ...r, notes: v }))} /></Field>
-        </div>)}
-      </Modal>
-
-      <Modal open={!!person} onClose={() => { setOpenP(null); setTxn(null); }} title={person ? `🤝 ${person.personName}` : ''}>
-        {person && (<div style={{ display: 'grid', gap: 10 }}>
-          <div style={{ background: C.surfaceAlt, borderRadius: 10, padding: 10, textAlign: 'center' }}>
-            <div style={{ fontSize: 11, color: C.textMuted }}>{t('remaining')}</div>
-            <div style={{ fontSize: 20, fontWeight: 800, color: balance(person) > 0 ? C.danger : C.success }}>{money(balance(person), person.currency)}</div>
-            {person.notes && <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>{person.notes}</div>}
-          </div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <Btn size="sm" onClick={() => setTxn({ type: 'lend', amount: '', date: todayISO(), note: '' })}>＋ {t('lend')}</Btn>
-            <Btn size="sm" variant="light" onClick={() => setTxn({ type: 'collect', amount: '', date: todayISO(), note: '' })}>💰 {t('collect')}</Btn>
-            <Btn size="sm" variant="outline" onClick={() => delPerson(person)} style={{ color: C.danger, marginInlineStart: 'auto' }}>🗑️ {t('delete')}</Btn>
-          </div>
-          {txn && (<div style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: 10 }}>
-            <Field label={t('amount')} required><Input type="number" value={txn.amount} onChange={(v) => setTxn((x) => ({ ...x, amount: v }))} /></Field>
-            <Field label={t('date')}><Input type="date" value={txn.date} onChange={(v) => setTxn((x) => ({ ...x, date: v }))} /></Field>
-            <Field label={t('notes')}><Input value={txn.note} onChange={(v) => setTxn((x) => ({ ...x, note: v }))} /></Field>
-            <Btn size="sm" onClick={saveTxn}>{t('save')}</Btn>
-          </div>)}
-          <div style={{ display: 'grid', gap: 5 }}>
-            {[...(person.txns || [])].map((x, origIdx) => ({ x, origIdx })).reverse().map(({ x, origIdx }) => (
-              <div key={origIdx} style={{ display: 'flex', alignItems: 'center', gap: 8, background: C.surfaceAlt, borderRadius: 9, padding: '7px 10px' }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: C.text }}>{x.type === 'collect' ? `💰 ${t('collect')}` : `🤝 ${t('lend')}`}</div>
-                  <div style={{ fontSize: 10, color: C.textMuted }}>{x.date}{x.note ? ` · ${x.note}` : ''}</div>
+      {projects.length === 0 ? <EmptyState icon="🏗️" text={t('noData')} /> : (
+        <div style={{ display: 'grid', gap: 10 }}>
+          {projects.map((p) => {
+            const code = p.currency === 'USD' ? 'USD' : 'AED';
+            return (
+              <Card key={p.id} onClick={() => setEdit({ ...p, amount: String(p.amount ?? ''), expectedReturn: String(p.expectedReturn ?? ''), durationMonths: String(p.durationMonths ?? '') })} style={{ cursor: 'pointer' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <span style={{ fontSize: 18 }}>🏗️</span>
+                  <div style={{ flex: 1, fontWeight: 800, color: C.text, fontSize: 14 }}>{p.name}</div>
+                  <Badge tone={statusTone[p.status] || 'info'}>{t(p.status || 'active')}</Badge>
                 </div>
-                <div style={{ fontWeight: 800, color: x.type === 'collect' ? C.success : C.danger }}>{x.type === 'collect' ? '-' : '+'}{money(num(x.amount), person.currency)}</div>
-                <button onClick={() => delTxn(person, origIdx)} title={t('delete')}
-                  style={{ border: 'none', background: 'transparent', color: C.textMuted, cursor: 'pointer', fontSize: 15, padding: '2px 4px', lineHeight: 1 }}>🗑️</button>
-              </div>
-            ))}
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <Mini label={t('invested')} value={cur(p.amount, code)} />
+                  <Mini label={t('expectedReturn')} value={cur(p.expectedReturn, code)} accent={C.success} />
+                  <Mini label="ROI" value={`${fmtRoi(p)}%`} accent={C.primary} />
+                </div>
+                <div style={{ fontSize: 11, color: C.textMuted, marginTop: 8 }}>
+                  📅 {fmtDate(p.startDate)}{num(p.durationMonths) > 0 ? ` · ${t('duration')}: ${fmtNum(p.durationMonths)} ${t('months')}` : ''}
+                  {p.note ? ` · ${p.note}` : ''}
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      <Modal open={!!edit} onClose={() => setEdit(null)} title={edit?.id ? t('edit') : `🏗️ ${t('addProject')}`}
+        footer={<><Btn variant="ghost" onClick={() => setEdit(null)}>{t('cancel')}</Btn><Btn onClick={save}>{t('save')}</Btn></>}>
+        {edit && (
+          <div style={{ display: 'grid', gap: 10 }}>
+            <Field label={t('projectName')} required><Input value={edit.name} onChange={(v) => setEdit((r) => ({ ...r, name: v }))} placeholder={t('projectExample')} /></Field>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ flex: 2 }}><Field label={t('invested')} required><Input type="number" value={edit.amount} onChange={(v) => setEdit((r) => ({ ...r, amount: v }))} /></Field></div>
+              <div style={{ flex: 1 }}><Field label={t('currency')}><Select value={edit.currency} onChange={(v) => setEdit((r) => ({ ...r, currency: v }))} options={[{ value: 'AED', label: 'AED' }, { value: 'USD', label: 'USD' }]} /></Field></div>
+            </div>
+            <Field label={t('expectedReturn')}><Input type="number" value={edit.expectedReturn} onChange={(v) => setEdit((r) => ({ ...r, expectedReturn: v }))} /></Field>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ flex: 1 }}><Field label={t('startDate')}><Input type="date" value={edit.startDate} onChange={(v) => setEdit((r) => ({ ...r, startDate: v }))} /></Field></div>
+              <div style={{ flex: 1 }}><Field label={`${t('duration')} (${t('months')})`}><Input type="number" value={edit.durationMonths} onChange={(v) => setEdit((r) => ({ ...r, durationMonths: v }))} /></Field></div>
+            </div>
+            <Field label={t('status')}>
+              <Select value={edit.status} onChange={(v) => setEdit((r) => ({ ...r, status: v }))}
+                options={[{ value: 'active', label: t('active') }, { value: 'completed', label: t('completed') }, { value: 'onhold', label: t('onhold') }]} />
+            </Field>
+            <Field label={t('notes')}><Input value={edit.note} onChange={(v) => setEdit((r) => ({ ...r, note: v }))} /></Field>
+            {edit.id && <Btn variant="outline" onClick={remove} style={{ color: C.danger }}>{t('delete')}</Btn>}
           </div>
-        </div>)}
+        )}
       </Modal>
     </div>
   );
