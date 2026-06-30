@@ -17,6 +17,7 @@ const Investments = lazy(() => import('../features/investments/Investments.jsx')
 const Settings = lazy(() => import('../features/settings/Settings.jsx'));
 const AuditLog = lazy(() => import('../features/audit/AuditLog.jsx'));
 const CashFlow = lazy(() => import('../features/cashflow/CashFlow.jsx'));
+const Debts = lazy(() => import('../features/debts/Debts.jsx'));
 
 function useIsDesktop() {
   const [d, setD] = useState(typeof window !== 'undefined' ? window.innerWidth > 1024 : false);
@@ -34,6 +35,7 @@ const NAV = [
   { key: 'catalogue', labelKey: 'catalogue', icon: '🗂️', Comp: Catalogue, primary: true },
   { key: 'invoices', labelKey: 'invoices', icon: '🧾', Comp: Invoices, primary: true },
   { key: 'customers', labelKey: 'customers', icon: '🧑‍⚕️', Comp: Customers, primary: true },
+  { key: 'debts', labelKey: 'debts', icon: '🤝', Comp: Debts, primary: false },
   { key: 'orders', labelKey: 'orders', icon: '📋', Comp: Orders, primary: false },
   { key: 'cashflow', labelKey: 'cashFlow', icon: '💰', Comp: CashFlow, primary: false },
   { key: 'purchases', labelKey: 'purchases', icon: '📥', Comp: Purchases, primary: false },
