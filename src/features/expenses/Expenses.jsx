@@ -15,7 +15,16 @@ export default function Expenses() {
   const [filterGroup, setFilterGroup] = useState('');
   const [typeFilter, setTypeFilter] = useState('all'); // all | business | personal | home
   const [editExpense, setEditExpense] = useState(null);
+  const [formType, setFormType] = useState(null); // which type the add form is scoped to
   const [editGroup, setEditGroup] = useState(null);
+  // Open the add form scoped to one type (work / personal / home). Preselect the group if the
+  // type has exactly one — so a tap usually leaves just the amount to type.
+  const openAdd = (type) => {
+    const gs = (data[TABLES.expenseGroups] || []).filter((g) => g.isActive !== false && (g.type || 'business') === type);
+    setFormType(type);
+    setEditExpense({ ...blankExpense(), groupId: gs.length === 1 ? gs[0].id : '' });
+  };
+  const closeExpense = () => { setEditExpense(null); setFormType(null); };
 
   const groups = useMemo(() => (data[TABLES.expenseGroups] || []).filter((g) => g.isActive !== false), [data]);
   const groupById = (id) => groups.find((g) => g.id === id);
@@ -81,7 +90,7 @@ export default function Expenses() {
     if (!(num(r.amount) > 0) || !r.groupId) return;
     const payload = { date: r.date || todayISO(), amount: num(r.amount), groupId: r.groupId, note: r.note || '', currency: r.currency === 'USD' ? 'USD' : 'AED' };
     if (r.id) await updateRow(TABLES.expenses, r.id, payload); else await createRow(TABLES.expenses, payload);
-    setEditExpense(null);
+    setEditExpense(null); setFormType(null);
   };
 
   const saveGroup = async () => {
@@ -95,10 +104,25 @@ export default function Expenses() {
   return (
     <div>
       <PageHeader title={t('expenses')} action={
-        tab === 'list'
-          ? <Btn onClick={() => setEditExpense(blankExpense())}>＋ {t('addExpense')}</Btn>
-          : <Btn onClick={() => setEditGroup(blankGroup())}>＋ {t('addGroup')}</Btn>
+        tab === 'groups'
+          ? <Btn onClick={() => setEditGroup(blankGroup())}>＋ {t('addGroup')}</Btn>
+          : null
       } />
+
+      {tab === 'list' && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+          {[['business', C.primary, '🏢'], ['personal', C.warning, '👤'], ['home', C.success, '🏠']].map(([type, color, icon]) => (
+            <button key={type} onClick={() => openAdd(type)} style={{
+              flex: 1, border: 'none', background: color, color: '#fff', borderRadius: 12,
+              padding: '11px 6px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer',
+              boxShadow: `0 2px 8px ${color}55`, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+            }}>
+              <span style={{ fontSize: 17 }}>{icon}</span>
+              <span>＋ {t(type)}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
@@ -200,7 +224,7 @@ export default function Expenses() {
                 const g = groupById(e.groupId);
                 return (
                   <Card key={e.id} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', borderInlineStart: `3px solid ${g?.color || C.border}` }}
-                    onClick={() => setEditExpense({ ...e, amount: String(e.amount) })}>
+                    onClick={() => { setFormType(typeOfGroup(e.groupId)); setEditExpense({ ...e, amount: String(e.amount) }); }}>
                     <div style={{ fontSize: 18 }}>{g?.icon || '🧾'}</div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontWeight: 700, color: C.text, fontSize: 13 }}>{groupName(g)} {g && <Badge tone={g.type === 'personal' ? 'warning' : g.type === 'home' ? 'success' : 'info'}>{t(g.type)}</Badge>}</div>
@@ -230,10 +254,17 @@ export default function Expenses() {
       )}
 
       {/* Expense modal */}
-      <Modal open={!!editExpense} onClose={() => setEditExpense(null)} title={editExpense?.id ? t('edit') : t('addExpense')}
-        footer={<><Btn variant="ghost" onClick={() => setEditExpense(null)}>{t('cancel')}</Btn><Btn onClick={saveExpense}>{t('save')}</Btn></>}>
+      <Modal open={!!editExpense} onClose={closeExpense}
+        title={editExpense?.id ? t('edit') : `＋ ${t(formType || 'business')}`}
+        footer={<><Btn variant="ghost" onClick={closeExpense}>{t('cancel')}</Btn><Btn onClick={saveExpense}>{t('save')}</Btn></>}>
         {editExpense && (
           <div>
+            {(() => {
+              const ftype = formType || typeOfGroup(editExpense.groupId);
+              const tcol = ftype === 'personal' ? C.warning : ftype === 'home' ? C.success : C.primary;
+              const ticon = ftype === 'personal' ? '👤' : ftype === 'home' ? '🏠' : '🏢';
+              return <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: tcol + '18', color: tcol, borderRadius: 999, padding: '4px 12px', fontSize: 12, fontWeight: 800, marginBottom: 10 }}>{ticon} {t(ftype)}</div>;
+            })()}
             <div style={{ display: 'flex', gap: 8 }}>
               <div style={{ flex: 2 }}><Field label={t('amount')} required><Input type="number" value={editExpense.amount} onChange={(v) => setEditExpense((r) => ({ ...r, amount: v }))} /></Field></div>
               <div style={{ flex: 1 }}><Field label={t('currency')} required>
@@ -242,12 +273,16 @@ export default function Expenses() {
               </Field></div>
             </div>
             <Field label={t('expenseGroup')} required>
-              <Select value={editExpense.groupId} onChange={(v) => setEditExpense((r) => ({ ...r, groupId: v }))} placeholder="—"
-                options={groups.map((g) => ({ value: g.id, label: `${g.icon} ${groupName(g)} (${t(g.type)})` }))} />
+              {(() => {
+                const ftype = formType || typeOfGroup(editExpense.groupId);
+                const opts = groups.filter((g) => (g.type || 'business') === ftype);
+                return <Select value={editExpense.groupId} onChange={(v) => setEditExpense((r) => ({ ...r, groupId: v }))} placeholder={opts.length ? '—' : t('noData')}
+                  options={opts.map((g) => ({ value: g.id, label: `${g.icon} ${groupName(g)}` }))} />;
+              })()}
             </Field>
             <Field label={t('date')}><Input type="date" value={editExpense.date} onChange={(v) => setEditExpense((r) => ({ ...r, date: v }))} /></Field>
             <Field label={t('notes')}><Textarea value={editExpense.note} onChange={(v) => setEditExpense((r) => ({ ...r, note: v }))} rows={2} /></Field>
-            {editExpense.id && <Btn variant="outline" onClick={() => { if (window.confirm(t('confirmDelete'))) { deleteRow(TABLES.expenses, editExpense.id); setEditExpense(null); } }} style={{ color: C.danger }}>{t('delete')}</Btn>}
+            {editExpense.id && <Btn variant="outline" onClick={() => { if (window.confirm(t('confirmDelete'))) { deleteRow(TABLES.expenses, editExpense.id); closeExpense(); } }} style={{ color: C.danger }}>{t('delete')}</Btn>}
           </div>
         )}
       </Modal>
