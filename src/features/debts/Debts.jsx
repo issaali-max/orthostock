@@ -14,7 +14,7 @@ const blankPerson = () => ({ personName: '', currency: 'AED', dir: 'owesMe', amo
 export default function Debts() {
   const app = useApp();
   const { t, data, displayCurrency, usdRate, createRow, updateRow, showToast } = app;
-  const [tab, setTab] = useState('doctors');
+  const [side, setSide] = useState('me'); // me = owed to me, owe = I owe
   const [addP, setAddP] = useState(null);
   const [person, setPerson] = useState(null);   // open personal-debt detail
   const [doctor, setDoctor] = useState(null);   // open doctor drill
@@ -79,36 +79,24 @@ export default function Debts() {
     setPerson(null); showToast(t('deleted') || t('saved'), 'success');
   };
 
-  const TabBtn = ({ id, label }) => (
-    <button onClick={() => setTab(id)} style={{ flex: 1, padding: '9px 6px', borderRadius: 9, border: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: 800, background: tab === id ? '#fff' : 'transparent', color: tab === id ? C.primary : C.textMid, boxShadow: tab === id ? '0 1px 4px rgba(0,0,0,.12)' : 'none' }}>{label}</button>
-  );
-
   return (
     <div>
-      <PageHeader title={t('debts')} action={tab === 'personal' ? <Btn onClick={() => setAddP(blankPerson())}>＋ {t('addPerson')}</Btn> : null} />
+      <PageHeader title={t('debts')} action={<Btn onClick={() => setAddP({ ...blankPerson(), dir: side === 'owe' ? 'iOwe' : 'owesMe' })}>＋ {t('addPerson')}</Btn>} />
 
-      {/* Overview: receivable vs payable */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-        <SummaryCard color={C.success} icon="🟢" label={t('receivable')} value={fmtCur(receivable, displayCurrency, usdRate)} sub={`${t('customers')} ${fmtCur(docTotal, displayCurrency, usdRate)} · ${t('personalDebts')} ${fmtCur(peopleOweTotal, displayCurrency, usdRate)}`} />
-        <SummaryCard color={C.danger} icon="🔴" label={t('payable')} value={fmtCur(payable, displayCurrency, usdRate)} sub={`${t('suppliers')} ${fmtCur(supTotal, displayCurrency, usdRate)} · ${t('personalDebts')} ${fmtCur(peopleIOweTotal, displayCurrency, usdRate)}`} />
+      {/* Two big, clear side buttons: what's owed to me vs what I owe */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+        <SideBtn active={side === 'me'} color={C.success} icon="🟢" label={t('debtsToMe') || 'ديون لي'} value={fmtCur(receivable, displayCurrency, usdRate)} onClick={() => setSide('me')} />
+        <SideBtn active={side === 'owe'} color={C.danger} icon="🔴" label={t('debtsIOwe') || 'ديون عليّ'} value={fmtCur(payable, displayCurrency, usdRate)} onClick={() => setSide('owe')} />
       </div>
-      <Card style={{ marginBottom: 12, textAlign: 'center', background: net >= 0 ? C.success + '10' : C.danger + '10', border: `1px solid ${net >= 0 ? C.success : C.danger}40` }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: C.textMid }}>{t('netPosition')}: </span>
-        <span style={{ fontSize: 18, fontWeight: 900, color: net >= 0 ? C.success : C.danger }}>{net >= 0 ? '+' : ''}{fmtCur(net, displayCurrency, usdRate)}</span>
-      </Card>
-
-      {/* Tabs */}
-      <div style={{ display: 'flex', gap: 6, marginBottom: 12, background: C.surfaceAlt, padding: 4, borderRadius: 12 }}>
-        <TabBtn id="doctors" label={`🧑‍⚕️ ${t('doctorsDebts')} (${doctorDebts.length})`} />
-        <TabBtn id="personal" label={`🤝 ${t('personalDebts')} (${people.length})`} />
-        <TabBtn id="suppliers" label={`🚚 ${t('suppliers')} (${supDebts.length})`} />
+      <div style={{ textAlign: 'center', fontSize: 11.5, color: C.textMid, marginBottom: 12 }}>
+        {t('netPosition')}: <b style={{ color: net >= 0 ? C.success : C.danger }}>{net >= 0 ? '+' : ''}{fmtCur(net, displayCurrency, usdRate)}</b>
       </div>
 
-      {/* ── Doctors ── */}
-      {tab === 'doctors' && (
-        doctorDebts.length === 0 ? <EmptyState icon="✅" text={t('noDebts')} /> : (
-          <div style={{ display: 'grid', gap: 8 }}>
-            {doctorDebts.map(({ c, s }) => (
+      {/* ════ ديون لي ════ */}
+      {side === 'me' && (
+        <div style={{ display: 'grid', gap: 14 }}>
+          <Section title={`🧑‍⚕️ ${t('doctorsDebts')}`} count={doctorDebts.length} total={fmtCur(docTotal, displayCurrency, usdRate)} color={C.success}>
+            {doctorDebts.length === 0 ? <EmptyHint text={t('noDebts')} /> : doctorDebts.map(({ c, s }) => (
               <Card key={c.id} onClick={() => setDoctor({ c, s })} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
                 <span style={{ fontSize: 18 }}>🧑‍⚕️</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -118,29 +106,24 @@ export default function Debts() {
                     {s.openingOutstanding > 0 && `${s.invoiceDebt > 0 ? ' · ' : ''}${t('openingDebt') || 'دين قديم'}: ${fmtCur(s.openingOutstanding, displayCurrency, usdRate)}`}
                   </div>
                 </div>
-                <div style={{ fontWeight: 900, color: C.danger, fontSize: 15 }}>{fmtCur(s.debt, displayCurrency, usdRate)}</div>
+                <div style={{ fontWeight: 900, color: C.success, fontSize: 15 }}>{fmtCur(s.debt, displayCurrency, usdRate)}</div>
                 <span style={{ color: C.textMuted }}>›</span>
               </Card>
             ))}
-          </div>
-        )
+          </Section>
+          <Section title={`🤝 ${t('personalDebts')}`} count={peopleOwe.length} total={fmtCur(peopleOweTotal, displayCurrency, usdRate)} color={C.success}>
+            {peopleOwe.length === 0 ? <EmptyHint text={t('noData')} /> : peopleOwe.map((x) => (
+              <PersonRow key={x.p.id} p={x.p} color={C.success} amount={fmtCur(aed(x.net, x.p.currency), displayCurrency, usdRate)} onTap={() => setPerson(x.p)} />
+            ))}
+          </Section>
+        </div>
       )}
 
-      {/* ── Personal ── */}
-      {tab === 'personal' && (
-        people.length === 0 ? <EmptyState icon="🤝" text={t('noData')} /> : (
-          <div style={{ display: 'grid', gap: 12 }}>
-            <PersonGroup title={`🟢 ${t('owedToMe')}`} color={C.success} rows={peopleOwe} onTap={setPerson} fmt={(x) => fmtCur(aed(x.net, x.p.currency), displayCurrency, usdRate)} />
-            <PersonGroup title={`🔴 ${t('iOwe')}`} color={C.danger} rows={peopleIOwe} onTap={setPerson} fmt={(x) => fmtCur(aed(-x.net, x.p.currency), displayCurrency, usdRate)} />
-          </div>
-        )
-      )}
-
-      {/* ── Suppliers ── */}
-      {tab === 'suppliers' && (
-        supDebts.length === 0 ? <EmptyState icon="✅" text={t('noDebts')} /> : (
-          <div style={{ display: 'grid', gap: 8 }}>
-            {supDebts.map((r) => (
+      {/* ════ ديون عليّ ════ */}
+      {side === 'owe' && (
+        <div style={{ display: 'grid', gap: 14 }}>
+          <Section title={`🚚 ${t('suppliers')}`} count={supDebts.length} total={fmtCur(supTotal, displayCurrency, usdRate)} color={C.danger}>
+            {supDebts.length === 0 ? <EmptyHint text={t('noDebts')} /> : supDebts.map((r) => (
               <Card key={r.supplier.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <span style={{ fontSize: 18 }}>🚚</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -150,8 +133,13 @@ export default function Debts() {
                 <div style={{ fontWeight: 900, color: C.danger, fontSize: 15 }}>{fmtCur(r.balance, displayCurrency, usdRate)}</div>
               </Card>
             ))}
-          </div>
-        )
+          </Section>
+          <Section title={`🤝 ${t('personalDebts')}`} count={peopleIOwe.length} total={fmtCur(peopleIOweTotal, displayCurrency, usdRate)} color={C.danger}>
+            {peopleIOwe.length === 0 ? <EmptyHint text={t('noData')} /> : peopleIOwe.map((x) => (
+              <PersonRow key={x.p.id} p={x.p} color={C.danger} amount={fmtCur(aed(-x.net, x.p.currency), displayCurrency, usdRate)} onTap={() => setPerson(x.p)} />
+            ))}
+          </Section>
+        </div>
       )}
 
       {/* Add person */}
@@ -268,32 +256,44 @@ export default function Debts() {
   );
 }
 
-function SummaryCard({ color, icon, label, value, sub }) {
+function SideBtn({ active, color, icon, label, value, onClick }) {
   return (
-    <div style={{ flex: 1, background: '#fff', border: `1px solid ${color}40`, borderRadius: 14, padding: 12 }}>
-      <div style={{ fontSize: 12, fontWeight: 700, color: C.textMid }}>{icon} {label}</div>
-      <div style={{ fontSize: 19, fontWeight: 900, color, letterSpacing: '-.5px', margin: '2px 0' }}>{value}</div>
-      <div style={{ fontSize: 9.5, color: C.textMuted, lineHeight: 1.3 }}>{sub}</div>
+    <button onClick={onClick} style={{
+      flex: 1, textAlign: 'start', cursor: 'pointer', borderRadius: 16, padding: '14px 14px',
+      border: `2px solid ${active ? color : C.border}`,
+      background: active ? color : '#fff', color: active ? '#fff' : C.text,
+      boxShadow: active ? `0 4px 14px ${color}55` : 'none', transition: 'all .15s',
+    }}>
+      <div style={{ fontSize: 12.5, fontWeight: 800, opacity: active ? 0.95 : 0.7 }}>{icon} {label}</div>
+      <div style={{ fontSize: 20, fontWeight: 900, letterSpacing: '-.5px', marginTop: 2, color: active ? '#fff' : color }}>{value}</div>
+    </button>
+  );
+}
+
+function Section({ title, count, total, color, children }) {
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 7 }}>
+        <span style={{ fontSize: 13, fontWeight: 900, color: C.text }}>{title} <span style={{ color: C.textMuted, fontWeight: 600 }}>({count})</span></span>
+        <span style={{ fontSize: 13, fontWeight: 800, color }}>{total}</span>
+      </div>
+      <div style={{ display: 'grid', gap: 7 }}>{children}</div>
     </div>
   );
 }
 
-function PersonGroup({ title, color, rows, onTap, fmt }) {
-  if (rows.length === 0) return null;
+function EmptyHint({ text }) {
+  return <div style={{ fontSize: 12, color: C.textMuted, textAlign: 'center', padding: '12px', background: C.surfaceAlt, borderRadius: 10 }}>{text}</div>;
+}
+
+function PersonRow({ p, color, amount, onTap }) {
   return (
-    <div>
-      <div style={{ fontSize: 12.5, fontWeight: 900, color, marginBottom: 6 }}>{title} ({rows.length})</div>
-      <div style={{ display: 'grid', gap: 6 }}>
-        {rows.map((x) => (
-          <Card key={x.p.id} onClick={() => onTap(x.p)} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
-            <span style={{ fontSize: 17 }}>🧑</span>
-            <div style={{ flex: 1, minWidth: 0, fontWeight: 800, color: C.text, fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{x.p.personName}</div>
-            <div style={{ fontWeight: 900, color, fontSize: 15 }}>{fmt(x)}</div>
-            <span style={{ color: C.textMuted }}>›</span>
-          </Card>
-        ))}
-      </div>
-    </div>
+    <Card onClick={onTap} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+      <span style={{ fontSize: 17 }}>🧑</span>
+      <div style={{ flex: 1, minWidth: 0, fontWeight: 800, color: C.text, fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.personName}</div>
+      <div style={{ fontWeight: 900, color, fontSize: 15 }}>{amount}</div>
+      <span style={{ color: C.textMuted }}>›</span>
+    </Card>
   );
 }
 
