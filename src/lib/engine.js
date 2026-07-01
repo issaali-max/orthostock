@@ -1118,9 +1118,10 @@ export function supplierDebt(app) {
   }
   return suppliers.map((s) => {
     const e = byId[s.id] || { purchased: 0, paidAtPurchase: 0, paidLater: 0 };
+    const opening = round2(num(s.openingDebt)); // a manual/old debt not tied to any purchase
     const paid = round2(e.paidAtPurchase + e.paidLater);
-    return { supplier: s, purchased: round2(e.purchased), paid, balance: round2(e.purchased - paid) };
-  }).filter((r) => r.purchased > 0 || r.paid > 0).sort((a, b) => b.balance - a.balance);
+    return { supplier: s, purchased: round2(e.purchased), opening, paid, balance: round2(e.purchased + opening - paid) };
+  }).filter((r) => r.purchased > 0 || r.paid > 0 || r.opening > 0).sort((a, b) => b.balance - a.balance);
 }
 
 // Generic duplicate document-number resolver (works for invoices and purchases).

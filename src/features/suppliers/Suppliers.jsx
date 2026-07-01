@@ -6,7 +6,7 @@ import { fmtDate } from '../../lib/dates.js';
 import { supplierStats, supplierDebt, recordSupplierPayment, freeRestocks } from '../../lib/engine.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, SearchBar, Select, Textarea } from '../../ui/components.jsx';
 
-const blank = () => ({ name: '', phone: '', whatsapp: '', city: '', currency: 'AED', notes: '', isActive: true });
+const blank = () => ({ name: '', phone: '', whatsapp: '', city: '', currency: 'AED', openingDebt: '', notes: '', isActive: true });
 
 export default function Suppliers() {
   const app = useApp();
@@ -31,7 +31,7 @@ export default function Suppliers() {
   const save = async () => {
     const r = editing;
     if (!r.name?.trim()) return;
-    const payload = { name: r.name.trim(), phone: r.phone || '', whatsapp: r.whatsapp || '', city: r.city || '', currency: r.currency || 'AED', notes: r.notes || '', isActive: true };
+    const payload = { name: r.name.trim(), phone: r.phone || '', whatsapp: r.whatsapp || '', city: r.city || '', currency: r.currency || 'AED', openingDebt: num(r.openingDebt), notes: r.notes || '', isActive: true };
     if (r.id) await updateRow(TABLES.suppliers, r.id, payload); else await createRow(TABLES.suppliers, payload);
     setEditing(null);
   };
@@ -83,6 +83,9 @@ export default function Suppliers() {
             </div>
             <Field label={t('emirate')}><Select value={editing.city} onChange={(v) => setEditing((r) => ({ ...r, city: v }))} placeholder="—" options={emirateOptions(lang)} /></Field>
             <Field label={t('currency')}><Select value={editing.currency} onChange={(v) => setEditing((r) => ({ ...r, currency: v }))} options={['AED', 'USD']} /></Field>
+            <Field label={t('supplierOpeningDebt') || 'دين قديم/يدوي عليّ'}>
+              <Input type="number" value={editing.openingDebt} onChange={(v) => setEditing((r) => ({ ...r, openingDebt: v }))} placeholder="0" />
+            </Field>
             <Field label={t('notes')}><Textarea value={editing.notes} onChange={(v) => setEditing((r) => ({ ...r, notes: v }))} rows={2} /></Field>
             {editing.id && <Btn variant="outline" onClick={() => { if (window.confirm(t('deactivate') + '?')) { deleteRow(TABLES.suppliers, editing.id); setEditing(null); } }} style={{ color: C.danger }}>{t('delete')}</Btn>}
           </div>
