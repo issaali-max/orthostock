@@ -11,7 +11,8 @@ import { money } from '../../lib/whatsapp.js';
 // cost. Shareable as a plain-text shopping list to send to a supplier.
 export default function RestockList({ onClose }) {
   const app = useApp();
-  const { t, lang, data, settings, showToast } = app;
+  const { t, lang, data, settings, showToast, updateRow } = app;
+  const addToList = async (r) => { await updateRow(TABLES.variants, r.v.id, { onList: true, listQty: r.suggest != null ? r.suggest : 1 }); showToast(`🛒 ${r.v.nameEn || r.v.sku}`, 'success'); };
   const cur = settings?.baseCurrency || 'AED';
 
   const { rows, groups, totalEst } = useMemo(() => {
@@ -90,9 +91,9 @@ export default function RestockList({ onClose }) {
                 <span style={{ fontSize: 11, color: C.textMuted }}>{money(g.est, cur)}</span>
               </div>
               {g.items.map((r) => (
-                <div key={r.v.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: C.surfaceAlt, borderRadius: 12, padding: '9px 11px' }}>
+                <div key={r.v.id} onClick={() => addToList(r)} style={{ display: 'flex', alignItems: 'center', gap: 10, background: r.v.onList ? C.success + '14' : C.surfaceAlt, borderRadius: 12, padding: '9px 11px', cursor: 'pointer' }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, color: C.text, fontSize: 13 }}>{variantLabel(r.v)}</div>
+                    <div style={{ fontWeight: 700, color: C.text, fontSize: 13 }}>{r.v.onList ? '🛒 ' : ''}{variantLabel(r.v)}</div>
                     <div style={{ fontSize: 11, color: C.textMuted }}>
                       {r.v.sku ? `${r.v.sku} · ` : ''}{t('stock')}: {fmtNum(r.stock)}{r.min > 0 ? ` / ${fmtNum(r.min)}` : ''}
                     </div>
@@ -100,7 +101,7 @@ export default function RestockList({ onClose }) {
                   {r.out ? <Badge tone="danger">{t('outOfStock')}</Badge> : <Badge tone="warning">{t('lowStock')}</Badge>}
                   <div style={{ textAlign: 'center', minWidth: 56 }}>
                     <div style={{ fontSize: 16, fontWeight: 800, color: C.primary }}>{r.suggest != null ? fmtNum(r.suggest) : '—'}</div>
-                    <div style={{ fontSize: 9, color: C.textMuted }}>{t('orderQty')}</div>
+                    <div style={{ fontSize: 9, color: C.textMuted }}>{r.v.onList ? '✓ ' : ''}{t('orderQty')}</div>
                   </div>
                 </div>
               ))}

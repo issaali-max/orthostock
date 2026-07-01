@@ -3,7 +3,7 @@ import { useApp } from '../../app/AppProvider.jsx';
 import { C, RADIUS, SHADOW, TABLES } from '../../lib/constants.js';
 import { StoredImage } from '../../ui/StoredImage.jsx';
 import { fmtCur, fmtNum, num } from '../../lib/money.js';
-import { Badge, Btn, EmptyState, Modal, PageHeader, SearchBar } from '../../ui/components.jsx';
+import { Badge, Btn, EmptyState, Field, Input, Modal, PageHeader, SearchBar } from '../../ui/components.jsx';
 import { BandGrid } from '../../ui/BandGrid.jsx';
 import { isGridWorthy } from '../../lib/bandGrid.js';
 import RestockList from './RestockList.jsx';
@@ -37,6 +37,17 @@ export default function Catalogue() {
   const [editMode, setEditMode] = useState(false);
   const [edit, setEdit] = useState(null);
   const [genGroup, setGenGroup] = useState(null);
+  const [buyAdd, setBuyAdd] = useState(null); // { v, qty } — add to purchase list from stock
+  const openBuyAdd = (v) => {
+    const stock = num(v.stockQty), min = num(v.stockMin);
+    const suggest = min > 0 ? Math.max(1, Math.ceil(min - stock)) : 1;
+    setBuyAdd({ v, qty: String(v.onList && num(v.listQty) > 0 ? num(v.listQty) : suggest) });
+  };
+  const confirmBuyAdd = async () => {
+    await app.updateRow(TABLES.variants, buyAdd.v.id, { onList: true, listQty: num(buyAdd.qty) || 1 });
+    app.showToast(`🛒 ${buyAdd.v.nameEn || buyAdd.v.sku}`, 'success');
+    setBuyAdd(null);
+  };
   const [flat, setFlat] = useState(false); // default: browse by category (flat all-materials view removed)
   const [flatStatus, setFlatStatus] = useState('');
   const [flatBrand, setFlatBrand] = useState('');
@@ -100,10 +111,10 @@ export default function Catalogue() {
     });
   };
   // Shared grid renderers (stock view): inline-editable cell (stock or min) + an "other" chip.
-  const bandStockCell = ({ variant: v, field }) => <StockCell variant={v} app={app} editMode={editMode} onEditFull={editVariant} field={field} />;
+  const bandStockCell = ({ variant: v, field }) => <StockCell variant={v} app={app} editMode={editMode} onEditFull={editVariant} onPick={openBuyAdd} field={field} />;
   const bandFields = editMode ? [{ key: 'stock', label: `✎ ${t('stock')}` }, { key: 'min', label: `✎ ${t('stockMin')}` }] : undefined;
   const bandStockOther = (v) => (
-    <button key={v.id} onClick={editMode ? () => editVariant(v) : undefined} style={{ border: `1px solid ${C.border}`, background: '#fff', borderRadius: 8, padding: '6px 10px', fontSize: 11.5, fontWeight: 700, color: C.text, cursor: editMode ? 'pointer' : 'default' }}>{v.nameEn || v.sku} · {fmtNum(num(v.stockQty))}</button>
+    <button key={v.id} onClick={editMode ? () => editVariant(v) : () => openBuyAdd(v)} style={{ border: `1px solid ${C.border}`, background: '#fff', borderRadius: 8, padding: '6px 10px', fontSize: 11.5, fontWeight: 700, color: C.text, cursor: editMode ? 'pointer' : 'default' }}>{v.nameEn || v.sku} · {fmtNum(num(v.stockQty))}</button>
   );
   const saveEdit = async () => {
     const fn = edit.table === TABLES.categories ? saveCategory : edit.table === TABLES.products ? saveProduct : saveVariant;
@@ -177,7 +188,7 @@ export default function Catalogue() {
       const prod = products.find((p) => p.id === v.productId);
       const pimg = prod?.image_path || prod?.image_url;
       return (
-        <div key={v.id} onClick={editMode ? () => editVariant(v) : undefined}
+        <div key={v.id} onClick={editMode ? () => editVariant(v) : () => openBuyAdd(v)}
           style={{ display: 'flex', alignItems: 'center', gap: 12, background: '#fff', border: `1px solid ${C.border}`, borderRadius: RADIUS, boxShadow: SHADOW, padding: '12px 14px', cursor: editMode ? 'pointer' : 'default' }}>
           <StoredImage value={pimg} size={52} radius={12} emptyBg={C.primary + '12'} fontSize={24} fallback={prod?.icon || '📦'} />
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -380,7 +391,7 @@ export default function Catalogue() {
               const v = vs[0];
               return (
                 <div key={p.id} style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: RADIUS, boxShadow: SHADOW, overflow: 'hidden' }}>
-                  <div onClick={editMode ? () => editVariant(v) : undefined} style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 13, cursor: editMode ? 'pointer' : 'default' }}>
+                  <div onClick={editMode ? () => editVariant(v) : () => openBuyAdd(v)} style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 13, cursor: editMode ? 'pointer' : 'default' }}>
                     <StoredImage value={img} size={76} radius={14} emptyBg={`linear-gradient(135deg, ${(cat?.color || C.primary)}26, ${(cat?.color || C.primary)}0d)`} fontSize={34} fallback={p.icon || cat?.icon || '📦'} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 16, fontWeight: 800, color: C.text, lineHeight: 1.3 }}>{editMode && <span style={{ color: C.primary }}>✎ </span>}{v.nameEn || p.nameEn}</div>
@@ -425,7 +436,7 @@ export default function Catalogue() {
                   ) : vs.map((v, i) => {
                     const attrs = Object.entries(v.attributes || {}).filter(([, val]) => val);
                     return (
-                      <div key={v.id} onClick={editMode ? () => editVariant(v) : undefined}
+                      <div key={v.id} onClick={editMode ? () => editVariant(v) : () => openBuyAdd(v)}
                         style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', borderTop: (i || img) ? `1px solid ${C.surfaceAlt}` : 'none', cursor: editMode ? 'pointer' : 'default' }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontWeight: 700, color: C.text, fontSize: 14 }}>{editMode && '✎ '}{v.nameEn || variantLabel(v)}</div>
@@ -463,6 +474,17 @@ export default function Catalogue() {
       )}
       {Edit}
       {genGroup && <BandGenerator app={app} t={t} group={genGroup} existingVariants={variants.filter((v) => v.productId === genGroup.id && v.isActive !== false)} onClose={() => setGenGroup(null)} />}
+      <Modal open={!!buyAdd} onClose={() => setBuyAdd(null)} title={`🛒 ${t('addToPurchaseList') || 'أضف لقائمة المشتريات'}`}
+        footer={<><Btn variant="ghost" onClick={() => setBuyAdd(null)}>{t('cancel')}</Btn><Btn onClick={confirmBuyAdd}>{t('add')}</Btn></>}>
+        {buyAdd && (
+          <div style={{ display: 'grid', gap: 10 }}>
+            <div style={{ fontWeight: 800, color: C.text }}>{buyAdd.v.nameEn || buyAdd.v.sku}</div>
+            <div style={{ fontSize: 12, color: C.textMuted }}>{t('stock')}: {fmtNum(num(buyAdd.v.stockQty))}{num(buyAdd.v.stockMin) > 0 ? ` / ${fmtNum(num(buyAdd.v.stockMin))}` : ''}</div>
+            <Field label={t('orderQty') || 'الكمية'}><Input type="number" value={buyAdd.qty} onChange={(val) => setBuyAdd((r) => ({ ...r, qty: val }))} inputMode="numeric" /></Field>
+            {buyAdd.v.onList && <div style={{ fontSize: 11.5, color: C.warning }}>⚠ موجودة في القائمة — سيُحدَّث العدد.</div>}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

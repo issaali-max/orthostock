@@ -7,7 +7,7 @@ import * as db from '../db/db.js';
 //   'stock' → stockQty   |   'min' → stockMin
 // In edit mode it's an input you type straight into (saved on blur / Enter — no page opens).
 // A long-press opens the full material editor. An empty cell (no variant) is a gap.
-export function StockCell({ variant: v, app, editMode, onEditFull, field = 'stock' }) {
+export function StockCell({ variant: v, app, editMode, onEditFull, onPick, field = 'stock' }) {
   const [val, setVal] = useState('');
   const press = useRef(null);
   const key = field === 'min' ? 'stockMin' : 'stockQty';
@@ -35,7 +35,7 @@ export function StockCell({ variant: v, app, editMode, onEditFull, field = 'stoc
   const cancelPress = () => { if (press.current) { clearTimeout(press.current); press.current = null; } };
 
   if (!editMode) {
-    return <div title={v.nameEn || v.sku} style={{ minWidth: 40, border: `1.5px solid ${col}44`, background: col + '14', color: col, borderRadius: 8, padding: '8px 2px', fontSize: 14, fontWeight: 800, textAlign: 'center' }}>{fmtNum(num(v[key]))}</div>;
+    return <div onClick={onPick ? () => onPick(v) : undefined} title={v.nameEn || v.sku} style={{ minWidth: 40, border: `1.5px solid ${col}44`, background: col + '14', color: col, borderRadius: 8, padding: '8px 2px', fontSize: 14, fontWeight: 800, textAlign: 'center', cursor: onPick ? 'pointer' : 'default' }}>{fmtNum(num(v[key]))}</div>;
   }
   return (
     <input
