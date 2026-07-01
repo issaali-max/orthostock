@@ -15,6 +15,8 @@ export default function Debts() {
   const app = useApp();
   const { t, data, displayCurrency, usdRate, createRow, updateRow, showToast } = app;
   const [side, setSide] = useState('me'); // me = owed to me, owe = I owe
+  const [meTab, setMeTab] = useState('doctors');   // doctors | personal
+  const [oweTab, setOweTab] = useState('suppliers'); // suppliers | personal
   const [addP, setAddP] = useState(null);
   const [person, setPerson] = useState(null);   // open personal-debt detail
   const [doctor, setDoctor] = useState(null);   // open doctor drill
@@ -94,51 +96,65 @@ export default function Debts() {
 
       {/* ════ ديون لي ════ */}
       {side === 'me' && (
-        <div style={{ display: 'grid', gap: 14 }}>
-          <Section title={`🧑‍⚕️ ${t('doctorsDebts')}`} count={doctorDebts.length} total={fmtCur(docTotal, displayCurrency, usdRate)} color={C.success}>
-            {doctorDebts.length === 0 ? <EmptyHint text={t('noDebts')} /> : doctorDebts.map(({ c, s }) => (
-              <Card key={c.id} onClick={() => setDoctor({ c, s })} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
-                <span style={{ fontSize: 18 }}>🧑‍⚕️</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 800, color: C.text, fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name || '—'}</div>
-                  <div style={{ fontSize: 11, color: C.textMuted }}>
-                    {s.invoiceDebt > 0 && `${t('invoices')}: ${fmtCur(s.invoiceDebt, displayCurrency, usdRate)}`}
-                    {s.openingOutstanding > 0 && `${s.invoiceDebt > 0 ? ' · ' : ''}${t('openingDebt') || 'دين قديم'}: ${fmtCur(s.openingOutstanding, displayCurrency, usdRate)}`}
+        <div>
+          <SubTabs active={meTab} onChange={setMeTab} color={C.success} tabs={[
+            { id: 'doctors', label: `🧑‍⚕️ ${t('doctorsDebts')}`, n: doctorDebts.length },
+            { id: 'personal', label: `🤝 ${t('personalDebts')}`, n: peopleOwe.length },
+          ]} />
+          {meTab === 'doctors' ? (
+            <Section title={`🧑‍⚕️ ${t('doctorsDebts')}`} count={doctorDebts.length} total={fmtCur(docTotal, displayCurrency, usdRate)} color={C.success}>
+              {doctorDebts.length === 0 ? <EmptyHint text={t('noDebts')} /> : doctorDebts.map(({ c, s }) => (
+                <Card key={c.id} onClick={() => setDoctor({ c, s })} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+                  <span style={{ fontSize: 18 }}>🧑‍⚕️</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 800, color: C.text, fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name || '—'}</div>
+                    <div style={{ fontSize: 11, color: C.textMuted }}>
+                      {s.invoiceDebt > 0 && `${t('invoices')}: ${fmtCur(s.invoiceDebt, displayCurrency, usdRate)}`}
+                      {s.openingOutstanding > 0 && `${s.invoiceDebt > 0 ? ' · ' : ''}${t('openingDebt') || 'دين قديم'}: ${fmtCur(s.openingOutstanding, displayCurrency, usdRate)}`}
+                    </div>
                   </div>
-                </div>
-                <div style={{ fontWeight: 900, color: C.success, fontSize: 15 }}>{fmtCur(s.debt, displayCurrency, usdRate)}</div>
-                <span style={{ color: C.textMuted }}>›</span>
-              </Card>
-            ))}
-          </Section>
-          <Section title={`🤝 ${t('personalDebts')}`} count={peopleOwe.length} total={fmtCur(peopleOweTotal, displayCurrency, usdRate)} color={C.success}>
-            {peopleOwe.length === 0 ? <EmptyHint text={t('noData')} /> : peopleOwe.map((x) => (
-              <PersonRow key={x.p.id} p={x.p} color={C.success} amount={fmtCur(aed(x.net, x.p.currency), displayCurrency, usdRate)} onTap={() => setPerson(x.p)} />
-            ))}
-          </Section>
+                  <div style={{ fontWeight: 900, color: C.success, fontSize: 15 }}>{fmtCur(s.debt, displayCurrency, usdRate)}</div>
+                  <span style={{ color: C.textMuted }}>›</span>
+                </Card>
+              ))}
+            </Section>
+          ) : (
+            <Section title={`🤝 ${t('personalDebts')}`} count={peopleOwe.length} total={fmtCur(peopleOweTotal, displayCurrency, usdRate)} color={C.success}>
+              {peopleOwe.length === 0 ? <EmptyHint text={t('noData')} /> : peopleOwe.map((x) => (
+                <PersonRow key={x.p.id} p={x.p} color={C.success} amount={fmtCur(aed(x.net, x.p.currency), displayCurrency, usdRate)} onTap={() => setPerson(x.p)} />
+              ))}
+            </Section>
+          )}
         </div>
       )}
 
       {/* ════ ديون عليّ ════ */}
       {side === 'owe' && (
-        <div style={{ display: 'grid', gap: 14 }}>
-          <Section title={`🚚 ${t('suppliers')}`} count={supDebts.length} total={fmtCur(supTotal, displayCurrency, usdRate)} color={C.danger}>
-            {supDebts.length === 0 ? <EmptyHint text={t('noDebts')} /> : supDebts.map((r) => (
-              <Card key={r.supplier.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ fontSize: 18 }}>🚚</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 800, color: C.text, fontSize: 13.5 }}>{r.supplier.name || r.supplier.nameEn || '—'}</div>
-                  <div style={{ fontSize: 11, color: C.textMuted }}>{t('purchases')}: {fmtCur(r.purchased, displayCurrency, usdRate)} · {t('paid') || 'مدفوع'}: {fmtCur(r.paid, displayCurrency, usdRate)}</div>
-                </div>
-                <div style={{ fontWeight: 900, color: C.danger, fontSize: 15 }}>{fmtCur(r.balance, displayCurrency, usdRate)}</div>
-              </Card>
-            ))}
-          </Section>
-          <Section title={`🤝 ${t('personalDebts')}`} count={peopleIOwe.length} total={fmtCur(peopleIOweTotal, displayCurrency, usdRate)} color={C.danger}>
-            {peopleIOwe.length === 0 ? <EmptyHint text={t('noData')} /> : peopleIOwe.map((x) => (
-              <PersonRow key={x.p.id} p={x.p} color={C.danger} amount={fmtCur(aed(-x.net, x.p.currency), displayCurrency, usdRate)} onTap={() => setPerson(x.p)} />
-            ))}
-          </Section>
+        <div>
+          <SubTabs active={oweTab} onChange={setOweTab} color={C.danger} tabs={[
+            { id: 'suppliers', label: `🚚 ${t('suppliers')}`, n: supDebts.length },
+            { id: 'personal', label: `🤝 ${t('personalDebts')}`, n: peopleIOwe.length },
+          ]} />
+          {oweTab === 'suppliers' ? (
+            <Section title={`🚚 ${t('suppliers')}`} count={supDebts.length} total={fmtCur(supTotal, displayCurrency, usdRate)} color={C.danger}>
+              {supDebts.length === 0 ? <EmptyHint text={t('noDebts')} /> : supDebts.map((r) => (
+                <Card key={r.supplier.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 18 }}>🚚</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 800, color: C.text, fontSize: 13.5 }}>{r.supplier.name || r.supplier.nameEn || '—'}</div>
+                    <div style={{ fontSize: 11, color: C.textMuted }}>{t('purchases')}: {fmtCur(r.purchased, displayCurrency, usdRate)} · {t('paid') || 'مدفوع'}: {fmtCur(r.paid, displayCurrency, usdRate)}</div>
+                  </div>
+                  <div style={{ fontWeight: 900, color: C.danger, fontSize: 15 }}>{fmtCur(r.balance, displayCurrency, usdRate)}</div>
+                </Card>
+              ))}
+            </Section>
+          ) : (
+            <Section title={`🤝 ${t('personalDebts')}`} count={peopleIOwe.length} total={fmtCur(peopleIOweTotal, displayCurrency, usdRate)} color={C.danger}>
+              {peopleIOwe.length === 0 ? <EmptyHint text={t('noData')} /> : peopleIOwe.map((x) => (
+                <PersonRow key={x.p.id} p={x.p} color={C.danger} amount={fmtCur(aed(-x.net, x.p.currency), displayCurrency, usdRate)} onTap={() => setPerson(x.p)} />
+              ))}
+            </Section>
+          )}
         </div>
       )}
 
@@ -252,6 +268,21 @@ export default function Debts() {
           );
         })()}
       </Modal>
+    </div>
+  );
+}
+
+function SubTabs({ tabs, active, onChange, color }) {
+  return (
+    <div style={{ display: 'flex', gap: 6, marginBottom: 12, background: C.surfaceAlt, padding: 4, borderRadius: 12 }}>
+      {tabs.map((tb) => {
+        const on = active === tb.id;
+        return (
+          <button key={tb.id} onClick={() => onChange(tb.id)} style={{ flex: 1, padding: '9px 6px', borderRadius: 9, border: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: 800, background: on ? '#fff' : 'transparent', color: on ? color : C.textMid, boxShadow: on ? '0 1px 4px rgba(0,0,0,.12)' : 'none' }}>
+            {tb.label} ({tb.n})
+          </button>
+        );
+      })}
     </div>
   );
 }
