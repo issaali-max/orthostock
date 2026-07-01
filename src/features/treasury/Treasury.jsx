@@ -59,28 +59,54 @@ export default function Treasury() {
     transferOut: { icon: '🔁', label: `${t('transfer')} → ${ACC[m.otherAccount]?.label || ''}` },
   }[m.type] || { icon: '•', label: m.type });
 
+  const [moveFilter, setMoveFilter] = useState('all');
+
+  const typeColor = { business: C.primary, personal: C.warning, home: C.success };
+  const mLabel = { cash: t('payCash'), transfer: t('payTransfer'), cheque: t('payCheque'), card: t('payCard') };
+
+  // One movement rendered like a proper bank-statement line:
+  //   [icon]  who/what (bold)                       ±amount
+  //           date · details (invoice, method, reason)
   const MoveRow = ({ m }) => {
-    const meta = typeMeta(m);
     const inn = m.direction === 'in';
+    let icon = '•', title = '', chip = null, detail = fmtDate(m.date);
+    if (m.type === 'invoicePayment') {
+      icon = m.method === 'cheque' ? '🧾' : m.method === 'transfer' ? '🏦' : '💵';
+      title = m.customerName || t('invoicePayment');
+      detail += `${m.invoiceNumber ? ` · 🧾 ${m.invoiceNumber}` : ''} · ${mLabel[m.method] || m.method}`;
+      if (m.method === 'cheque') detail += ` · ${m.chequeStatus === 'cleared' ? `✓ ${t('chequeCleared')}` : `⏳ ${m.chequeStatus === 'deposited' ? t('chequeDeposited') : t('chequeReceived')}`}`;
+      chip = <span style={{ fontSize: 9.5, fontWeight: 800, color: C.success, background: C.success + '14', borderRadius: 999, padding: '2px 7px' }}>{t('invoicePayment')}</span>;
+    } else if (m.type === 'expense') {
+      icon = m.groupIcon || '🧾';
+      title = (app.lang === 'en' ? m.groupNameEn : m.groupNameAr) || t('expenses');
+      const tc = typeColor[m.expenseType] || C.primary;
+      chip = <span style={{ fontSize: 9.5, fontWeight: 800, color: tc, background: tc + '16', borderRadius: 999, padding: '2px 7px' }}>{t(m.expenseType || 'business')}</span>;
+      if (m.reason) detail += ` · ${m.reason}`;
+    } else if (m.type === 'purchase') {
+      icon = '📦';
+      title = m.supplierName || t('purchases');
+      chip = <span style={{ fontSize: 9.5, fontWeight: 800, color: C.textMid, background: C.surfaceAlt, borderRadius: 999, padding: '2px 7px' }}>{t('purchases')}</span>;
+      if (m.reason) detail += ` · ${m.reason}`;
+    } else {
+      const meta = typeMeta(m); icon = meta.icon; title = meta.label;
+      if (m.reason) detail += ` · ${m.reason}`;
+    }
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 9, background: '#fff', borderRadius: 10, padding: '8px 10px', opacity: m.pending ? 0.85 : 1 }}>
-        <span style={{ fontSize: 16 }}>{meta.icon}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 9, background: '#fff', borderRadius: 10, padding: '8px 10px', opacity: m.pending ? 0.9 : 1 }}>
+        <span style={{ fontSize: 17 }}>{icon}</span>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {meta.label}
-            {m.customerName ? ` · ${m.customerName}` : ''}{m.supplierName ? ` · ${m.supplierName}` : ''}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+            <span style={{ fontSize: 12.5, fontWeight: 800, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
+            {chip}
           </div>
-          <div style={{ fontSize: 10.5, color: C.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {fmtDate(m.date)}{m.invoiceNumber ? ` · 🧾 ${m.invoiceNumber}` : ''}{m.reason ? ` · ${m.reason}` : ''}
-            {m.pending ? ` · ⏳ ${m.chequeStatus === 'deposited' ? t('chequeDeposited') : t('chequeReceived')}` : ''}
-          </div>
+          <div style={{ fontSize: 10.5, color: C.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{detail}</div>
         </div>
         {m.pending && (
           <button onClick={() => advanceCheque(m)} style={{ border: 'none', background: C.warning, color: '#fff', borderRadius: 8, padding: '5px 8px', fontSize: 10.5, fontWeight: 800, cursor: 'pointer' }}>
             {m.chequeStatus === 'deposited' ? `✓ ${t('chequeCleared')}` : `🏦 ${t('chequeDeposited')}`}
           </button>
         )}
-        <span style={{ fontWeight: 900, fontSize: 13.5, color: m.pending ? C.warning : inn ? C.success : C.danger }}>{inn ? '+' : '−'}{ccy(m.amount, m.currency)}</span>
+        <span style={{ fontWeight: 900, fontSize: 13.5, whiteSpace: 'nowrap', color: m.pending ? C.warning : inn ? C.success : C.danger }}>{inn ? '+' : '−'}{ccy(m.amount, m.currency)}</span>
       </div>
     );
   };
@@ -96,14 +122,31 @@ export default function Treasury() {
           <span style={{ fontWeight: 900, fontSize: 13.5, color: C.text, flex: 1 }}>{a.label}</span>
           <span style={{ color: C.textMuted }}>›</span>
         </div>
-        <div style={{ fontSize: 21, fontWeight: 900, color: a.color, letterSpacing: '-.5px', margin: '4px 0 1px' }}>{ccy(b.AED)}</div>
+        <div style={{ fontSize: 21, fontWeight: 900, color: b.AED < 0 ? C.danger : a.color, letterSpacing: '-.5px', margin: '4px 0 1px' }}>{ccy(b.AED)}</div>
         {b.USD !== 0 && <div style={{ fontSize: 11, color: C.textMid, fontWeight: 700 }}>+ {ccy(b.USD, 'USD')}</div>}
         {pend > 0 && <div style={{ fontSize: 10.5, color: C.warning, fontWeight: 800, marginTop: 3 }}>⏳ {t('pendingCheques')}: {ccy(pend)}</div>}
       </Card>
     );
   };
 
-  const viewMoves = view ? ledger.moves.filter((m) => m.account === view) : [];
+  const viewMoves = useMemo(() => {
+    if (!view) return [];
+    const mine = ledger.moves.filter((m) => m.account === view);
+    if (moveFilter === 'all') return mine;
+    if (moveFilter === 'manual') return mine.filter((m) => !['invoicePayment', 'expense', 'purchase'].includes(m.type));
+    return mine.filter((m) => m.type === moveFilter);
+  }, [view, ledger, moveFilter]);
+
+  // Expense totals per type (عمل/شخصي/بيت) for the current account — the professional view.
+  const expByType = useMemo(() => {
+    if (!view) return null;
+    const r = { business: 0, personal: 0, home: 0 };
+    for (const m of ledger.moves) {
+      if (m.account !== view || m.type !== 'expense') continue;
+      r[m.expenseType || 'business'] = round2((r[m.expenseType || 'business'] || 0) + m.amount * (m.currency === 'USD' ? rate : 1));
+    }
+    return r;
+  }, [view, ledger, rate]);
 
   return (
     <div>
@@ -140,19 +183,39 @@ export default function Treasury() {
       </div>
 
       {/* account drill-in */}
-      <Modal open={!!view} onClose={() => setView(null)} title={view ? `${ACC[view].icon} ${ACC[view].label}` : ''} width={620}>
+      <Modal open={!!view} onClose={() => { setView(null); setMoveFilter('all'); }} title={view ? `${ACC[view].icon} ${ACC[view].label}` : ''} width={620}>
         {view && (
           <div style={{ display: 'grid', gap: 10 }}>
             <Card style={{ textAlign: 'center', background: ACC[view].color + '10', border: 'none' }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: C.textMid }}>{t('balance')}</div>
-              <div style={{ fontSize: 24, fontWeight: 900, color: ACC[view].color }}>{ccy(ledger.balances[view].AED)}</div>
-              {ledger.balances[view].USD !== 0 && <div style={{ fontSize: 12, fontWeight: 700, color: C.textMid }}>+ {ccy(ledger.balances[view].USD, 'USD')}</div>}
+              <div style={{ fontSize: 24, fontWeight: 900, color: ledger.balances[view].AED < 0 ? C.danger : ACC[view].color }}>{ccy(ledger.balances[view].AED)}</div>
+              {ledger.balances[view].USD !== 0 && <div style={{ fontSize: 12, fontWeight: 700, color: ledger.balances[view].USD < 0 ? C.danger : C.textMid }}>+ {ccy(ledger.balances[view].USD, 'USD')}</div>}
               {view === 'bank' && ledger.pendingChequesTotal > 0 && <div style={{ fontSize: 11, color: C.warning, fontWeight: 800, marginTop: 3 }}>⏳ {t('pendingCheques')}: {ccy(ledger.pendingChequesTotal)} ({t('notCountedUntilCleared')})</div>}
             </Card>
+
+            {/* expenses by type — عمل / شخصي / بيت */}
+            {expByType && (expByType.business + expByType.personal + expByType.home) > 0 && (
+              <div style={{ display: 'flex', gap: 6 }}>
+                {[['business', '🏢', C.primary], ['personal', '👤', C.warning], ['home', '🏠', C.success]].map(([ty, icon, col]) => (
+                  <div key={ty} style={{ flex: 1, background: col + '10', border: `1px solid ${col}30`, borderRadius: 10, padding: '7px 6px', textAlign: 'center' }}>
+                    <div style={{ fontSize: 10, fontWeight: 800, color: col }}>{icon} {t(ty)}</div>
+                    <div style={{ fontSize: 12.5, fontWeight: 900, color: C.text }}>{ccy(expByType[ty])}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* filter chips */}
+            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+              {[['all', t('all') || 'الكل'], ['invoicePayment', t('invoicePayment')], ['expense', t('expenses')], ['purchase', t('purchases')], ['manual', t('manual')]].map(([id, label]) => (
+                <button key={id} onClick={() => setMoveFilter(id)} style={{ border: `1px solid ${moveFilter === id ? ACC[view].color : C.border}`, background: moveFilter === id ? ACC[view].color + '14' : '#fff', color: moveFilter === id ? ACC[view].color : C.textMid, borderRadius: 999, padding: '4px 11px', fontSize: 11.5, fontWeight: 800, cursor: 'pointer' }}>{label}</button>
+              ))}
+            </div>
+
             <div style={{ fontSize: 12.5, fontWeight: 900, color: C.textMid }}>📜 {t('movements')} ({viewMoves.length})</div>
             {viewMoves.length === 0 ? <EmptyState icon="📜" text={t('noData')} /> : (
               <div style={{ display: 'grid', gap: 5, background: C.surfaceAlt, borderRadius: 12, padding: 8 }}>
-                {viewMoves.slice(0, 120).map((m, i) => <MoveRow key={i} m={m} />)}
+                {viewMoves.slice(0, 150).map((m, i) => <MoveRow key={i} m={m} />)}
               </div>
             )}
           </div>

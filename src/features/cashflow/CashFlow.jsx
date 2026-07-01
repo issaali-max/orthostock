@@ -2,8 +2,8 @@ import { useMemo } from 'react';
 import { useApp } from '../../app/AppProvider.jsx';
 import { PageHeader, Card } from '../../ui/components.jsx';
 import { C } from '../../lib/constants.js';
-import { num, round2 } from '../../lib/money.js';
-import { financialPosition, combineForInfo } from '../../lib/engine.js';
+import { num, round2, fmtNum } from '../../lib/money.js';
+import { financialPosition, combineForInfo, accountLedger, portfolioStats } from '../../lib/engine.js';
 
 // Money in its ORIGINAL currency (never converts the stored amount).
 function money(amount, currency = 'AED') {
@@ -16,6 +16,8 @@ export default function CashFlow() {
   const app = useApp();
   const { t, displayCurrency, usdRate } = app;
   const fin = useMemo(() => financialPosition(app), [app.data]); // eslint-disable-line react-hooks/exhaustive-deps
+  const ledger = useMemo(() => accountLedger(app.data), [app.data]);
+  const pstats = useMemo(() => portfolioStats(app.data), [app.data]);
 
   // Info-only combined figures (everything → display currency at the current rate),
   // used ONLY for the distribution percentages and the "≈" summary line.
@@ -41,6 +43,24 @@ export default function CashFlow() {
   return (
     <div>
       <PageHeader title={`💰 ${t('cashFlow')}`} />
+
+      {/* ── The three money accounts: where the cash physically is ── */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+        {[
+          ['bank', '🏦', t('bankAccount'), ledger.balances.bank.AED, C.primary],
+          ['drawer', '🗄️', t('drawer'), ledger.balances.drawer.AED, C.success],
+          ['investment', '📈', t('investments'), null, C.warning],
+        ].map(([id, icon, label, bal, color]) => (
+          <div key={id} style={{ flex: 1, background: '#fff', border: `1px solid ${color}35`, borderTop: `3px solid ${color}`, borderRadius: 12, padding: '9px 8px', textAlign: 'center' }}>
+            <div style={{ fontSize: 10.5, fontWeight: 800, color: C.textMid }}>{icon} {label}</div>
+            <div style={{ fontSize: 14.5, fontWeight: 900, color: bal != null && bal < 0 ? C.danger : color, marginTop: 2 }}>
+              {id === 'investment' ? `$${fmtNum(round2(num(pstats.accountValue)))}` : `${fmtNum(round2(bal))}`}
+            </div>
+            {id === 'bank' && ledger.pendingChequesTotal > 0 && <div style={{ fontSize: 9, color: C.warning, fontWeight: 800 }}>⏳ {fmtNum(round2(ledger.pendingChequesTotal))}</div>}
+          </div>
+        ))}
+      </div>
+      <div style={{ fontSize: 10.5, color: C.textMuted, textAlign: 'center', marginBottom: 12 }}>{t('accountsDetailNote')}</div>
 
       {/* ── Cash balance per currency ── */}
       <CashCard cur="AED" b={fin.cash.AED} t={t} />

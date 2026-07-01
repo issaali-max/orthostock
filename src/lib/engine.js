@@ -82,10 +82,18 @@ export function accountLedger(appOrData) {
     }
   }
 
-  // 2) Expenses → out of bank (default) or drawer.
+  // 2) Expenses → out of bank (default) or drawer, labelled by group (عمل/شخصي/بيت + name).
+  const expGroups = data[TABLES.expenseGroups] || [];
   for (const e of (data[TABLES.expenses] || [])) {
     if (e.isActive === false) continue;
-    moves.push({ account: e.paidFrom === 'drawer' ? 'drawer' : 'bank', date: e.date, direction: 'out', amount: num(e.amount), currency: e.currency || 'AED', type: 'expense', expenseId: e.id, reason: e.note || '' });
+    const g = expGroups.find((x) => x.id === e.groupId);
+    moves.push({
+      account: e.paidFrom === 'drawer' ? 'drawer' : 'bank', date: e.date, direction: 'out',
+      amount: num(e.amount), currency: e.currency || 'AED', type: 'expense', expenseId: e.id,
+      expenseType: g?.type || 'business', groupIcon: g?.icon || '🧾',
+      groupNameAr: g?.nameAr || g?.nameEn || '', groupNameEn: g?.nameEn || g?.nameAr || '',
+      reason: e.note || '',
+    });
   }
 
   // 3) Purchases: what was actually paid to suppliers (at purchase + later payments).
