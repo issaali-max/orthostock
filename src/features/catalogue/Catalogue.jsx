@@ -10,7 +10,7 @@ import RestockList from './RestockList.jsx';
 import StockTake from './StockTake.jsx';
 import BandGenerator from './BandGenerator.jsx';
 import { StockCell } from '../../ui/StockCell.jsx';
-import { logStockMovement } from '../../lib/engine.js';
+import { logStockMovement, recommendedQtyByVariant } from '../../lib/engine.js';
 import { fmtDate } from '../../lib/dates.js';
 import {
   CategoryForm, ProductForm, VariantForm,
@@ -30,6 +30,10 @@ export default function Catalogue() {
   const [showStockTake, setShowStockTake] = useState(false);
   const app = useApp();
   const { t, lang, data, displayCurrency, usdRate, deleteRow } = app;
+  const rec = useMemo(() => recommendedQtyByVariant(data), [data]);
+  const cartBtn = (v) => (
+    <button onClick={(e) => { e.stopPropagation(); openBuyAdd(v); }} title={t('addToPurchaseList')} style={{ border: 'none', background: v.onList ? C.success : C.primary + '18', color: v.onList ? '#fff' : C.primary, borderRadius: 9, width: 34, height: 34, fontSize: 15, cursor: 'pointer', flexShrink: 0 }}>{v.onList ? '✓' : '🛒'}</button>
+  );
   const [catId, setCatId] = useState(null);
   const [q, setQ] = useState('');
   const [brandFilter, setBrandFilter] = useState('');
@@ -188,7 +192,7 @@ export default function Catalogue() {
       const prod = products.find((p) => p.id === v.productId);
       const pimg = prod?.image_path || prod?.image_url;
       return (
-        <div key={v.id} onClick={editMode ? () => editVariant(v) : () => openBuyAdd(v)}
+        <div key={v.id} onClick={editMode ? () => editVariant(v) : undefined}
           style={{ display: 'flex', alignItems: 'center', gap: 12, background: '#fff', border: `1px solid ${C.border}`, borderRadius: RADIUS, boxShadow: SHADOW, padding: '12px 14px', cursor: editMode ? 'pointer' : 'default' }}>
           <StoredImage value={pimg} size={52} radius={12} emptyBg={C.primary + '12'} fontSize={24} fallback={prod?.icon || '📦'} />
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -205,8 +209,9 @@ export default function Catalogue() {
           </div>
           <div style={{ textAlign: 'center', minWidth: 56 }}>
             <span style={{ display: 'inline-block', minWidth: 40, padding: '3px 10px', borderRadius: 999, background: stockColor + '18', color: stockColor, fontSize: 17, fontWeight: 800 }}>{fmtNum(stock)}</span>
-            <div style={{ fontSize: 9, color: C.textMuted, marginTop: 2 }}>{t('stock')}</div>
+            <div style={{ fontSize: 9, color: C.textMuted, marginTop: 2 }}>{t('stock')}{num(rec.get(v.id)) > 0 ? <span style={{ color: C.primary, fontWeight: 800 }}> · 📋{fmtNum(rec.get(v.id))}</span> : null}</div>
           </div>
+          {!editMode && cartBtn(v)}
           <div style={{ minWidth: 92, textAlign: 'end' }}>
             <div style={{ fontWeight: 800, color: C.primary, fontSize: 14 }}>{fmtCur(sell, displayCurrency, usdRate)}</div>
             <div style={{ fontSize: 10, color: C.textMuted }}>{t('avgCost')} {fmtCur(avg, displayCurrency, usdRate)}</div>
@@ -228,7 +233,7 @@ export default function Catalogue() {
         <PageHeader title={t('inventory')} action={
           <div style={{ display: 'flex', gap: 6 }}>
             {EditToggle}
-            <Btn size="sm" variant="light" onClick={() => setShowRestock(true)}>🛒 {t('restockList')}</Btn>
+            <Btn size="sm" variant="light" onClick={() => setShowRestock(true)}>📉 {t('lowStockList')}</Btn>
             <Btn size="sm" variant="light" onClick={() => setShowStockTake(true)}>🔢 {t('stockTake')}</Btn>
             <Btn size="sm" variant="light" onClick={() => { setFlat(false); setFlatCat(null); setQ(''); }}>🗂️ {t('byCategory')}</Btn>
           </div>
@@ -391,7 +396,7 @@ export default function Catalogue() {
               const v = vs[0];
               return (
                 <div key={p.id} style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: RADIUS, boxShadow: SHADOW, overflow: 'hidden' }}>
-                  <div onClick={editMode ? () => editVariant(v) : () => openBuyAdd(v)} style={{ display: 'flex', alignItems: 'center', gap: 13, padding: 13, cursor: editMode ? 'pointer' : 'default' }}>
+                  <div onClick={editMode ? () => editVariant(v) : undefined} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 13, cursor: editMode ? 'pointer' : 'default' }}>
                     <StoredImage value={img} size={76} radius={14} emptyBg={`linear-gradient(135deg, ${(cat?.color || C.primary)}26, ${(cat?.color || C.primary)}0d)`} fontSize={34} fallback={p.icon || cat?.icon || '📦'} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 16, fontWeight: 800, color: C.text, lineHeight: 1.3 }}>{editMode && <span style={{ color: C.primary }}>✎ </span>}{v.nameEn || p.nameEn}</div>
@@ -399,6 +404,7 @@ export default function Catalogue() {
                     </div>
                     {stockPill(v)}
                     {priceBlock(v)}
+                    {!editMode && cartBtn(v)}
                   </div>
                   {editToolbar()}
                 </div>
@@ -436,7 +442,7 @@ export default function Catalogue() {
                   ) : vs.map((v, i) => {
                     const attrs = Object.entries(v.attributes || {}).filter(([, val]) => val);
                     return (
-                      <div key={v.id} onClick={editMode ? () => editVariant(v) : () => openBuyAdd(v)}
+                      <div key={v.id} onClick={editMode ? () => editVariant(v) : undefined}
                         style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', borderTop: (i || img) ? `1px solid ${C.surfaceAlt}` : 'none', cursor: editMode ? 'pointer' : 'default' }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontWeight: 700, color: C.text, fontSize: 14 }}>{editMode && '✎ '}{v.nameEn || variantLabel(v)}</div>
@@ -451,6 +457,7 @@ export default function Catalogue() {
                         </div>
                         {stockPill(v)}
                         {priceBlock(v)}
+                        {!editMode && cartBtn(v)}
                       </div>
                     );
                   })}

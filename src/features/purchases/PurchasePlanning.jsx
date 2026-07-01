@@ -42,12 +42,11 @@ export default function PurchasePlanning({ onClose }) {
       const groups = [];
       for (const p of prods.filter((pp) => pp.categoryId === c.id)) {
         const needed = (byProd[p.id] || [])
-          .filter((v) => statusOf(v) !== 'ok' || v.onList)
+          .filter((v) => v.onList) // purchase list = only what was added by hand
           .map((v) => {
             const s = statusOf(v);
-            const manual = !!v.onList;
-            const qty = manual ? (num(v.listQty) > 0 ? num(v.listQty) : (autoQty(v) || 1)) : autoQty(v);
-            return { v, status: s, manual, qty };
+            const qty = num(v.listQty) > 0 ? num(v.listQty) : (autoQty(v) || 1);
+            return { v, status: s, manual: true, qty };
           })
           .sort((a, b) => (sortKey(a.v) > sortKey(b.v) ? 1 : sortKey(a.v) < sortKey(b.v) ? -1 : 0));
         if (needed.length === 0) continue;
@@ -108,9 +107,7 @@ export default function PurchasePlanning({ onClose }) {
       ) : (
         <div style={{ display: 'grid', gap: 10 }}>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 12 }}>
-            <Badge tone="danger">🔴 {t('lowStock') || 'منخفض'}: {counts.low}</Badge>
-            <Badge tone="warning">🟠 {t('nearLow') || 'قريب'}: {counts.near}</Badge>
-            {counts.manual > 0 && <Badge tone="info">🔖 {t('manual') || 'يدوي'}: {counts.manual}</Badge>}
+            <Badge tone="info">🛒 {counts.total} {t('itemsToReorder') || 'مادة'}</Badge>
             <span style={{ marginInlineStart: 'auto', fontWeight: 800 }}>{t('estCost') || 'تقدير'}: {money(totalEst, cur)}</span>
           </div>
 

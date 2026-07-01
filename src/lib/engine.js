@@ -1377,6 +1377,20 @@ export const ORDER_STATUSES = ['new', 'planning', 'ready', 'delivered', 'cancell
 // statuses that still need a visit / delivery (drive the visit planner)
 export const OPEN_ORDER_STATUSES = ['new', 'planning', 'ready'];
 
+// Total still-open recommended quantity (التواصي) per material — what doctors have requested
+// but hasn't been delivered yet. Used to plan purchases against real demand.
+export function recommendedQtyByVariant(data) {
+  const open = new Set((data[TABLES.orders] || [])
+    .filter((o) => o.isActive !== false && OPEN_ORDER_STATUSES.includes(o.status || 'new'))
+    .map((o) => o.id));
+  const map = new Map();
+  for (const it of (data[TABLES.orderItems] || [])) {
+    if (it.isActive === false || !open.has(it.orderId)) continue;
+    map.set(it.variantId, (map.get(it.variantId) || 0) + num(it.qty));
+  }
+  return map;
+}
+
 // All orders enriched with their customer (name/type/emirate/city) and their item lines
 // (material name + qty + note). One pass; safe on missing references.
 export function orderList(app) {
