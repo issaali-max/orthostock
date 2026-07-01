@@ -1,6 +1,6 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useApp } from '../../app/AppProvider.jsx';
-import { Modal, Btn, Badge } from '../../ui/components.jsx';
+import { Modal, Btn, Badge, Input } from '../../ui/components.jsx';
 import { C, TABLES } from '../../lib/constants.js';
 import { num, fmtNum, round2 } from '../../lib/money.js';
 import { money } from '../../lib/whatsapp.js';
@@ -26,15 +26,22 @@ const orderQty = (v) => {
 
 export default function PurchasePlanning({ onClose }) {
   const app = useApp();
-  const { t, lang, data, settings, showToast } = app;
+  const { t, lang, data, settings, showToast, updateRow } = app;
   const cur = settings?.baseCurrency || 'AED';
+  const [adding, setAdding] = useState(false); // material picker open
+  const [q, setQ] = useState('');
 
-  const { tree, counts, totalEst } = useMemo(() => {
+  const addToList = async (v) => { await updateRow(TABLES.variants, v.id, { onList: true, listQty: num(v.listQty) || orderQty(v) || 1 }); };
+  const removeFromList = async (v) => { await updateRow(TABLES.variants, v.id, { onList: false }); };
+  const setQty = async (v, qty) => { await updateRow(TABLES.variants, v.id, { listQty: num(qty) }); };
+
+  const { tree, counts, totalEst, manual } = useMemo(() => {
     const cats = (data[TABLES.categories] || []).filter((c) => c.isActive !== false);
     const prods = (data[TABLES.products] || []).filter((p) => p.isActive !== false);
     const variants = (data[TABLES.variants] || []).filter((v) => v.isActive !== false);
     const byProd = {};
     for (const v of variants) (byProd[v.productId] = byProd[v.productId] || []).push(v);
+    const prodName = (id) => { const p = prods.find((x) => x.id === id); return p?.nameEn || p?.nameAr || ''; };
 
     let nOut = 0, nLow = 0, nNear = 0, est = 0;
     const tree = [];
@@ -44,7 +51,7 @@ export default function PurchasePlanning({ onClose }) {
       const groups = [];
       for (const p of catProds) {
         const vs = byProd[p.id] || [];
-        const problems = vs.filter((v) => statusOf(v) !== 'ok');
+        const problems = vs.filter((v) => statusOf(v) !== 'ok' && !v.onList); // manual items shown separately
         if (problems.length === 0) continue;
         for (const v of problems) {
           const s = statusOf(v);
@@ -56,7 +63,13 @@ export default function PurchasePlanning({ onClose }) {
       }
       if (groups.length) tree.push({ category: c, name: catName(c), groups });
     }
-    return { tree, counts: { out: nOut, low: nLow, near: nNear, total: nOut + nLow + nNear }, totalEst: round2(est) };
+    // Manually-added items (a needed material put on the list by hand) — shown at the top.
+    const manual = variants.filter((v) => v.onList).map((v) => {
+      const qty = num(v.listQty) > 0 ? num(v.listQty) : (orderQty(v) || 1);
+      est += qty * (num(v.purchasePriceAvg) || num(v.purchasePriceLatest));
+      return { v, product: prodName(v.productId), qty };
+    }).sort((a, b) => (a.product + a.v.nameEn).localeCompare(b.product + b.v.nameEn));
+    return { tree, counts: { out: nOut, low: nLow, near: nNear, total: nOut + nLow + nNear }, totalEst: round2(est), manual };
   }, [data, lang]);
 
   const cellColor = (v) => {
@@ -70,6 +83,14 @@ export default function PurchasePlanning({ onClose }) {
     const company = settings?.companyName || 'OrthoStock';
     const esc = (s) => String(s).replace(/[&<>]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]));
     let body = '';
+    if (manual.length > 0) {
+      body += `<h2>🔖 ${lang === 'en' ? 'Manually added' : 'مضافة يدوياً'}</h2>`;
+      body += '<table><thead><tr><th>Material</th><th>Stock</th><th>Order</th></tr></thead><tbody>';
+      for (const { v, qty } of manual) {
+        body += `<tr><td>${esc(v.nameEn || v.sku)}</td><td>${fmtNum(num(v.stockQty))}</td><td><b>${fmtNum(qty)}</b></td></tr>`;
+      }
+      body += '</tbody></table>';
+    }
     for (const cat of tree) {
       body += `<h2>${esc(cat.category.icon || '')} ${esc(cat.name)}</h2>`;
       for (const g of cat.groups) {
@@ -108,17 +129,41 @@ export default function PurchasePlanning({ onClose }) {
     <Modal open title={`🛒 ${t('purchasePlan') || 'قائمة المشتريات'}`} onClose={onClose} width={640}
       footer={<>
         <Btn variant="ghost" onClick={onClose}>{t('close')}</Btn>
-        {counts.total > 0 && <Btn onClick={printList}>🖨️ {t('print') || 'طباعة'}</Btn>}
+        <Btn variant="outline" onClick={() => { setQ(''); setAdding(true); }}>＋ {t('addMaterial')}</Btn>
+        {(counts.total > 0 || manual.length > 0) && <Btn onClick={printList}>🖨️ {t('print') || 'طباعة'}</Btn>}
       </>}>
-      {counts.total === 0 ? (
-        <div style={{ padding: 28, textAlign: 'center', color: C.success, fontWeight: 700 }}>✓ {t('restockNone') || 'كل المخزون كافٍ'}</div>
+      {counts.total === 0 && manual.length === 0 ? (
+        <div style={{ padding: 24, textAlign: 'center' }}>
+          <div style={{ color: C.success, fontWeight: 700, marginBottom: 10 }}>✓ {t('restockNone') || 'كل المخزون كافٍ'}</div>
+          <Btn variant="outline" onClick={() => { setQ(''); setAdding(true); }}>＋ {t('addMaterial')}</Btn>
+        </div>
       ) : (
         <div style={{ display: 'grid', gap: 10 }}>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 12 }}>
             <Badge tone="danger">🔴 {t('lowStock') || 'منخفض'}: {counts.out + counts.low}</Badge>
             <Badge tone="warning">🟠 {t('nearLow') || 'قريب'}: {counts.near}</Badge>
+            {manual.length > 0 && <Badge tone="info">🔖 {t('manual') || 'يدوي'}: {manual.length}</Badge>}
             <span style={{ marginInlineStart: 'auto', fontWeight: 800 }}>{t('estCost') || 'تقدير'}: {money(totalEst, cur)}</span>
           </div>
+
+          {/* Manually added materials */}
+          {manual.length > 0 && (
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 900, color: C.primary, borderBottom: `2px solid ${C.primary}`, paddingBottom: 3, marginBottom: 6 }}>🔖 {t('manualAdded') || 'مضافة يدوياً'}</div>
+              <div style={{ display: 'grid', gap: 5 }}>
+                {manual.map(({ v, product, qty }) => (
+                  <div key={v.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: C.primary + '0c', borderRadius: 9, padding: '7px 10px' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.nameEn || v.sku}</div>
+                      <div style={{ fontSize: 10.5, color: C.textMuted }}>{product} · {t('stock')}: {fmtNum(num(v.stockQty))}</div>
+                    </div>
+                    <Input type="number" value={String(qty)} onChange={(val) => setQty(v, val)} style={{ width: 58, padding: 6, textAlign: 'center', fontWeight: 800 }} />
+                    <button onClick={() => removeFromList(v)} title={t('delete')} style={{ border: 'none', background: 'transparent', color: C.danger, fontSize: 16, cursor: 'pointer' }}>✕</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {tree.map((cat) => (
             <div key={cat.category.id} style={{ display: 'grid', gap: 8 }}>
@@ -160,7 +205,38 @@ export default function PurchasePlanning({ onClose }) {
               ))}
             </div>
           ))}
-          <div style={{ fontSize: 10.5, color: C.textMuted, textAlign: 'center' }}>الرقم = المخزون · +N = الكمية المقترحة للطلب · أحمر = منخفض/نافد · برتقالي = قريب من الانخفاض</div>
+          <div style={{ fontSize: 10.5, color: C.textMuted, textAlign: 'center' }}>الرقم = المخزون · +N = الكمية المقترحة للطلب · أحمر = منخفض/نافد · برتقالي = قريب · 🔖 = مضافة يدوياً</div>
+        </div>
+      )}
+
+      {/* Material picker: search any material and add it to the list */}
+      {adding && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={() => setAdding(false)}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: '#fff', width: '100%', maxWidth: 560, maxHeight: '75vh', borderRadius: '18px 18px 0 0', padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ fontSize: 14, fontWeight: 900, flex: 1 }}>＋ {t('addMaterial')}</div>
+              <button onClick={() => setAdding(false)} style={{ border: 'none', background: 'transparent', fontSize: 18, cursor: 'pointer', color: C.textMid }}>✕</button>
+            </div>
+            <Input value={q} onChange={setQ} placeholder={t('search') || 'بحث…'} autoFocus />
+            <div style={{ overflowY: 'auto', display: 'grid', gap: 5 }}>
+              {(() => {
+                const term = q.trim().toLowerCase();
+                if (!term) return <div style={{ fontSize: 12, color: C.textMuted, textAlign: 'center', padding: 12 }}>{t('search') || 'اكتب للبحث'}…</div>;
+                const matches = (data[TABLES.variants] || []).filter((v) => v.isActive !== false && !v.onList
+                  && ((v.nameEn || '').toLowerCase().includes(term) || (v.sku || '').toLowerCase().includes(term))).slice(0, 40);
+                if (matches.length === 0) return <div style={{ fontSize: 12, color: C.textMuted, textAlign: 'center', padding: 12 }}>{t('noData')}</div>;
+                return matches.map((v) => (
+                  <button key={v.id} onClick={() => { addToList(v); setQ(''); }} style={{ display: 'flex', alignItems: 'center', gap: 8, border: `1px solid ${C.border}`, background: '#fff', borderRadius: 9, padding: '8px 10px', cursor: 'pointer', textAlign: 'start' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.nameEn || v.sku}</div>
+                      <div style={{ fontSize: 10.5, color: C.textMuted }}>{t('stock')}: {fmtNum(num(v.stockQty))}</div>
+                    </div>
+                    <span style={{ color: C.primary, fontWeight: 900, fontSize: 18 }}>＋</span>
+                  </button>
+                ));
+              })()}
+            </div>
+          </div>
         </div>
       )}
     </Modal>
