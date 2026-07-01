@@ -5,7 +5,7 @@ import { fmtCur, num } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, Select, Textarea } from '../../ui/components.jsx';
 
-const blankExpense = () => ({ date: todayISO(), amount: '', groupId: '', note: '', currency: 'AED' });
+const blankExpense = () => ({ date: todayISO(), amount: '', groupId: '', note: '', currency: 'AED', paidFrom: 'bank' });
 const blankGroup = () => ({ nameAr: '', nameEn: '', type: 'business', icon: '🧾', color: CATEGORY_COLORS[0], isActive: true });
 
 export default function Expenses() {
@@ -88,7 +88,7 @@ export default function Expenses() {
   const saveExpense = async () => {
     const r = editExpense;
     if (!(num(r.amount) > 0) || !r.groupId) return;
-    const payload = { date: r.date || todayISO(), amount: num(r.amount), groupId: r.groupId, note: r.note || '', currency: r.currency === 'USD' ? 'USD' : 'AED' };
+    const payload = { date: r.date || todayISO(), amount: num(r.amount), groupId: r.groupId, note: r.note || '', currency: r.currency === 'USD' ? 'USD' : 'AED', paidFrom: r.paidFrom === 'drawer' ? 'drawer' : 'bank' };
     if (r.id) await updateRow(TABLES.expenses, r.id, payload); else await createRow(TABLES.expenses, payload);
     setEditExpense(null); setFormType(null);
   };
@@ -281,6 +281,14 @@ export default function Expenses() {
               })()}
             </Field>
             <Field label={t('date')}><Input type="date" value={editExpense.date} onChange={(v) => setEditExpense((r) => ({ ...r, date: v }))} /></Field>
+            <Field label={t('paidFrom')}>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {[['bank', '🏦'], ['drawer', '🗄️']].map(([src, icon]) => {
+                  const on = (editExpense.paidFrom || 'bank') === src;
+                  return <button key={src} onClick={() => setEditExpense((r) => ({ ...r, paidFrom: src }))} style={{ flex: 1, border: `1.5px solid ${on ? C.primary : C.border}`, background: on ? C.primary : '#fff', color: on ? '#fff' : C.textMid, borderRadius: 10, padding: '8px 4px', fontSize: 12, fontWeight: 800, cursor: 'pointer' }}>{icon} {t(src === 'bank' ? 'bankAccount' : 'drawer')}</button>;
+                })}
+              </div>
+            </Field>
             <Field label={t('notes')}><Textarea value={editExpense.note} onChange={(v) => setEditExpense((r) => ({ ...r, note: v }))} rows={2} /></Field>
             {editExpense.id && <Btn variant="outline" onClick={() => { if (window.confirm(t('confirmDelete'))) { deleteRow(TABLES.expenses, editExpense.id); closeExpense(); } }} style={{ color: C.danger }}>{t('delete')}</Btn>}
           </div>

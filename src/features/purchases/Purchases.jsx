@@ -28,6 +28,7 @@ export default function Purchases() {
   const [date, setDate] = useState(todayISO());
   const [lines, setLines] = useState([]);     // [{variantId, qty, unitCost}]
   const [paid, setPaid] = useState('');
+  const [paidFrom, setPaidFrom] = useState('bank'); // which account the payment left
   const [isFree, setIsFree] = useState(false);   // استرجاع مجاني: stock back at no cost, avg untouched
   const [freeInvoiceId, setFreeInvoiceId] = useState(''); // the REAL invoice this restock belongs to (carries the center/doctor)
   const [catId, setCatId] = useState('');
@@ -65,7 +66,7 @@ export default function Purchases() {
     setProdId(''); setPq('');
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const startNew = () => { setEditingId(null); setSupplierId(''); setDate(todayISO()); setLines([]); setPaid(''); setIsFree(false); setFreeInvoiceId(''); setOpen(true); };
+  const startNew = () => { setEditingId(null); setSupplierId(''); setDate(todayISO()); setLines([]); setPaid(''); setPaidFrom('bank'); setIsFree(false); setFreeInvoiceId(''); setOpen(true); };
 
   const openEdit = (po) => {
     const its = (data[TABLES.purchaseItems] || []).filter((x) => x.purchaseId === po.id && x.isActive !== false);
@@ -75,6 +76,7 @@ export default function Purchases() {
     setFreeInvoiceId(po.invoiceId || '');
     setDate(po.date || todayISO());
     setPaid(num(po.paidAmount) >= num(po.totalAED) ? '' : String(num(po.paidAmount)));
+    setPaidFrom(po.paidFrom === 'drawer' ? 'drawer' : 'bank');
     setLines(its.map((it) => ({ variantId: it.variantId, qty: num(it.qty), unitCost: num(it.unitCost) })));
     setOpen(true);
   };
@@ -114,6 +116,7 @@ export default function Purchases() {
         purchaseNumber: number, supplierId: supplierId || null, date, currency: 'AED', exchangeRate: 1,
         totalOriginal: isFree ? 0 : total, totalAED: isFree ? 0 : total,
         paidAmount: isFree ? 0 : (paid === '' ? total : num(paid)),
+        paidFrom,
         isFree,
         invoiceId: isFree ? (freeInvoiceId || null) : null,
         customerId: isFree ? ((data[TABLES.invoices] || []).find((i) => i.id === freeInvoiceId)?.customerId || null) : null,
@@ -313,6 +316,11 @@ export default function Purchases() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
           <span style={{ color: C.textMid, fontSize: 13 }}>{t('paidToSupplier')}</span>
           <Input type="number" value={paid} onChange={(v) => setPaid(v)} placeholder={String(total)} style={{ width: 110, padding: 6 }} />
+          <div style={{ display: 'flex', gap: 4 }}>
+            {[['bank', '🏦'], ['drawer', '🗄️']].map(([src, icon]) => (
+              <button key={src} onClick={() => setPaidFrom(src)} style={{ border: `1.5px solid ${paidFrom === src ? C.primary : C.border}`, background: paidFrom === src ? C.primary : '#fff', color: paidFrom === src ? '#fff' : C.textMid, borderRadius: 8, padding: '5px 8px', fontSize: 11, fontWeight: 800, cursor: 'pointer' }}>{icon}</button>
+            ))}
+          </div>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, fontSize: 13, fontWeight: 700, color: balance > 0 ? C.danger : C.success }}>
           <span>{t('balanceDue')}</span><span>{fmtCur(balance, displayCurrency, usdRate)}</span>

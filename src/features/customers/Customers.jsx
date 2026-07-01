@@ -356,7 +356,7 @@ function CustomerProfile({ customer, onBack, onEdit, t, lang, displayCurrency, u
 
       <PaymentModal open={!!payFor} invoice={payFor} t={t} cur={(v) => fmtCur(v, displayCurrency, usdRate)}
         onClose={() => setPayFor(null)}
-        onRecord={(amount) => recordInvoicePayment(app, payFor.id, amount)} />
+        onRecord={(amount, method) => recordInvoicePayment(app, payFor.id, amount, undefined, method)} />
     </div>
   );
 }

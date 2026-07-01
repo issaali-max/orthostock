@@ -100,7 +100,7 @@ export default function Investments() {
   }, [securities.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const allUSD = securities.filter((x) => x.isActive !== false).every((x) => (x.currency || 'USD') !== 'AED');
   const curTot = (v) => moneyIn(v, allUSD ? 'USD' : 'AED');
-  const flows = useMemo(() => (data[TABLES.cashFlows] || []).slice().sort((a, b) => (b.date || '').localeCompare(a.date || '')), [data]);
+  const flows = useMemo(() => (data[TABLES.cashFlows] || []).filter((f) => (f.account || 'investment') === 'investment').sort((a, b) => (b.date || '').localeCompare(a.date || '')), [data]);
   const cur = (v) => fmtCur(v, displayCurrency, usdRate);
   const pnlColor = (v) => (v > 0 ? C.success : v < 0 ? C.danger : C.textMid);
 

@@ -15,7 +15,7 @@ import { todayISO } from './dates.js';
 
 // Record a payment against an invoice: appends to its payment history,
 // updates paidAmount (capped at total) and recomputes paymentStatus.
-export async function recordInvoicePayment(app, invoiceId, amount, date) {
+export async function recordInvoicePayment(app, invoiceId, amount, date, method = 'cash') {
   const all = await db.getAll(TABLES.invoices);
   const inv = all.find((x) => x.id === invoiceId);
   if (!inv) return null;
@@ -24,11 +24,115 @@ export async function recordInvoicePayment(app, invoiceId, amount, date) {
   const add = Math.max(0, Math.min(num(amount), round2(total - prev))); // can't overpay
   if (add <= 0) return inv;
   const newPaid = round2(prev + add);
-  const payments = [...(inv.payments || []), { date: date || todayISO(), amount: add }];
+  // Each payment carries its own method (partial payments can differ). Cheques start as
+  // 'received' and only count as real money once cleared.
+  const entry = { date: date || todayISO(), amount: add, method };
+  if (method === 'cheque') entry.chequeStatus = 'received';
+  const payments = [...(inv.payments || []), entry];
   const paymentStatus = newPaid >= total ? 'paid' : newPaid > 0 ? 'partial' : 'unpaid';
   const saved = await db.update(TABLES.invoices, invoiceId, { paidAmount: newPaid, paymentStatus, payments });
   await app.refresh(TABLES.invoices);
   return saved;
+}
+
+// ───────────────────────────── Money accounts (bank / drawer / investment) ─────────────────────────────
+// Where the money physically is — separate from profit. Balances are DERIVED from the
+// authoritative sources (invoice payments by method, expenses/purchases by pay source,
+// manual flows) so nothing is ever counted twice.
+
+export const PAYMENT_ACCOUNT = { cash: 'drawer', transfer: 'bank', card: 'bank', cheque: 'bank' };
+
+// Advance/set the status of a cheque payment on an invoice: received → deposited → cleared.
+export async function setChequeStatus(app, invoiceId, paymentIndex, status) {
+  const all = await db.getAll(TABLES.invoices);
+  const inv = all.find((x) => x.id === invoiceId);
+  if (!inv || !inv.payments?.[paymentIndex]) return null;
+  const payments = inv.payments.map((p, i) => (i === paymentIndex ? { ...p, chequeStatus: status } : p));
+  const saved = await db.update(TABLES.invoices, invoiceId, { payments });
+  await app.refresh(TABLES.invoices);
+  return saved;
+}
+
+// Build the full ledger: per-account movements + per-currency balances + pending cheques.
+export function accountLedger(appOrData) {
+  const data = appOrData.data || appOrData;
+  const moves = []; // {account, date, direction, amount, currency, type, label, customerId, invoiceId, invoiceNumber, paymentIndex, method, chequeStatus, pending, reason}
+  const custName = (id) => (data[TABLES.customers] || []).find((c) => c.id === id)?.name || '';
+  const supName = (id) => (data[TABLES.suppliers] || []).find((s) => s.id === id)?.name || '';
+
+  // 1) Invoice payments → bank (transfer/card/cheque) or drawer (cash), linked to invoice+doctor.
+  for (const inv of (data[TABLES.invoices] || [])) {
+    if (inv.isActive === false) continue;
+    (inv.payments || []).forEach((p, i) => {
+      const method = p.method || inv.paymentMethod || 'cash';
+      const account = PAYMENT_ACCOUNT[method] || 'drawer';
+      const pending = method === 'cheque' && p.chequeStatus !== 'cleared';
+      moves.push({
+        account, date: p.date || inv.date, direction: 'in', amount: num(p.amount), currency: inv.currency || 'AED',
+        type: 'invoicePayment', method, chequeStatus: p.chequeStatus, pending,
+        customerId: inv.customerId, customerName: custName(inv.customerId),
+        invoiceId: inv.id, invoiceNumber: inv.invoiceNumber, paymentIndex: i,
+      });
+    });
+  }
+  // Customer opening-debt payments stored on the customer record.
+  for (const c of (data[TABLES.customers] || [])) {
+    for (const p of (c.openingPayments || [])) {
+      moves.push({ account: PAYMENT_ACCOUNT[p.method || 'cash'] || 'drawer', date: p.date, direction: 'in', amount: num(p.amount), currency: 'AED', type: 'invoicePayment', method: p.method || 'cash', customerId: c.id, customerName: c.name, label: 'openingDebt' });
+    }
+  }
+
+  // 2) Expenses → out of bank (default) or drawer.
+  for (const e of (data[TABLES.expenses] || [])) {
+    if (e.isActive === false) continue;
+    moves.push({ account: e.paidFrom === 'drawer' ? 'drawer' : 'bank', date: e.date, direction: 'out', amount: num(e.amount), currency: e.currency || 'AED', type: 'expense', expenseId: e.id, reason: e.note || '' });
+  }
+
+  // 3) Purchases: what was actually paid to suppliers (at purchase + later payments).
+  for (const p of (data[TABLES.purchases] || [])) {
+    if (p.isActive === false) continue;
+    if (num(p.paidAmount) > 0) moves.push({ account: p.paidFrom === 'drawer' ? 'drawer' : 'bank', date: p.date, direction: 'out', amount: num(p.paidAmount), currency: 'AED', type: 'purchase', supplierId: p.supplierId, supplierName: supName(p.supplierId), purchaseId: p.id, reason: p.invoiceRef || '' });
+  }
+  for (const sp of (data[TABLES.supplierPayments] || [])) {
+    if (sp.isActive === false) continue;
+    const account = sp.paidFrom || PAYMENT_ACCOUNT[sp.method || 'cash'] || 'drawer';
+    moves.push({ account, date: sp.date, direction: 'out', amount: num(sp.amount), currency: 'AED', type: 'purchase', supplierId: sp.supplierId, supplierName: supName(sp.supplierId), reason: sp.note || '' });
+  }
+
+  // 4) Manual flows on bank/drawer (deposit/withdraw/transfer). Legacy rows without an
+  //    account belong to the investment and are handled by portfolioStats, not here —
+  //    except transfers touching bank/drawer which are written with explicit accounts.
+  for (const f of (data[TABLES.cashFlows] || [])) {
+    if (f.isActive === false) continue;
+    const account = f.account || 'investment';
+    if (account !== 'bank' && account !== 'drawer') continue;
+    const dirIn = f.type === 'deposit' || f.type === 'transferIn';
+    moves.push({ account, date: f.date, direction: dirIn ? 'in' : 'out', amount: num(f.amount), currency: f.currency || 'AED', type: f.type, reason: f.reason || f.notes || '', flowId: f.id, otherAccount: f.toAccount || f.fromAccount });
+  }
+
+  // Balances per account per currency; pending cheques excluded from balance.
+  const blank = () => ({ AED: 0, USD: 0 });
+  const balances = { bank: blank(), drawer: blank() };
+  const pendingCheques = [];
+  for (const m of moves) {
+    if (m.account !== 'bank' && m.account !== 'drawer') continue;
+    if (m.pending) { pendingCheques.push(m); continue; }
+    const cur = m.currency === 'USD' ? 'USD' : 'AED';
+    balances[m.account][cur] = round2(balances[m.account][cur] + (m.direction === 'in' ? m.amount : -m.amount));
+  }
+  moves.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  return { moves, balances, pendingCheques, pendingChequesTotal: round2(pendingCheques.reduce((s, m) => s + m.amount, 0)) };
+}
+
+// Move money between accounts (bank/drawer/investment) as two linked flow rows —
+// one out of the source, one into the target — so each side's ledger stays honest.
+export async function transferBetweenAccounts(app, { from, to, amount, date, reason }) {
+  const a = num(amount); if (!(a > 0) || from === to) return null;
+  const transferId = crypto.randomUUID();
+  const base = { date: date || todayISO(), amount: a, currency: 'AED', reason: reason || '', transferId };
+  await db.insert(TABLES.cashFlows, { ...base, account: from, type: from === 'investment' ? 'withdraw' : 'transferOut', toAccount: to });
+  await db.insert(TABLES.cashFlows, { ...base, account: to, type: to === 'investment' ? 'deposit' : 'transferIn', fromAccount: from });
+  await app.refresh(TABLES.cashFlows);
 }
 
 // Record a manual stock change as an audit movement (the variant's stockQty
@@ -817,7 +921,9 @@ export function portfolioStats(data, priceOf) {
   const securities = (data[TABLES.securities] || []).filter((s) => s.isActive !== false);
   const lots = data[TABLES.tradeLots] || [];
   const sells = data[TABLES.tradeSells] || [];
-  const flows = data[TABLES.cashFlows] || [];
+  // Only investment-account flows: bank/drawer movements share the cashFlows table
+  // (records without an account are legacy investment rows).
+  const flows = (data[TABLES.cashFlows] || []).filter((f) => (f.account || 'investment') === 'investment');
   const priceFor = (s) => { const p = priceOf ? priceOf(s.id) : undefined; return p != null ? num(p) : num(s.currentPrice); };
 
   const positions = securities.map((s) => {

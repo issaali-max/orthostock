@@ -111,7 +111,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
     try {
       const number = editing ? editing.invoiceNumber : await nextNumber(TABLES.invoices, 'INV', 'invoiceNumber');
       const paid = paymentStatus === 'paid' ? totals.total : paymentStatus === 'partial' ? num(paidAmount) : 0;
-      const payments = editing?.payments?.length ? editing.payments : (paid > 0 ? [{ date, amount: round2(paid) }] : []);
+      const payments = editing?.payments?.length ? editing.payments : (paid > 0 ? [{ date, amount: round2(paid), method: paymentMethod, ...(paymentMethod === 'cheque' ? { chequeStatus: 'received' } : {}) }] : []);
       await saveInvoiceAtomic(app, {
         editingId: editing ? editing.id : null,
         invoiceData: {
@@ -356,9 +356,8 @@ export default function InvoiceCreate({ open, onClose, editing }) {
       </Field>
       <Field label={t('paymentMethod')}>
         <Select value={paymentMethod} onChange={setPaymentMethod} options={[
-          { value: 'cash', label: t('payCash') }, { value: 'card', label: t('payCard') },
+          { value: 'cash', label: t('payCash') },
           { value: 'transfer', label: t('payTransfer') }, { value: 'cheque', label: t('payCheque') },
-          { value: 'credit', label: t('payCredit') },
         ]} />
       </Field>
       {paymentStatus === 'partial' && (

@@ -287,13 +287,16 @@ export function PageHeader({ title, action }) {
 // Presentational: calls onRecord(amount). `cur` formats currency, `t` translates.
 export function PaymentModal({ open, onClose, invoice, t, cur, onRecord }) {
   const [amount, setAmount] = useState('');
-  useEffect(() => { if (open) setAmount(''); }, [open, invoice?.id]);
+  const [method, setMethod] = useState('cash');
+  useEffect(() => { if (open) { setAmount(''); setMethod('cash'); } }, [open, invoice?.id]);
   if (!invoice) return null;
   const total = Number(invoice.total) || 0;
   const paid = Number(invoice.paidAmount) || 0;
   const remaining = Math.round((total - paid) * 100) / 100;
   const history = invoice.payments || [];
-  const submit = () => { const a = Number(amount) || 0; if (a > 0) { onRecord(a); onClose(); } };
+  const submit = () => { const a = Number(amount) || 0; if (a > 0) { onRecord(a, method); onClose(); } };
+  const mLabel = { cash: t('payCash'), transfer: t('payTransfer'), cheque: t('payCheque'), card: t('payCard') };
+  const mIcon = { cash: '💵', transfer: '🏦', cheque: '🧾', card: '💳' };
   return (
     <Modal open={open} onClose={onClose} title={`${t('recordPayment')} · ${invoice.invoiceNumber || ''}`}
       footer={<><Btn variant="ghost" onClick={onClose}>{t('cancel')}</Btn><Btn onClick={submit} disabled={!(Number(amount) > 0)}>{t('save')}</Btn></>}>
@@ -312,17 +315,29 @@ export function PaymentModal({ open, onClose, invoice, t, cur, onRecord }) {
         </div>
       </div>
       {remaining > 0 ? (
-        <Field label={t('paymentAmount')}>
-          <Input type="number" value={amount} placeholder={String(remaining)} onChange={(v) => setAmount(v === '' ? '' : Math.min(Math.max(0, Number(v) || 0), remaining))} />
-        </Field>
+        <>
+          <Field label={t('paymentAmount')}>
+            <Input type="number" value={amount} placeholder={String(remaining)} onChange={(v) => setAmount(v === '' ? '' : Math.min(Math.max(0, Number(v) || 0), remaining))} />
+          </Field>
+          <Field label={t('paymentMethod')}>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {['cash', 'transfer', 'cheque'].map((m) => (
+                <button key={m} onClick={() => setMethod(m)} style={{ flex: 1, border: `1.5px solid ${method === m ? C.primary : C.border}`, background: method === m ? C.primary : '#fff', color: method === m ? '#fff' : C.textMid, borderRadius: 10, padding: '8px 4px', fontSize: 12, fontWeight: 800, cursor: 'pointer' }}>{mIcon[m]} {mLabel[m]}</button>
+              ))}
+            </div>
+          </Field>
+          {method === 'cheque' && <div style={{ fontSize: 11.5, color: C.warning, fontWeight: 700, marginTop: -4, marginBottom: 6 }}>🧾 الشيك لا يُحسب نقداً إلا بعد تحصيله (تُتابع حالته في قسم الأموال).</div>}
+        </>
       ) : <div style={{ color: C.success, fontWeight: 700, textAlign: 'center', padding: 8 }}>✓ {t('paid')}</div>}
       {history.length > 0 && (
         <div style={{ marginTop: 10 }}>
           <div style={{ fontSize: 12, fontWeight: 800, color: C.textMid, marginBottom: 6 }}>{t('paymentsHistory')}</div>
           <div style={{ display: 'grid', gap: 4 }}>
             {history.map((p, i) => (
-              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: C.textMid, background: C.surfaceAlt, borderRadius: 8, padding: '5px 9px' }}>
-                <span>{p.date}</span><span style={{ fontWeight: 700, color: C.success }}>+{cur(p.amount)}</span>
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, fontSize: 12, color: C.textMid, background: C.surfaceAlt, borderRadius: 8, padding: '5px 9px' }}>
+                <span>{p.date}</span>
+                <span style={{ flex: 1, fontSize: 11, color: C.textMuted }}>{p.method ? `${mIcon[p.method] || ''} ${mLabel[p.method] || p.method}` : ''}{p.method === 'cheque' && p.chequeStatus !== 'cleared' ? ' ⏳' : ''}</span>
+                <span style={{ fontWeight: 700, color: p.method === 'cheque' && p.chequeStatus !== 'cleared' ? C.warning : C.success }}>+{cur(p.amount)}</span>
               </div>
             ))}
           </div>

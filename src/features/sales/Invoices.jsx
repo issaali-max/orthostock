@@ -68,7 +68,7 @@ export default function Invoices() {
       <FreeRestockModal open={showFree} onClose={() => setShowFree(false)} />
       <PaymentModal open={!!payFor} invoice={payFor} t={t} cur={cur}
         onClose={() => setPayFor(null)}
-        onRecord={(amount) => recordInvoicePayment(app, payFor.id, amount)} />
+        onRecord={(amount, method) => recordInvoicePayment(app, payFor.id, amount, undefined, method)} />
     </div>
   );
 }
