@@ -134,12 +134,30 @@ export function accountLedger(appOrData) {
 
 // Move money between accounts (bank/drawer/investment) as two linked flow rows —
 // one out of the source, one into the target — so each side's ledger stays honest.
-export async function transferBetweenAccounts(app, { from, to, amount, date, reason }) {
+// CURRENCY RULE: the investment (broker) account operates in USD; bank & drawer are AED-
+// based. A transfer touching the investment therefore CONVERTS at the given usdRate,
+// and each leg is stored in its own account's currency — explicit, no silent mixing.
+export const ACCOUNT_CURRENCY = { bank: 'AED', drawer: 'AED', investment: 'USD' };
+
+// Pure: build the two legs of a transfer. `amount` is in the SOURCE account's currency.
+export function transferLegs({ from, to, amount, rate }) {
+  const a = num(amount); const r = num(rate) || 3.6725;
+  const cFrom = ACCOUNT_CURRENCY[from] || 'AED';
+  const cTo = ACCOUNT_CURRENCY[to] || 'AED';
+  const target = cFrom === cTo ? a : (cFrom === 'USD' ? round2(a * r) : round2(a / r));
+  return [
+    { account: from, type: from === 'investment' ? 'withdraw' : 'transferOut', amount: round2(a), currency: cFrom, toAccount: to },
+    { account: to, type: to === 'investment' ? 'deposit' : 'transferIn', amount: target, currency: cTo, fromAccount: from },
+  ];
+}
+
+export async function transferBetweenAccounts(app, { from, to, amount, date, reason, rate }) {
   const a = num(amount); if (!(a > 0) || from === to) return null;
   const transferId = crypto.randomUUID();
-  const base = { date: date || todayISO(), amount: a, currency: 'AED', reason: reason || '', transferId };
-  await db.insert(TABLES.cashFlows, { ...base, account: from, type: from === 'investment' ? 'withdraw' : 'transferOut', toAccount: to });
-  await db.insert(TABLES.cashFlows, { ...base, account: to, type: to === 'investment' ? 'deposit' : 'transferIn', fromAccount: from });
+  const base = { date: date || todayISO(), reason: reason || '', transferId };
+  for (const leg of transferLegs({ from, to, amount: a, rate })) {
+    await db.insert(TABLES.cashFlows, { ...base, ...leg });
+  }
   await app.refresh(TABLES.cashFlows);
 }
 
@@ -152,15 +170,15 @@ export function investmentMovements(data) {
   for (const f of (data[TABLES.cashFlows] || [])) {
     if (f.isActive === false || (f.account || 'investment') !== 'investment') continue;
     const dirIn = f.type === 'deposit' || f.type === 'dividend' || f.type === 'interest';
-    moves.push({ account: 'investment', date: f.date, direction: dirIn ? 'in' : 'out', amount: num(f.amount), currency: 'AED', type: f.type, reason: f.reason || f.notes || '', symbol: symbolOf(f.securityId), otherAccount: f.toAccount || f.fromAccount, flowId: f.id });
+    moves.push({ account: 'investment', date: f.date, direction: dirIn ? 'in' : 'out', amount: num(f.amount), currency: 'USD', type: f.type, reason: f.reason || f.notes || '', symbol: symbolOf(f.securityId), otherAccount: f.toAccount || f.fromAccount, flowId: f.id });
   }
   for (const l of (data[TABLES.tradeLots] || [])) {
     if (l.isActive === false) continue;
-    moves.push({ account: 'investment', date: l.buyDate, direction: 'out', amount: num(l.costBasis), currency: 'AED', type: 'buy', symbol: symbolOf(l.securityId), qty: num(l.qtyBought) });
+    moves.push({ account: 'investment', date: l.buyDate, direction: 'out', amount: num(l.costBasis), currency: 'USD', type: 'buy', symbol: symbolOf(l.securityId), qty: num(l.qtyBought) });
   }
   for (const x of (data[TABLES.tradeSells] || [])) {
     if (x.isActive === false) continue;
-    moves.push({ account: 'investment', date: x.sellDate, direction: 'in', amount: num(x.proceeds), currency: 'AED', type: 'sell', symbol: symbolOf(x.securityId), qty: num(x.qty) });
+    moves.push({ account: 'investment', date: x.sellDate, direction: 'in', amount: num(x.proceeds), currency: 'USD', type: 'sell', symbol: symbolOf(x.securityId), qty: num(x.qty) });
   }
   moves.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   return moves;
@@ -920,7 +938,7 @@ export async function commitBuy(app, { securityId, buyDate, qty, pricePerShare, 
   const q = num(qty), price = num(pricePerShare), f = num(fees);
   await db.insert(TABLES.tradeLots, {
     securityId, buyDate, qtyBought: q, qtyRemaining: q,
-    buyPricePerShare: price, buyFees: f, costBasis: round2(q * price + f), currency: 'AED', notes: '',
+    buyPricePerShare: price, buyFees: f, costBasis: round2(q * price + f), currency: 'USD', notes: '', // investment account = USD
   });
   await app.refresh(TABLES.tradeLots);
 }
@@ -942,7 +960,7 @@ export async function commitSell(app, { securityId, sellDate, qty, pricePerShare
   const proceeds = round2(soldQty * price - f);
   await db.insert(TABLES.tradeSells, {
     securityId, sellDate, qty: soldQty, sellPricePerShare: price, sellFees: f,
-    proceeds, costBasisMatched: round2(costMatched), realizedPnL: round2(proceeds - costMatched), currency: 'AED', notes: '',
+    proceeds, costBasisMatched: round2(costMatched), realizedPnL: round2(proceeds - costMatched), currency: 'USD', notes: '',
   });
   await Promise.all([app.refresh(TABLES.tradeLots), app.refresh(TABLES.tradeSells)]);
   nudgeSync();

@@ -4,9 +4,9 @@ import { C, TABLES } from '../../lib/constants.js';
 import { num, fmtNum, round2, fmtCur } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
 import { PageHeader, Card, Btn, Field, Input, Select, Modal, Badge, EmptyState } from '../../ui/components.jsx';
-import { accountLedger, portfolioStats, setChequeStatus, transferBetweenAccounts, investmentMovements } from '../../lib/engine.js';
+import { accountLedger, portfolioStats, setChequeStatus, transferBetweenAccounts, transferLegs, ACCOUNT_CURRENCY, investmentMovements } from '../../lib/engine.js';
 
-const ccy = (v, code = 'AED') => `${fmtNum(round2(v))} ${code}`;
+const ccy = (v, code = 'AED') => (code === 'USD' ? `$${fmtNum(round2(v))}` : `${fmtNum(round2(v))} ${code}`);
 
 // «الأموال» — where the money physically is: bank / drawer / investment. Balances are
 // derived from real records (invoice payments by method, expenses & purchases by source,
@@ -35,13 +35,15 @@ export default function Treasury() {
     const r = flowForm; const a = num(r.amount);
     if (!(a > 0)) return;
     if (r.type === 'withdraw' && !r.reason.trim()) { showToast(t('reasonRequired'), 'error'); return; }
-    await createRow(TABLES.cashFlows, { account: r.account, type: r.type, amount: a, currency: 'AED', date: r.date || todayISO(), reason: r.reason || '' });
+    // Currency rule: investment flows are USD; bank/drawer flows use the chosen currency (AED default).
+    const currency = r.account === 'investment' ? 'USD' : (r.currency === 'USD' ? 'USD' : 'AED');
+    await createRow(TABLES.cashFlows, { account: r.account, type: r.type, amount: a, currency, date: r.date || todayISO(), reason: r.reason || '' });
     setFlowForm(null); showToast(t('saved'), 'success');
   };
   const saveXfer = async () => {
     const r = xfer; const a = num(r.amount);
     if (!(a > 0) || r.from === r.to) return;
-    await transferBetweenAccounts(app, r);
+    await transferBetweenAccounts(app, { ...r, rate });
     setXfer(null); showToast(t('saved'), 'success');
   };
   const advanceCheque = async (m) => {
@@ -174,15 +176,15 @@ export default function Treasury() {
           </div>
           <div style={{ display: 'flex', gap: 14, marginTop: 4 }}>
             <div>
-              <div style={{ fontSize: 17, fontWeight: 900, color: num(inv.cash) < 0 ? C.danger : C.warning }}>{ccy(inv.cash || 0)}</div>
+              <div style={{ fontSize: 17, fontWeight: 900, color: num(inv.cash) < 0 ? C.danger : C.warning }}>{ccy(inv.cash || 0, 'USD')}</div>
               <div style={{ fontSize: 10, color: C.textMuted }}>{t('cashBalance')}</div>
             </div>
             <div>
-              <div style={{ fontSize: 17, fontWeight: 900, color: C.text }}>{ccy(inv.holdingsValue || 0)}</div>
+              <div style={{ fontSize: 17, fontWeight: 900, color: C.text }}>{ccy(inv.holdingsValue || 0, 'USD')}</div>
               <div style={{ fontSize: 10, color: C.textMuted }}>{t('holdings')}</div>
             </div>
             <div>
-              <div style={{ fontSize: 17, fontWeight: 900, color: C.primary }}>{ccy(inv.accountValue || 0)}</div>
+              <div style={{ fontSize: 17, fontWeight: 900, color: C.primary }}>{ccy(inv.accountValue || 0, 'USD')}</div>
               <div style={{ fontSize: 10, color: C.textMuted }}>{t('accountValue') || 'قيمة الحساب'}</div>
             </div>
           </div>
@@ -205,8 +207,8 @@ export default function Treasury() {
               <div style={{ fontSize: 11, fontWeight: 700, color: C.textMid }}>{view === 'investment' ? t('cashBalance') : t('balance')}</div>
               {view === 'investment' ? (
                 <>
-                  <div style={{ fontSize: 24, fontWeight: 900, color: num(inv.cash) < 0 ? C.danger : ACC.investment.color }}>{ccy(inv.cash || 0)}</div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: C.textMid }}>{t('holdings')}: {ccy(inv.holdingsValue || 0)} · {t('accountValue') || 'قيمة الحساب'}: {ccy(inv.accountValue || 0)}</div>
+                  <div style={{ fontSize: 24, fontWeight: 900, color: num(inv.cash) < 0 ? C.danger : ACC.investment.color }}>{ccy(inv.cash || 0, 'USD')}</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: C.textMid }}>{t('holdings')}: {ccy(inv.holdingsValue || 0, 'USD')} · {t('accountValue')}: {ccy(inv.accountValue || 0, 'USD')}</div>
                   {num(inv.cash) < 0 && <div style={{ fontSize: 11, color: C.danger, fontWeight: 800, marginTop: 3 }}>⚠ {t('negativeInvCashHint')}</div>}
                 </>
               ) : (
@@ -260,7 +262,19 @@ export default function Treasury() {
                 })}
               </div>
             </Field>
-            <Field label={t('amount')} required><Input type="number" value={flowForm.amount} onChange={(v) => setFlowForm((r) => ({ ...r, amount: v }))} /></Field>
+            <Field label={`${t('amount')} (${flowForm.account === 'investment' ? 'USD $' : (flowForm.currency === 'USD' ? 'USD $' : 'AED')})`} required>
+              <Input type="number" value={flowForm.amount} onChange={(v) => setFlowForm((r) => ({ ...r, amount: v }))} />
+            </Field>
+            {flowForm.account !== 'investment' && (
+              <Field label={t('currency')}>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {['AED', 'USD'].map((c) => {
+                    const on = (flowForm.currency || 'AED') === c;
+                    return <button key={c} onClick={() => setFlowForm((r) => ({ ...r, currency: c }))} style={{ flex: 1, border: `1.5px solid ${on ? C.primary : C.border}`, background: on ? C.primary : '#fff', color: on ? '#fff' : C.textMid, borderRadius: 10, padding: '7px 4px', fontSize: 12, fontWeight: 800, cursor: 'pointer' }}>{c === 'USD' ? '$ USD' : 'AED'}</button>;
+                  })}
+                </div>
+              </Field>
+            )}
             <Field label={t('date')}><Input type="date" value={flowForm.date} onChange={(v) => setFlowForm((r) => ({ ...r, date: v }))} /></Field>
             <Field label={t('reason')} required={flowForm.type === 'withdraw'}>
               {flowForm.type === 'withdraw' && (
@@ -295,7 +309,15 @@ export default function Treasury() {
               </div>
             </div>
             {xfer.from === xfer.to && <div style={{ fontSize: 11.5, color: C.danger, fontWeight: 700 }}>اختر حسابين مختلفين.</div>}
-            <Field label={t('amount')} required><Input type="number" value={xfer.amount} onChange={(v) => setXfer((r) => ({ ...r, amount: v }))} /></Field>
+            <Field label={`${t('amount')} (${ACCOUNT_CURRENCY[xfer.from] === 'USD' ? 'USD $' : 'AED'})`} required>
+              <Input type="number" value={xfer.amount} onChange={(v) => setXfer((r) => ({ ...r, amount: v }))} />
+            </Field>
+            {ACCOUNT_CURRENCY[xfer.from] !== ACCOUNT_CURRENCY[xfer.to] && num(xfer.amount) > 0 && (() => {
+              const legs = transferLegs({ from: xfer.from, to: xfer.to, amount: num(xfer.amount), rate });
+              return <div style={{ fontSize: 12, fontWeight: 800, color: C.primary, background: C.primary + '10', borderRadius: 9, padding: '8px 12px', textAlign: 'center' }}>
+                {ccy(legs[0].amount, legs[0].currency)} ← {ccy(legs[1].amount, legs[1].currency)} <span style={{ color: C.textMuted, fontWeight: 600 }}>(1$ = {rate} AED)</span>
+              </div>;
+            })()}
             <Field label={t('reason')}><Input value={xfer.reason} onChange={(v) => setXfer((r) => ({ ...r, reason: v }))} /></Field>
             {(xfer.from === 'investment' || xfer.to === 'investment') && <div style={{ fontSize: 11, color: C.textMuted }}>ℹ️ {t('investmentTransferNote')}</div>}
           </div>

@@ -85,11 +85,13 @@ export default function Investments() {
 
   const priceOf = useMemo(() => (live ? (sid) => livePrices[sid] : undefined), [live, livePrices]);
   const stats = useMemo(() => portfolioStats(data, priceOf), [data[TABLES.securities], data[TABLES.tradeLots], data[TABLES.tradeSells], data[TABLES.cashFlows], priceOf]); // eslint-disable-line react-hooks/exhaustive-deps
-  // each security displays in ITS OWN currency; USD never converted by mistake
+  // CURRENCY RULE: the investment (broker) account is USD. Every account amount —
+  // cash, deposits, dividends, buy costs, sell proceeds, per-share prices — shows as $.
+  // AED formatting exists only for the rare AED-denominated security.
+  const aedFmt = (v) => fmtCur(v, displayCurrency, usdRate);
   const ccyOf = (id) => (securities.find((x) => x.id === id)?.currency) === 'AED' ? 'AED' : 'USD';
-  const moneyIn = (v, ccy) => ccy === 'USD' ? `$${fmtNum(round2(num(v)))}` : cur(v);
+  const moneyIn = (v, ccy) => ccy === 'USD' ? `$${fmtNum(round2(num(v)))}` : aedFmt(v);
   const curFor = (id) => (v) => moneyIn(v, ccyOf(id));
-  // portfolio totals: if every active security is USD (the common case), show $
   useEffect(() => {
     if (settings.ccyMigrated) return;
     const aed = securities.filter((x) => x.currency === 'AED');
@@ -98,7 +100,7 @@ export default function Investments() {
   }, [securities.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const allUSD = securities.filter((x) => x.isActive !== false).every((x) => (x.currency || 'USD') !== 'AED');
   const curTot = (v) => moneyIn(v, allUSD ? 'USD' : 'AED');
-  const cur = (v) => fmtCur(v, displayCurrency, usdRate);
+  const cur = (v) => moneyIn(v, 'USD');
   const pnlColor = (v) => (v > 0 ? C.success : v < 0 ? C.danger : C.textMid);
 
   const active = stats.positions.filter((p) => p.qty > 0 || !p.everTraded);
