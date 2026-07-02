@@ -4,7 +4,7 @@ import { C, TABLES } from '../../lib/constants.js';
 import { num, fmtNum, round2, fmtCur } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
 import { PageHeader, Card, Btn, Field, Input, Select, Modal, Badge, EmptyState } from '../../ui/components.jsx';
-import { accountLedger, portfolioStats, setChequeStatus, transferBetweenAccounts } from '../../lib/engine.js';
+import { accountLedger, portfolioStats, setChequeStatus, transferBetweenAccounts, investmentMovements } from '../../lib/engine.js';
 
 const ccy = (v, code = 'AED') => `${fmtNum(round2(v))} ${code}`;
 
@@ -20,6 +20,7 @@ export default function Treasury() {
 
   const ledger = useMemo(() => accountLedger(data), [data]);
   const inv = useMemo(() => portfolioStats(data), [data]);
+  const invMoves = useMemo(() => investmentMovements(data), [data]);
   const rate = num(usdRate) || 3.6725;
   const totalAED = (b) => round2(b.AED + b.USD * rate);
 
@@ -87,6 +88,15 @@ export default function Treasury() {
       title = m.supplierName || t('purchases');
       chip = <span style={{ fontSize: 9.5, fontWeight: 800, color: C.textMid, background: C.surfaceAlt, borderRadius: 999, padding: '2px 7px' }}>{t('purchases')}</span>;
       if (m.reason) detail += ` · ${m.reason}`;
+    } else if (m.type === 'buy' || m.type === 'sell') {
+      icon = m.type === 'buy' ? '📥' : '📤';
+      title = `${t(m.type)} ${m.symbol || ''}`.trim();
+      if (m.qty) detail += ` · ×${fmtNum(m.qty)}`;
+      chip = <span style={{ fontSize: 9.5, fontWeight: 800, color: C.warning, background: C.warning + '16', borderRadius: 999, padding: '2px 7px' }}>{t('portfolio')}</span>;
+    } else if (m.type === 'dividend' || m.type === 'fee' || m.type === 'interest') {
+      icon = m.type === 'dividend' ? '💰' : m.type === 'fee' ? '🧾' : '🏦';
+      title = `${t(m.type)}${m.symbol ? ` · ${m.symbol}` : ''}`;
+      if (m.reason) detail += ` · ${m.reason}`;
     } else {
       const meta = typeMeta(m); icon = meta.icon; title = meta.label;
       if (m.reason) detail += ` · ${m.reason}`;
@@ -131,11 +141,11 @@ export default function Treasury() {
 
   const viewMoves = useMemo(() => {
     if (!view) return [];
-    const mine = ledger.moves.filter((m) => m.account === view);
-    if (moveFilter === 'all') return mine;
+    const mine = view === 'investment' ? invMoves : ledger.moves.filter((m) => m.account === view);
+    if (view === 'investment' || moveFilter === 'all') return mine;
     if (moveFilter === 'manual') return mine.filter((m) => !['invoicePayment', 'expense', 'purchase'].includes(m.type));
     return mine.filter((m) => m.type === moveFilter);
-  }, [view, ledger, moveFilter]);
+  }, [view, ledger, invMoves, moveFilter]);
 
   // Expense totals per type (عمل/شخصي/بيت) for the current account — the professional view.
   const expByType = useMemo(() => {
@@ -156,19 +166,24 @@ export default function Treasury() {
       <div style={{ display: 'grid', gap: 10, marginBottom: 12 }}>
         <AccountCard id="bank" />
         <AccountCard id="drawer" />
-        <Card style={{ borderTop: `3px solid ${C.warning}` }}>
+        <Card onClick={() => setView('investment')} style={{ cursor: 'pointer', borderTop: `3px solid ${C.warning}` }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: 20 }}>📈</span>
             <span style={{ fontWeight: 900, fontSize: 13.5, color: C.text, flex: 1 }}>{t('investments')}</span>
+            <span style={{ color: C.textMuted }}>›</span>
           </div>
           <div style={{ display: 'flex', gap: 14, marginTop: 4 }}>
             <div>
-              <div style={{ fontSize: 17, fontWeight: 900, color: C.warning }}>{ccy(inv.cash ?? inv.cashBalance ?? 0, 'USD')}</div>
-              <div style={{ fontSize: 10, color: C.textMuted }}>{t('cashTab')}</div>
+              <div style={{ fontSize: 17, fontWeight: 900, color: num(inv.cash) < 0 ? C.danger : C.warning }}>{ccy(inv.cash || 0)}</div>
+              <div style={{ fontSize: 10, color: C.textMuted }}>{t('cashBalance')}</div>
             </div>
             <div>
-              <div style={{ fontSize: 17, fontWeight: 900, color: C.text }}>{ccy(inv.holdingsValue || 0, 'USD')}</div>
-              <div style={{ fontSize: 10, color: C.textMuted }}>{t('portfolio')}</div>
+              <div style={{ fontSize: 17, fontWeight: 900, color: C.text }}>{ccy(inv.holdingsValue || 0)}</div>
+              <div style={{ fontSize: 10, color: C.textMuted }}>{t('holdings')}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 17, fontWeight: 900, color: C.primary }}>{ccy(inv.accountValue || 0)}</div>
+              <div style={{ fontSize: 10, color: C.textMuted }}>{t('accountValue') || 'قيمة الحساب'}</div>
             </div>
           </div>
           <div style={{ fontSize: 10.5, color: C.textMuted, marginTop: 4 }}>{t('investmentStaysNote')}</div>
@@ -187,14 +202,24 @@ export default function Treasury() {
         {view && (
           <div style={{ display: 'grid', gap: 10 }}>
             <Card style={{ textAlign: 'center', background: ACC[view].color + '10', border: 'none' }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: C.textMid }}>{t('balance')}</div>
-              <div style={{ fontSize: 24, fontWeight: 900, color: ledger.balances[view].AED < 0 ? C.danger : ACC[view].color }}>{ccy(ledger.balances[view].AED)}</div>
-              {ledger.balances[view].USD !== 0 && <div style={{ fontSize: 12, fontWeight: 700, color: ledger.balances[view].USD < 0 ? C.danger : C.textMid }}>+ {ccy(ledger.balances[view].USD, 'USD')}</div>}
-              {view === 'bank' && ledger.pendingChequesTotal > 0 && <div style={{ fontSize: 11, color: C.warning, fontWeight: 800, marginTop: 3 }}>⏳ {t('pendingCheques')}: {ccy(ledger.pendingChequesTotal)} ({t('notCountedUntilCleared')})</div>}
+              <div style={{ fontSize: 11, fontWeight: 700, color: C.textMid }}>{view === 'investment' ? t('cashBalance') : t('balance')}</div>
+              {view === 'investment' ? (
+                <>
+                  <div style={{ fontSize: 24, fontWeight: 900, color: num(inv.cash) < 0 ? C.danger : ACC.investment.color }}>{ccy(inv.cash || 0)}</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: C.textMid }}>{t('holdings')}: {ccy(inv.holdingsValue || 0)} · {t('accountValue') || 'قيمة الحساب'}: {ccy(inv.accountValue || 0)}</div>
+                  {num(inv.cash) < 0 && <div style={{ fontSize: 11, color: C.danger, fontWeight: 800, marginTop: 3 }}>⚠ {t('negativeInvCashHint')}</div>}
+                </>
+              ) : (
+                <>
+                  <div style={{ fontSize: 24, fontWeight: 900, color: ledger.balances[view].AED < 0 ? C.danger : ACC[view].color }}>{ccy(ledger.balances[view].AED)}</div>
+                  {ledger.balances[view].USD !== 0 && <div style={{ fontSize: 12, fontWeight: 700, color: ledger.balances[view].USD < 0 ? C.danger : C.textMid }}>+ {ccy(ledger.balances[view].USD, 'USD')}</div>}
+                  {view === 'bank' && ledger.pendingChequesTotal > 0 && <div style={{ fontSize: 11, color: C.warning, fontWeight: 800, marginTop: 3 }}>⏳ {t('pendingCheques')}: {ccy(ledger.pendingChequesTotal)} ({t('notCountedUntilCleared')})</div>}
+                </>
+              )}
             </Card>
 
             {/* expenses by type — عمل / شخصي / بيت */}
-            {expByType && (expByType.business + expByType.personal + expByType.home) > 0 && (
+            {view !== 'investment' && expByType && (expByType.business + expByType.personal + expByType.home) > 0 && (
               <div style={{ display: 'flex', gap: 6 }}>
                 {[['business', '🏢', C.primary], ['personal', '👤', C.warning], ['home', '🏠', C.success]].map(([ty, icon, col]) => (
                   <div key={ty} style={{ flex: 1, background: col + '10', border: `1px solid ${col}30`, borderRadius: 10, padding: '7px 6px', textAlign: 'center' }}>
@@ -206,11 +231,11 @@ export default function Treasury() {
             )}
 
             {/* filter chips */}
-            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+            {view !== 'investment' && <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
               {[['all', t('all') || 'الكل'], ['invoicePayment', t('invoicePayment')], ['expense', t('expenses')], ['purchase', t('purchases')], ['manual', t('manual')]].map(([id, label]) => (
                 <button key={id} onClick={() => setMoveFilter(id)} style={{ border: `1px solid ${moveFilter === id ? ACC[view].color : C.border}`, background: moveFilter === id ? ACC[view].color + '14' : '#fff', color: moveFilter === id ? ACC[view].color : C.textMid, borderRadius: 999, padding: '4px 11px', fontSize: 11.5, fontWeight: 800, cursor: 'pointer' }}>{label}</button>
               ))}
-            </div>
+            </div>}
 
             <div style={{ fontSize: 12.5, fontWeight: 900, color: C.textMid }}>📜 {t('movements')} ({viewMoves.length})</div>
             {viewMoves.length === 0 ? <EmptyState icon="📜" text={t('noData')} /> : (
@@ -229,7 +254,7 @@ export default function Treasury() {
           <div style={{ display: 'grid', gap: 10 }}>
             <Field label={t('account')}>
               <div style={{ display: 'flex', gap: 6 }}>
-                {['drawer', 'bank'].map((id) => {
+                {['drawer', 'bank', 'investment'].map((id) => {
                   const on = flowForm.account === id;
                   return <button key={id} onClick={() => setFlowForm((r) => ({ ...r, account: id }))} style={{ flex: 1, border: `1.5px solid ${on ? ACC[id].color : C.border}`, background: on ? ACC[id].color : '#fff', color: on ? '#fff' : C.textMid, borderRadius: 10, padding: '9px 4px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer' }}>{ACC[id].icon} {ACC[id].label}</button>;
                 })}

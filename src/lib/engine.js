@@ -143,6 +143,29 @@ export async function transferBetweenAccounts(app, { from, to, amount, date, rea
   await app.refresh(TABLES.cashFlows);
 }
 
+// The investment account's own statement, everything in AED (the account's currency):
+// manual flows (deposit/withdraw incl. transfer legs, dividend, fee, interest) merged
+// with actual stock trades (buy = cash out, sell = cash in). Sorted newest first.
+export function investmentMovements(data) {
+  const symbolOf = (sid) => (data[TABLES.securities] || []).find((s) => s.id === sid)?.symbol || '';
+  const moves = [];
+  for (const f of (data[TABLES.cashFlows] || [])) {
+    if (f.isActive === false || (f.account || 'investment') !== 'investment') continue;
+    const dirIn = f.type === 'deposit' || f.type === 'dividend' || f.type === 'interest';
+    moves.push({ account: 'investment', date: f.date, direction: dirIn ? 'in' : 'out', amount: num(f.amount), currency: 'AED', type: f.type, reason: f.reason || f.notes || '', symbol: symbolOf(f.securityId), otherAccount: f.toAccount || f.fromAccount, flowId: f.id });
+  }
+  for (const l of (data[TABLES.tradeLots] || [])) {
+    if (l.isActive === false) continue;
+    moves.push({ account: 'investment', date: l.buyDate, direction: 'out', amount: num(l.costBasis), currency: 'AED', type: 'buy', symbol: symbolOf(l.securityId), qty: num(l.qtyBought) });
+  }
+  for (const x of (data[TABLES.tradeSells] || [])) {
+    if (x.isActive === false) continue;
+    moves.push({ account: 'investment', date: x.sellDate, direction: 'in', amount: num(x.proceeds), currency: 'AED', type: 'sell', symbol: symbolOf(x.securityId), qty: num(x.qty) });
+  }
+  moves.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  return moves;
+}
+
 // Record a manual stock change as an audit movement (the variant's stockQty
 // is written by the caller; this only logs the movement so the ledger stays
 // the source of truth). type: 'adjustment' | 'opening'.

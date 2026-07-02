@@ -9,7 +9,6 @@ import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, Select, 
 
 const blankSec = () => ({ symbol: '', name: '', market: '', currency: 'USD', currentPrice: '', qty: '', notes: '', isActive: true });
 const blankTrade = (securityId, mode) => ({ securityId, mode, date: todayISO(), qty: '', pricePerShare: '', fees: '' });
-const blankFlow = () => ({ type: 'deposit', date: todayISO(), amount: '', notes: '' });
 const blankDiv = (securityId) => ({ securityId, date: todayISO(), amount: '' });
 
 export default function Investments() {
@@ -62,7 +61,6 @@ export default function Investments() {
     const list = (data[TABLES.securities] || []).filter((x) => x.isActive !== false && x.symbol);
     if (list.length && list.some((x) => (x.priceUpdatedAt || '') < todayISO())) doRefreshPrices(true);
   }, [finnhubKey]); // eslint-disable-line react-hooks/exhaustive-deps
-  const [editFlow, setEditFlow] = useState(null);
   const [divEdit, setDivEdit] = useState(null);
 
   // ── Simulated LIVE price feed (swap tickOnce() for a real API later) ──
@@ -100,7 +98,6 @@ export default function Investments() {
   }, [securities.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const allUSD = securities.filter((x) => x.isActive !== false).every((x) => (x.currency || 'USD') !== 'AED');
   const curTot = (v) => moneyIn(v, allUSD ? 'USD' : 'AED');
-  const flows = useMemo(() => (data[TABLES.cashFlows] || []).filter((f) => (f.account || 'investment') === 'investment').sort((a, b) => (b.date || '').localeCompare(a.date || '')), [data]);
   const cur = (v) => fmtCur(v, displayCurrency, usdRate);
   const pnlColor = (v) => (v > 0 ? C.success : v < 0 ? C.danger : C.textMid);
 
@@ -134,13 +131,6 @@ export default function Investments() {
 
   const savePrice = async () => { await updateRow(TABLES.securities, priceEdit.id, { currentPrice: num(priceEdit.currentPrice), priceUpdatedAt: todayISO() }); setPriceEdit(null); };
 
-  const saveFlow = async () => {
-    const r = editFlow;
-    if (!(num(r.amount) > 0)) return;
-    const payload = { type: r.type, date: r.date || todayISO(), amount: num(r.amount), notes: r.notes || '', currency: 'AED' };
-    if (r.id) await updateRow(TABLES.cashFlows, r.id, payload); else await createRow(TABLES.cashFlows, payload);
-    setEditFlow(null);
-  };
 
   const saveDiv = async () => {
     const r = divEdit;
@@ -240,21 +230,6 @@ export default function Investments() {
       </Modal>
 
       {/* Cash flow modal */}
-      <Modal open={!!editFlow} onClose={() => setEditFlow(null)} title={editFlow?.id ? t('edit') : t('addCashFlow')}
-        footer={<><Btn variant="ghost" onClick={() => setEditFlow(null)}>{t('cancel')}</Btn><Btn onClick={saveFlow}>{t('save')}</Btn></>}>
-        {editFlow && (
-          <div>
-            <Field label={t('flowType')} required>
-              <Select value={editFlow.type} onChange={(v) => setEditFlow((r) => ({ ...r, type: v }))}
-                options={[{ value: 'deposit', label: t('deposit') }, { value: 'withdraw', label: t('withdraw') }, { value: 'dividend', label: t('dividend') }, { value: 'fee', label: t('fees') }, { value: 'interest', label: t('interest') }]} />
-            </Field>
-            <Field label={t('amount')} required><Input type="number" value={editFlow.amount} onChange={(v) => setEditFlow((r) => ({ ...r, amount: v }))} /></Field>
-            <Field label={t('date')}><Input type="date" value={editFlow.date} onChange={(v) => setEditFlow((r) => ({ ...r, date: v }))} /></Field>
-            <Field label={t('notes')}><Textarea value={editFlow.notes} onChange={(v) => setEditFlow((r) => ({ ...r, notes: v }))} rows={2} /></Field>
-            {editFlow.id && <Btn variant="outline" onClick={() => { if (window.confirm(t('confirmDelete'))) { deleteRow(TABLES.cashFlows, editFlow.id); setEditFlow(null); } }} style={{ color: C.danger }}>{t('delete')}</Btn>}
-          </div>
-        )}
-      </Modal>
     </>
   );
 
@@ -338,7 +313,7 @@ export default function Investments() {
           {liveToggle}
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          <Mini label={t('cashBalance')} value={cur(stats.cash)} />
+          <Mini label={`${t('cashBalance')} →💰`} value={cur(stats.cash)} accent={stats.cash < 0 ? '#FFD9D9' : undefined} />
           <Mini label={t('holdings')} value={curTot(stats.holdingsValue)} />
           <Mini label={t('capital')} value={cur(stats.netCapital)} />
           <Mini label={t('totalPnL')} value={curTot(stats.totalPnL)} accent={stats.totalPnL >= 0 ? '#BFF3D6' : '#FFD9D9'} />
@@ -353,11 +328,10 @@ export default function Investments() {
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
         <TabBtn active={tab === 'portfolio'} onClick={() => setTab('portfolio')}>📈 {t('portfolio')}</TabBtn>
-        <TabBtn active={tab === 'cash'} onClick={() => setTab('cash')}>💵 {t('cashTab')}</TabBtn>
         <TabBtn active={tab === 'projects'} onClick={() => setTab('projects')}>🏗️ {t('projects')}</TabBtn>
       </div>
 
-      {tab === 'projects' ? <Projects app={app} /> : tab === 'portfolio' ? (
+      {tab === 'projects' ? <Projects app={app} /> : (
         stats.positions.length === 0 ? <EmptyState icon="📈" text={t('noSecurities')} /> : (
           <div style={{ display: 'grid', gap: 10 }}>
             {active.length > 0 && <div style={{ fontSize: 12, fontWeight: 800, color: C.textMid }}>{t('activeStocks')}</div>}
@@ -366,26 +340,6 @@ export default function Investments() {
             {sold.map(posRow)}
           </div>
         )
-      ) : (
-        <>
-          <Btn onClick={() => setEditFlow(blankFlow())} style={{ marginBottom: 10 }}>＋ {t('addCashFlow')}</Btn>
-          {flows.length === 0 ? <EmptyState icon="💵" text={t('noData')} /> : (
-            <div style={{ display: 'grid', gap: 8 }}>
-              {flows.map((f) => {
-                const sign = f.type === 'withdraw' || f.type === 'fee' ? -1 : 1;
-                return (
-                  <Card key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: f.securityId ? 'default' : 'pointer' }} onClick={() => !f.securityId && setEditFlow({ ...f, amount: String(f.amount) })}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 700, color: C.text, fontSize: 13 }}>{t(f.type)}{f.securityId ? ` · ${(securities.find((s) => s.id === f.securityId) || {}).symbol || ''}` : ''}</div>
-                      <div style={{ fontSize: 11, color: C.textMuted }}>{fmtDate(f.date, lang)}{f.notes ? ` · ${f.notes}` : ''}</div>
-                    </div>
-                    <div style={{ fontWeight: 800, color: sign > 0 ? C.success : C.danger }}>{sign > 0 ? '+' : '−'}{cur(f.amount)}</div>
-                  </Card>
-                );
-              })}
-            </div>
-          )}
-        </>
       )}
 
       {/* Security modal (with optional initial quantity) */}
