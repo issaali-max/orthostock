@@ -14,7 +14,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { TABLES } from '../lib/constants.js';
 import { observeTimestamp, nextTimestamp } from '../lib/clock.js';
-import { idbGetAll, idbBulkPut, idbClear, outboxAll, outboxDelete, outboxBumpTries, enqueueMutation, metaSet, metaGet } from './local.js';
+import { idbGetAll, idbBulkPut, idbClear, idbDelete, outboxAll, outboxDelete, outboxBumpTries, enqueueMutation, metaSet, metaGet } from './local.js';
 
 const MAX_OP_TRIES = 6; // after this many failed attempts, drop a stuck outbox op
 const SYNC_INTERVAL_MS = 25000; // periodic flush+pull cadence (your edits still push instantly via nudgeSync ~1.2s; this only governs how often the app pulls others' changes while idle)
@@ -307,6 +307,14 @@ export async function pull(onData, { full = false } = {}) {
   // duplicates onto an already-pending queue.
   const pending = await outboxAll();
   const outboxEmpty = pending.length === 0;
+  // Ids with a queued-but-not-yet-flushed remove: a pull must never re-download
+  // ("resurrect") a row the user just deleted while its cloud delete is in flight.
+  const pendingRemovals = new Map(); // table → Set(id)
+  for (const op of pending) {
+    if (op.type !== 'remove') continue;
+    if (!pendingRemovals.has(op.table)) pendingRemovals.set(op.table, new Set());
+    pendingRemovals.get(op.table).add(op.id);
+  }
   // Incremental pull (full=false): only fetch rows changed since the last pull (cheap
   // egress), with a skew buffer. BUT incremental can permanently miss a row if the two
   // devices' clocks diverge by more than the buffer (e.g. collaborators in different
@@ -323,9 +331,10 @@ export async function pull(onData, { full = false } = {}) {
       if (since > 0) q = q.gt('updatedAt', since);
       const { data, error } = await q;
       reached = true;                                        // the cloud answered (even a missing-table error still means we're online)
-      if (error || !Array.isArray(data) || !data.length) continue;
+      if (error || !Array.isArray(data)) continue;
       const localRows = await idbGetAll(table);
       const localById = new Map(localRows.map((r) => [r.id, r]));
+      const remSet = pendingRemovals.get(table);
       const toWrite = [];
       for (const cloud of data) {
         const rec = fromCloud(cloud);                          // unwrap the envelope (or legacy flat row)
@@ -333,13 +342,36 @@ export async function pull(onData, { full = false } = {}) {
         if (cu > maxSeen) maxSeen = cu;
         const local = localById.get(rec.id);
         const lu = Number(local?.updatedAt || 0);
-        if (!local) { toWrite.push(rec); changed++; }                    // brand-new row → download
-        else if (cu > lu) { toWrite.push(mergePreserve(local, rec)); changed++; } // cloud newer → cloud wins, but never blank a field with an empty cloud value
+        if (!local) {
+          if (remSet?.has(rec.id)) continue;                             // just deleted here; cloud delete still in flight — do NOT resurrect
+          toWrite.push(rec); changed++;                                  // brand-new row → download
+        } else if (cu > lu) { toWrite.push(mergePreserve(local, rec)); changed++; } // cloud newer → cloud wins, but never blank a field with an empty cloud value
         // local-newer / equal → KEEP LOCAL, but NEVER auto-push it up here. A long-offline or
         // clock-skewed device must not clobber the cloud during a read (that resurrected old,
         // deleted rows on every device). Legitimate local edits travel up via the outbox only.
       }
       if (toWrite.length) await idbBulkPut(table, toWrite);
+      // ── Deletion reconcile (FULL pulls only) ──
+      // A hard delete on another device removes the cloud row, but an upsert-only pull
+      // would keep our local copy forever. On a full snapshot (since=0) with NOTHING
+      // pending locally, any local row absent from the cloud was deleted elsewhere →
+      // delete it here too. Guards: (1) full snapshot only, (2) outbox empty, (3) cloud
+      // table non-empty (a just-recreated empty table must not wipe local data before
+      // it re-uploads), (4) mass-deletion brake, (5) outbox re-checked at delete time.
+      if (full && outboxEmpty && data.length > 0) {
+        const cloudIds = new Set(data.map((c) => c.id));
+        const gone = localRows.filter((r) => !cloudIds.has(r.id));
+        const suspicious = gone.length > 25 && gone.length > data.length;
+        if (gone.length && suspicious) {
+          console.warn('[sync] skipping suspicious mass local deletion:', table, gone.length, 'missing vs', data.length, 'in cloud');
+        } else if (gone.length) {
+          const stillEmpty = (await outboxAll()).length === 0;           // a row created mid-pull must survive
+          if (stillEmpty) {
+            for (const r of gone) await idbDelete(table, r.id);
+            changed += gone.length;
+          }
+        }
+      }
     } catch { /* table may not exist / timed out; skip and try next */ }
   }
   markOnline(reached);                                       // self-heal the online badge from real cloud reachability
