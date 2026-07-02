@@ -67,14 +67,16 @@ export default function PurchasePlanning({ onClose }) {
     const date = new Date().toLocaleDateString(lang === 'en' ? 'en-GB' : 'ar-EG');
     const company = settings?.companyName || 'OrthoStock';
     const esc = (s) => String(s).replace(/[&<>]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]));
-    let body = '';
+    // The printed sheet goes to the SUPPLIER: material name + wanted quantity only.
+    // Stock levels and prices are internal and stay inside the app.
+    let body = ''; let rowNo = 0;
     for (const cat of tree) {
       body += `<h2>${esc(cat.category.icon || '')} ${esc(cat.name)}</h2>`;
       for (const g of cat.groups) {
-        body += `<h3>${esc(g.product.nameEn || g.product.nameAr || '')}</h3><table><thead><tr><th>Material</th><th>Stock</th><th>Min</th><th>Order</th></tr></thead><tbody>`;
+        body += `<h3>${esc(g.product.nameEn || g.product.nameAr || '')}</h3><table><thead><tr><th style="width:34px">#</th><th>${lang === 'en' ? 'Material' : 'المادة'}</th><th style="width:80px">${lang === 'en' ? 'Qty' : 'الكمية'}</th></tr></thead><tbody>`;
         for (const it of g.needed) {
-          const flag = it.manual ? '◆' : it.status === 'near' ? '○' : '●';
-          body += `<tr><td>${flag} ${esc(it.v.nameEn || it.v.sku)}</td><td>${fmtNum(num(it.v.stockQty))}</td><td>${fmtNum(num(it.v.stockMin))}</td><td><b>${fmtNum(it.qty)}</b></td></tr>`;
+          rowNo += 1;
+          body += `<tr><td>${rowNo}</td><td>${esc(it.v.nameEn || it.v.sku)}</td><td><b>${fmtNum(it.qty)}</b></td></tr>`;
         }
         body += '</tbody></table>';
       }
@@ -83,9 +85,9 @@ export default function PurchasePlanning({ onClose }) {
       <style>*{font-family:system-ui,Arial,sans-serif}body{margin:24px;color:#111}h1{font-size:20px;margin:0 0 2px}.sub{color:#666;font-size:12px;margin-bottom:16px}
       h2{font-size:15px;margin:18px 0 4px;border-bottom:2px solid #333;padding-bottom:3px}h3{font-size:13px;margin:10px 0 4px;color:#333}
       table{width:100%;border-collapse:collapse;margin-bottom:6px;font-size:12px}th,td{border:1px solid #ccc;padding:5px 8px;text-align:${lang === 'en' ? 'left' : 'right'}}
-      th{background:#f1f1f1}td:nth-child(n+2),th:nth-child(n+2){text-align:center;width:60px}@media print{body{margin:10mm}}</style></head><body>
-      <h1>🛒 ${esc(company)} — ${lang === 'en' ? 'Purchase plan' : 'قائمة المشتريات'}</h1>
-      <div class="sub">${date} · ● ${lang === 'en' ? 'low' : 'منخفض'} ○ ${lang === 'en' ? 'soon' : 'قريباً'} ◆ ${lang === 'en' ? 'manual' : 'يدوي'}</div>
+      th{background:#f1f1f1}td:first-child,th:first-child,td:last-child,th:last-child{text-align:center}@media print{body{margin:10mm}}</style></head><body>
+      <h1>🛒 ${esc(company)} — ${lang === 'en' ? 'Purchase order' : 'طلب شراء'}</h1>
+      <div class="sub">${date}</div>
       ${body || `<p>${lang === 'en' ? 'Nothing to reorder.' : 'لا شيء لإعادة طلبه.'}</p>`}</body></html>`;
     const w = window.open('', '_blank');
     if (!w) { showToast('—', 'error'); return; }
@@ -93,10 +95,28 @@ export default function PurchasePlanning({ onClose }) {
     setTimeout(() => { try { w.print(); } catch { /* ignore */ } }, 300);
   };
 
+  // Plain-text version of the same clean order (for WhatsApp / email to the supplier).
+  const buildOrderText = () => {
+    const date = new Date().toLocaleDateString(lang === 'en' ? 'en-GB' : 'ar-EG');
+    const head = `🛒 ${settings?.companyName || 'OrthoStock'} — ${lang === 'en' ? 'Purchase order' : 'طلب شراء'} · ${date}`;
+    const blocks = tree.map((cat) => {
+      const gl = cat.groups.map((g) => [`  ▸ ${g.product.nameEn || g.product.nameAr}`,
+        ...g.needed.map((it) => `    • ${it.v.nameEn || it.v.sku} ×${fmtNum(it.qty)}`)].join('\n'));
+      return [`\n— ${cat.name} —`, ...gl].join('\n');
+    });
+    return [head, ...blocks].join('\n');
+  };
+  const shareOrder = async () => {
+    const text = buildOrderText();
+    try { if (navigator.share) { await navigator.share({ text }); return; } } catch (e) { if (e?.name === 'AbortError') return; }
+    try { await navigator.clipboard.writeText(text); showToast(t('copied'), 'success'); } catch { showToast('—', 'error'); }
+  };
+
   return (
     <Modal open title={`🛒 ${t('purchasePlan') || 'قائمة المشتريات'}`} onClose={onClose} width={640}
       footer={<>
         <Btn variant="ghost" onClick={onClose}>{t('close')}</Btn>
+        {counts.total > 0 && <Btn variant="light" onClick={shareOrder}>📤 {t('share')}</Btn>}
         {counts.total > 0 && <Btn onClick={printList}>🖨️ {t('print') || 'طباعة'}</Btn>}
       </>}>
       {counts.total === 0 ? (
