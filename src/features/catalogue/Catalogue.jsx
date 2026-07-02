@@ -284,7 +284,12 @@ export default function Catalogue() {
 
   // ── Step 1: categories ──
   if (!catId) {
-    const list = categories.filter((c) => !q || catLabel(c).toLowerCase().includes(q.toLowerCase()));
+    const ql = q.trim().toLowerCase();
+    const list = categories.filter((c) => !ql || catLabel(c).toLowerCase().includes(ql));
+    // Global material search: name or SKU across ALL categories, so typing a material
+    // or its code anywhere finds it instantly.
+    const matVars = ql ? variants.filter((v) => (v.nameEn || '').toLowerCase().includes(ql) || (v.sku || '').toLowerCase().includes(ql)).slice(0, 60) : [];
+    const prodName = (pid) => products.find((p) => p.id === pid)?.nameEn || '';
     return (
       <div>
         <PageHeader title={t('catalogue')} action={<div style={{ display: 'flex', gap: 6 }}>
@@ -292,7 +297,30 @@ export default function Catalogue() {
           {EditToggle}
         </div>} />
         <SearchBar value={q} onChange={setQ} placeholder={t('search')} />
-        {list.length === 0 ? <EmptyState icon="🗂️" text={t('noData')} /> : (
+        {ql !== '' && (
+          <div style={{ display: 'grid', gap: 7, marginBottom: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 800, color: C.textMid }}>📦 {t('materials')} ({matVars.length})</div>
+            {matVars.length === 0 ? <div style={{ fontSize: 12, color: C.textMuted, textAlign: 'center', padding: 10 }}>{t('noData')}</div> : matVars.map((v) => {
+              const stock = num(v.stockQty);
+              const scol = stock <= 0 ? C.danger : (num(v.stockMin) > 0 && stock <= num(v.stockMin)) ? C.warning : C.success;
+              const ordered = num(rec.get(v.id));
+              return (
+                <div key={v.id} onClick={() => { setCatId(catIdByProduct[v.productId] || null); setQ(''); }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 9, background: '#fff', border: `1px solid ${C.border}`, borderRadius: 12, padding: '9px 11px', cursor: 'pointer' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: C.text }}>{v.nameEn || v.sku}</div>
+                    <div style={{ fontSize: 10.5, color: C.textMuted }}>{[prodName(v.productId), v.sku].filter(Boolean).join(' · ')}</div>
+                  </div>
+                  {ordered > 0 && <span style={{ fontSize: 10.5, fontWeight: 800, color: C.primary, background: C.primary + '12', borderRadius: 999, padding: '3px 8px', whiteSpace: 'nowrap' }}>📋 {fmtNum(ordered)}</span>}
+                  <span style={{ minWidth: 38, textAlign: 'center', padding: '4px 9px', borderRadius: 999, background: scol + '18', color: scol, fontSize: 14, fontWeight: 800 }}>{fmtNum(stock)}</span>
+                  {!editMode && cartBtn(v)}
+                </div>
+              );
+            })}
+            {list.length > 0 && <div style={{ fontSize: 12, fontWeight: 800, color: C.textMid, marginTop: 4 }}>🗂️ {t('byCategory')}</div>}
+          </div>
+        )}
+        {list.length === 0 && ql === '' ? <EmptyState icon="🗂️" text={t('noData')} /> : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 14 }}>
             {list.map((c) => (
               <div key={c.id} onClick={() => { setCatId(c.id); setQ(''); }}
@@ -313,7 +341,11 @@ export default function Catalogue() {
 
   // ── Step 2: products of the category, materials listed vertically with stock ──
   const cat = categories.find((c) => c.id === catId);
-  const catProducts = products.filter((p) => p.categoryId === catId).filter((p) => !q || p.nameEn.toLowerCase().includes(q.toLowerCase()));
+  // Search inside a category matches the group name OR any material's name/SKU in it.
+  const ql2 = q.trim().toLowerCase();
+  const matchV = (v) => (v.nameEn || '').toLowerCase().includes(ql2) || (v.sku || '').toLowerCase().includes(ql2);
+  const catProducts = products.filter((p) => p.categoryId === catId)
+    .filter((p) => !ql2 || (p.nameEn || '').toLowerCase().includes(ql2) || variants.some((v) => v.productId === p.id && matchV(v)));
   // ── Multi-level taxonomy helpers: Brand (product) -> Arch (variant attr) -> Size (variant attrs) ──
   const ARCH_RE = /arch|jaw|الفك|فك/i;
   const archValueOf = (v) => { const e = Object.entries(v.attributes || {}).find(([k]) => ARCH_RE.test(k)); return e ? e[1] : ''; };
@@ -365,7 +397,9 @@ export default function Catalogue() {
       {shownProducts.length === 0 ? <EmptyState icon="📦" text={t('noProducts')} /> : (
         <div style={{ display: 'grid', gap: 16 }}>
           {shownProducts.map((p) => {
-            const vs = (variantsByProduct[p.id] || []).filter(matchVariantArch);
+            const vsArch = (variantsByProduct[p.id] || []).filter(matchVariantArch);
+            // While searching, if the group name itself doesn't match, show only the matching sizes.
+            const vs = ql2 && !(p.nameEn || '').toLowerCase().includes(ql2) ? vsArch.filter(matchV) : vsArch;
             const img = p.image_path || p.image_url;
             const isGroup = p.isGroup === true || vs.length > 1; // a group stays a group even with one size
             const totalStock = vs.reduce((s, v) => s + num(v.stockQty), 0);
@@ -383,26 +417,36 @@ export default function Catalogue() {
               const col = neg ? C.danger : low ? C.warning : C.success;
               return (<div style={{ textAlign: 'center', minWidth: 66 }}>
                 <span style={{ display: 'inline-block', minWidth: 40, padding: '4px 12px', borderRadius: 999, background: col + '18', color: col, fontSize: 18, fontWeight: 800 }}>{fmtNum(stock)}</span>
-                <div style={{ fontSize: 9, color: C.textMuted, marginTop: 2 }}>{t('stock')}{neg ? ' ⚠' : low ? ' !' : ''}</div>
+                <div style={{ fontSize: 10, color: C.textMid, fontWeight: 700, marginTop: 2 }}>{t('stock')}{neg ? ' ⚠' : low ? ' !' : ''}</div>
               </div>);
             };
             const priceBlock = (v) => (<div style={{ minWidth: 90, textAlign: 'end' }}>
               <div style={{ fontWeight: 800, color: C.primary, fontSize: 15 }}>{fmtCur(v.sellingPriceDefault, displayCurrency, usdRate)}</div>
-              <div style={{ fontSize: 10, color: C.textMuted }}>{t('avgCost')} {fmtCur(v.purchasePriceAvg, displayCurrency, usdRate)}</div>
+              <div style={{ fontSize: 10.5, color: C.textMuted }}>{t('costOnly')}: {fmtCur(v.purchasePriceAvg, displayCurrency, usdRate)}</div>
             </div>);
 
-            // ── STANDALONE MATERIAL (one size): a single self-contained card ──
+            // ── STANDALONE MATERIAL (one size): name gets the full width; stats on their own row ──
             if (!isGroup && vs.length === 1) {
               const v = vs[0];
+              const ordered = num(rec.get(v.id));
               return (
                 <div key={p.id} style={{ background: '#fff', border: `1px solid ${C.border}`, borderRadius: RADIUS, boxShadow: SHADOW, overflow: 'hidden' }}>
-                  <div onClick={editMode ? () => editVariant(v) : undefined} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 13, cursor: editMode ? 'pointer' : 'default' }}>
-                    <StoredImage value={img} size={76} radius={14} emptyBg={`linear-gradient(135deg, ${(cat?.color || C.primary)}26, ${(cat?.color || C.primary)}0d)`} fontSize={34} fallback={p.icon || cat?.icon || '📦'} />
+                  <div onClick={editMode ? () => editVariant(v) : undefined} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 13px 9px', cursor: editMode ? 'pointer' : 'default' }}>
+                    <StoredImage value={img} size={58} radius={13} emptyBg={`linear-gradient(135deg, ${(cat?.color || C.primary)}26, ${(cat?.color || C.primary)}0d)`} fontSize={27} fallback={p.icon || cat?.icon || '📦'} />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 16, fontWeight: 800, color: C.text, lineHeight: 1.3 }}>{editMode && <span style={{ color: C.primary }}>✎ </span>}{v.nameEn || p.nameEn}</div>
-                      <div style={{ fontSize: 10, color: C.textMuted, marginTop: 2 }}>{editMode ? t('tapToEdit') : [p.brand, v.sku].filter(Boolean).join(' · ')}</div>
+                      <div style={{ fontSize: 15.5, fontWeight: 800, color: C.text, lineHeight: 1.3 }}>{editMode && <span style={{ color: C.primary }}>✎ </span>}{v.nameEn || p.nameEn}</div>
+                      <div style={{ fontSize: 10.5, color: C.textMuted, marginTop: 2 }}>{editMode ? t('tapToEdit') : [p.brand, v.sku].filter(Boolean).join(' · ')}</div>
                     </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 13px 12px' }}>
                     {stockPill(v)}
+                    {ordered > 0 && (
+                      <div style={{ textAlign: 'center' }}>
+                        <span style={{ display: 'inline-block', padding: '4px 10px', borderRadius: 999, background: C.primary + '14', color: C.primary, fontSize: 14, fontWeight: 800 }}>{fmtNum(ordered)}</span>
+                        <div style={{ fontSize: 9, color: C.primary, fontWeight: 700, marginTop: 2 }}>📋 {t('recommended')}</div>
+                      </div>
+                    )}
+                    <div style={{ flex: 1 }} />
                     {priceBlock(v)}
                     {!editMode && cartBtn(v)}
                   </div>
@@ -453,7 +497,7 @@ export default function Catalogue() {
                               ))}
                             </div>
                           )}
-                          <div style={{ fontSize: 10, color: C.textMuted }}>{v.sku}</div>
+                          <div style={{ fontSize: 10, color: C.textMuted }}>{v.sku}{num(rec.get(v.id)) > 0 ? <span style={{ color: C.primary, fontWeight: 800 }}> · 📋 {t('recommended')}: {fmtNum(rec.get(v.id))}</span> : null}</div>
                         </div>
                         {stockPill(v)}
                         {priceBlock(v)}
