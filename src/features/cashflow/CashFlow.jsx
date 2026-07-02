@@ -56,6 +56,7 @@ export default function CashFlow() {
             <div style={{ fontSize: 14.5, fontWeight: 900, color: bal != null && bal < 0 ? C.danger : color, marginTop: 2 }}>
               {id === 'investment' ? `$${fmtNum(round2(num(pstats.accountValue)))}` : `${fmtNum(round2(bal))}`}
             </div>
+            {id !== 'investment' && ledger.balances[id].USD !== 0 && <div style={{ fontSize: 9.5, color: C.textMid, fontWeight: 800 }}>+${fmtNum(round2(ledger.balances[id].USD))}</div>}
             {id === 'bank' && ledger.pendingChequesTotal > 0 && <div style={{ fontSize: 9, color: C.warning, fontWeight: 800 }}>⏳ {fmtNum(round2(ledger.pendingChequesTotal))}</div>}
           </div>
         ))}

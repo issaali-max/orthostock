@@ -34,3 +34,17 @@ eq(stockStatus({ stockQty: 14, stockMin: 10 }), 'near', 'قريب (حد+50%)');
 eq(stockStatus({ stockQty: 30, stockMin: 10 }), 'ok', 'سليم');
 eqn(suggestedQty({ stockQty: 3, stockMin: 10 }), 7, 'اقتراح الطلب حتى الحد');
 console.log('\nFORMULA TESTS PASSED');
+
+// ═══ الأرباح والخسائر: مصروف الدولار يُحتسب بقيمته الدرهمية ═══
+import { pnl } from '../src/lib/engine.js';
+const pl = pnl({
+  settings: [{ usdRate: 3.6725 }],
+  invoices: [], invoiceItems: [], purchases: [], purchaseItems: [],
+  expenseGroups: [{ id: 'g1', type: 'business' }],
+  expenses: [
+    { id: 'e1', groupId: 'g1', amount: 100, currency: 'USD', date: '2026-07-01' },
+    { id: 'e2', groupId: 'g1', amount: 50, currency: 'AED', date: '2026-07-01' },
+  ],
+});
+eqn(pl.businessExp, 417.25, 'مصاريف العمل: $100×3.6725 + 50 = 417.25 (لا خلط عملات)');
+console.log('P&L CURRENCY TEST PASSED');

@@ -6,7 +6,7 @@ const eqn = (a, b, msg) => { if (Math.abs(a - b) > 0.001) { console.error(`✗ $
 eq(ACCOUNT_CURRENCY, { bank: 'AED', drawer: 'AED', investment: 'USD' }, 'قاعدة عملة الحسابات');
 
 // تحويل استثمار→درج: 100$ بسعر 3.6725 → الدرج يستلم 367.25 درهم
-let legs = transferLegs({ from: 'investment', to: 'drawer', amount: 100, rate: 3.6725 });
+let legs = transferLegs({ from: 'investment', to: 'drawer', amount: 100, rate: 3.6725, convertToAED: true }); // خيار الواجهة الافتراضي
 eq([legs[0].amount, legs[0].currency, legs[1].amount, legs[1].currency], [100, 'USD', 367.25, 'AED'], 'استثمار→درج: 100$ = 367.25 AED');
 
 // درج→استثمار: 367.25 درهم → الاستثمار يستلم 100$
@@ -37,4 +37,23 @@ eqn(L.balances.drawer.USD, 0, 'لا دولار في الدرج');
 const mv = investmentMovements(data);
 if (!mv.every((m) => m.currency === 'USD')) { console.error('✗ حركات الاستثمار ليست كلها USD'); process.exit(1); }
 console.log('✓ كل حركات الاستثمار USD');
+
+// ═══ اختيار عملة التحويل الصريح ═══
+// درج→بنك بالدولار: يبقى دولاراً 1:1 (محفظتان متعددتا العملات)
+legs = transferLegs({ from: 'drawer', to: 'bank', amount: 100, currency: 'USD', rate: 3.6725, convertToAED: false });
+eq([legs[0].currency, legs[1].amount, legs[1].currency], ['USD', 100, 'USD'], 'درج→بنك $100 يبقى $100');
+// درج (دولار)→بنك مع «استلام بالدرهم»: يتحول بالسعر
+legs = transferLegs({ from: 'drawer', to: 'bank', amount: 100, currency: 'USD', rate: 3.6725, convertToAED: true });
+eq([legs[1].amount, legs[1].currency], [367.25, 'AED'], 'درج$→بنك بالدرهم = 367.25');
+// درج (دولار)→استثمار: نفس الدولار بلا تحويل
+legs = transferLegs({ from: 'drawer', to: 'investment', amount: 100, currency: 'USD', rate: 3.6725 });
+eq([legs[1].amount, legs[1].currency], [100, 'USD'], 'درج$→استثمار $100 كما هو');
+// استثمار→بنك مع الاستلام بالدرهم (السحب المعتاد من الوسيط)
+legs = transferLegs({ from: 'investment', to: 'bank', amount: 100, currency: 'USD', rate: 3.6725, convertToAED: true });
+eq([legs[1].amount, legs[1].currency], [367.25, 'AED'], 'استثمار→بنك بالدرهم');
+// استثمار→بنك مع إبقاء الدولار
+legs = transferLegs({ from: 'investment', to: 'bank', amount: 100, currency: 'USD', rate: 3.6725, convertToAED: false });
+eq([legs[1].amount, legs[1].currency], [100, 'USD'], 'استثمار→بنك يبقى $');
+console.log('\nEXPLICIT-CURRENCY TRANSFER TESTS PASSED');
+
 console.log('\nALL CURRENCY TESTS PASSED');

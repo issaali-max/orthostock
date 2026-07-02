@@ -42,6 +42,11 @@ export async function recordInvoicePayment(app, invoiceId, amount, date, method 
 
 export const PAYMENT_ACCOUNT = { cash: 'drawer', transfer: 'bank', card: 'bank', cheque: 'bank' };
 
+// USD rate straight from settings (works inside the engine, no app context needed).
+export const rateOf = (data) => num((data[TABLES.settings] || [])[0]?.usdRate) || 3.6725;
+// Normalize any {amount, currency} record to AED for cross-currency totals.
+export const toAED = (amount, currency, rate) => (currency === 'USD' ? round2(num(amount) * rate) : num(amount));
+
 // Advance/set the status of a cheque payment on an invoice: received → deposited → cleared.
 export async function setChequeStatus(app, invoiceId, paymentIndex, status) {
   const all = await db.getAll(TABLES.invoices);
@@ -139,12 +144,17 @@ export function accountLedger(appOrData) {
 // and each leg is stored in its own account's currency — explicit, no silent mixing.
 export const ACCOUNT_CURRENCY = { bank: 'AED', drawer: 'AED', investment: 'USD' };
 
-// Pure: build the two legs of a transfer. `amount` is in the SOURCE account's currency.
-export function transferLegs({ from, to, amount, rate }) {
+// Pure: build the two legs of a transfer.
+// `currency` = the currency of `amount` being taken from the source (investment ⇒ USD;
+// bank/drawer ⇒ AED or USD, they are multi-currency wallets). Destination currency:
+// investment always ends in USD; bank/drawer receive the same currency as sent — unless
+// `convertToAED` is set for incoming USD (e.g. broker withdrawal landing as dirhams).
+// Conversion happens ONLY here, explicitly, at the given rate.
+export function transferLegs({ from, to, amount, currency, rate, convertToAED = false }) {
   const a = num(amount); const r = num(rate) || 3.6725;
-  const cFrom = ACCOUNT_CURRENCY[from] || 'AED';
-  const cTo = ACCOUNT_CURRENCY[to] || 'AED';
-  const target = cFrom === cTo ? a : (cFrom === 'USD' ? round2(a * r) : round2(a / r));
+  const cFrom = currency || ACCOUNT_CURRENCY[from] || 'AED';
+  const cTo = to === 'investment' ? 'USD' : (cFrom === 'USD' && convertToAED ? 'AED' : cFrom);
+  const target = cFrom === cTo ? round2(a) : (cFrom === 'USD' ? round2(a * r) : round2(a / r));
   return [
     { account: from, type: from === 'investment' ? 'withdraw' : 'transferOut', amount: round2(a), currency: cFrom, toAccount: to },
     { account: to, type: to === 'investment' ? 'deposit' : 'transferIn', amount: target, currency: cTo, fromAccount: from },
@@ -820,9 +830,11 @@ export function pnl(data, opts = {}) {
     .filter((it) => it.free && freePurch.has(it.purchaseId) && it.isActive !== false)
     .reduce((s, it) => s + num(it.valueAtCost), 0);
 
-  const businessExp = expenses.filter((e) => typeOf(e.groupId) === 'business').reduce((s, e) => s + num(e.amount), 0);
-  const personalExp = expenses.filter((e) => typeOf(e.groupId) === 'personal').reduce((s, e) => s + num(e.amount), 0);
-  const homeExp = expenses.filter((e) => typeOf(e.groupId) === 'home').reduce((s, e) => s + num(e.amount), 0);
+  const fx = rateOf(data);                                  // USD expenses weigh their AED value
+  const expAED = (e) => toAED(e.amount, e.currency, fx);
+  const businessExp = expenses.filter((e) => typeOf(e.groupId) === 'business').reduce((s, e) => s + expAED(e), 0);
+  const personalExp = expenses.filter((e) => typeOf(e.groupId) === 'personal').reduce((s, e) => s + expAED(e), 0);
+  const homeExp = expenses.filter((e) => typeOf(e.groupId) === 'home').reduce((s, e) => s + expAED(e), 0);
   const grossProfit = salesProfit + freeRestockGain;       // sales margin + recovered inventory
   const operatingProfit = grossProfit - businessExp;
   const netAfterAll = operatingProfit - personalExp - homeExp;
@@ -1053,7 +1065,8 @@ export function periodTrend(data, mode = 'month', n = 6) {
   const byKey = Object.fromEntries(buckets.map((b) => [b.key, b]));
   for (const inv of invoices) { const b = byKey[periodKey(inv.date, mode)]; if (b) b.revenue += num(inv.total); }
   for (const it of items) { const b = byKey[invKey.get(it.invoiceId)]; if (b) b.salesProfit += num(it.lineProfit); }
-  for (const e of expenses) { const b = byKey[periodKey(e.date, mode)]; if (b) { if (typeOf(e.groupId) === 'business') b.businessExp += num(e.amount); else b.personalExp += num(e.amount); } } // home+personal = non-business
+  const fx = rateOf(data);
+  for (const e of expenses) { const b = byKey[periodKey(e.date, mode)]; if (b) { if (typeOf(e.groupId) === 'business') b.businessExp += toAED(e.amount, e.currency, fx); else b.personalExp += toAED(e.amount, e.currency, fx); } } // home+personal = non-business
   return buckets.map((b) => ({
     key: b.key, revenue: round2(b.revenue), salesProfit: round2(b.salesProfit),
     businessExp: round2(b.businessExp), personalExp: round2(b.personalExp),

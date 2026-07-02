@@ -43,13 +43,21 @@ export default function Treasury() {
   const saveXfer = async () => {
     const r = xfer; const a = num(r.amount);
     if (!(a > 0) || r.from === r.to) return;
-    await transferBetweenAccounts(app, { ...r, rate });
+    const currency = r.from === 'investment' ? 'USD' : (r.currency === 'USD' ? 'USD' : 'AED');
+    await transferBetweenAccounts(app, { ...r, currency, rate });
     setXfer(null); showToast(t('saved'), 'success');
   };
   const advanceCheque = async (m) => {
     const next = m.chequeStatus === 'deposited' ? 'cleared' : 'deposited';
     await setChequeStatus(app, m.invoiceId, m.paymentIndex, next);
     showToast(next === 'cleared' ? `✓ ${t('chequeCleared')}` : `🏦 ${t('chequeDeposited')}`, 'success');
+  };
+  // Undo a mistaken tap: step the cheque one state BACK (cleared → deposited → received).
+  const stepChequeBack = async (m) => {
+    const prev = m.chequeStatus === 'cleared' ? 'deposited' : 'received';
+    if (m.chequeStatus === 'received' || !m.chequeStatus) return;
+    await setChequeStatus(app, m.invoiceId, m.paymentIndex, prev);
+    showToast(`↩ ${prev === 'deposited' ? t('chequeDeposited') : t('chequeReceived')}`, 'success');
   };
 
   const typeMeta = (m) => ({
@@ -117,6 +125,9 @@ export default function Treasury() {
           <button onClick={() => advanceCheque(m)} style={{ border: 'none', background: C.warning, color: '#fff', borderRadius: 8, padding: '5px 8px', fontSize: 10.5, fontWeight: 800, cursor: 'pointer' }}>
             {m.chequeStatus === 'deposited' ? `✓ ${t('chequeCleared')}` : `🏦 ${t('chequeDeposited')}`}
           </button>
+        )}
+        {m.method === 'cheque' && m.chequeStatus && m.chequeStatus !== 'received' && (
+          <button onClick={() => stepChequeBack(m)} title={t('undo') || 'تراجع'} style={{ border: `1px solid ${C.border}`, background: '#fff', color: C.textMid, borderRadius: 8, width: 26, height: 26, fontSize: 12, cursor: 'pointer', flexShrink: 0 }}>↩</button>
         )}
         <span style={{ fontWeight: 900, fontSize: 13.5, whiteSpace: 'nowrap', color: m.pending ? C.warning : inn ? C.success : C.danger }}>{inn ? '+' : '−'}{ccy(m.amount, m.currency)}</span>
       </div>
@@ -309,14 +320,35 @@ export default function Treasury() {
               </div>
             </div>
             {xfer.from === xfer.to && <div style={{ fontSize: 11.5, color: C.danger, fontWeight: 700 }}>اختر حسابين مختلفين.</div>}
-            <Field label={`${t('amount')} (${ACCOUNT_CURRENCY[xfer.from] === 'USD' ? 'USD $' : 'AED'})`} required>
-              <Input type="number" value={xfer.amount} onChange={(v) => setXfer((r) => ({ ...r, amount: v }))} />
-            </Field>
-            {ACCOUNT_CURRENCY[xfer.from] !== ACCOUNT_CURRENCY[xfer.to] && num(xfer.amount) > 0 && (() => {
-              const legs = transferLegs({ from: xfer.from, to: xfer.to, amount: num(xfer.amount), rate });
-              return <div style={{ fontSize: 12, fontWeight: 800, color: C.primary, background: C.primary + '10', borderRadius: 9, padding: '8px 12px', textAlign: 'center' }}>
-                {ccy(legs[0].amount, legs[0].currency)} ← {ccy(legs[1].amount, legs[1].currency)} <span style={{ color: C.textMuted, fontWeight: 600 }}>(1$ = {rate} AED)</span>
-              </div>;
+            {(() => {
+              const sendCur = xfer.from === 'investment' ? 'USD' : (xfer.currency === 'USD' ? 'USD' : 'AED');
+              const legs = num(xfer.amount) > 0 ? transferLegs({ from: xfer.from, to: xfer.to, amount: num(xfer.amount), currency: sendCur, rate, convertToAED: xfer.convertToAED !== false }) : null;
+              return <>
+                <Field label={`${t('amount')} (${sendCur === 'USD' ? 'USD $' : 'AED'})`} required>
+                  <Input type="number" value={xfer.amount} onChange={(v) => setXfer((r) => ({ ...r, amount: v }))} />
+                </Field>
+                {xfer.from !== 'investment' && (
+                  <Field label={`${t('currency')} — ${t('whatYouSend') || 'ما الذي تُرسله'}`}>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      {['AED', 'USD'].map((c) => {
+                        const on = sendCur === c;
+                        return <button key={c} onClick={() => setXfer((r) => ({ ...r, currency: c }))} style={{ flex: 1, border: `1.5px solid ${on ? C.primary : C.border}`, background: on ? C.primary : '#fff', color: on ? '#fff' : C.textMid, borderRadius: 10, padding: '7px 4px', fontSize: 12, fontWeight: 800, cursor: 'pointer' }}>{c === 'USD' ? '$ USD' : 'AED'}</button>;
+                      })}
+                    </div>
+                  </Field>
+                )}
+                {sendCur === 'USD' && xfer.to !== 'investment' && (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, fontWeight: 700, color: C.text, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={xfer.convertToAED !== false} onChange={(e) => setXfer((r) => ({ ...r, convertToAED: e.target.checked }))} />
+                    {t('receiveAsAED') || 'الاستلام بالدرهم (تحويل بسعر الصرف)'}
+                  </label>
+                )}
+                {legs && legs[0].currency !== legs[1].currency && (
+                  <div style={{ fontSize: 12, fontWeight: 800, color: C.primary, background: C.primary + '10', borderRadius: 9, padding: '8px 12px', textAlign: 'center' }}>
+                    {ccy(legs[0].amount, legs[0].currency)} ← {ccy(legs[1].amount, legs[1].currency)} <span style={{ color: C.textMuted, fontWeight: 600 }}>(1$ = {rate} AED)</span>
+                  </div>
+                )}
+              </>;
             })()}
             <Field label={t('reason')}><Input value={xfer.reason} onChange={(v) => setXfer((r) => ({ ...r, reason: v }))} /></Field>
             {(xfer.from === 'investment' || xfer.to === 'investment') && <div style={{ fontSize: 11, color: C.textMuted }}>ℹ️ {t('investmentTransferNote')}</div>}
