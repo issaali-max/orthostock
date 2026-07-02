@@ -4,6 +4,7 @@ import { Modal, Btn, Badge } from '../../ui/components.jsx';
 import { C, TABLES } from '../../lib/constants.js';
 import { num, fmtNum } from '../../lib/money.js';
 import { variantLabel, recommendedQtyByVariant } from '../../lib/engine.js';
+import { stockStatus, suggestedQty } from '../../lib/stock.js';
 import { money } from '../../lib/whatsapp.js';
 
 const round2 = (x) => Math.round((Number(x) || 0) * 100) / 100;
@@ -23,13 +24,6 @@ export default function RestockList({ onClose }) {
     const prods = (data[TABLES.products] || []).filter((p) => p.isActive !== false);
     const variants = (data[TABLES.variants] || []).filter((v) => v.isActive !== false);
     const catName = (c) => (lang === 'en' ? (c?.nameEn || c?.nameAr) : (c?.nameAr || c?.nameEn)) || '—';
-    const status = (v) => {
-      const stock = num(v.stockQty), min = num(v.stockMin);
-      if (stock <= 0) return 'out';
-      if (min > 0 && stock <= min) return 'low';
-      if (min > 0 && stock <= min + Math.max(1, Math.ceil(min * 0.5))) return 'near';
-      return 'ok';
-    };
     const byProd = {};
     for (const v of variants) (byProd[v.productId] = byProd[v.productId] || []).push(v);
 
@@ -38,9 +32,9 @@ export default function RestockList({ onClose }) {
       const groups = [];
       for (const p of prods.filter((pp) => pp.categoryId === c.id)) {
         const items = (byProd[p.id] || []).map((v) => {
-          const s = status(v); if (s === 'ok') return null;
+          const s = stockStatus(v); if (s === 'ok') return null;
           const stock = num(v.stockQty), min = num(v.stockMin);
-          const suggest = min > 0 ? Math.max(0, Math.ceil(min - stock)) : 0;
+          const suggest = suggestedQty(v);
           const cost = num(v.purchasePriceAvg) || num(v.purchasePriceLatest);
           return { v, status: s, stock, min, suggest, ordered: rec.get(v.id) || 0, estCost: round2(suggest * cost) };
         }).filter(Boolean).sort((a, b) => (a.v.nameEn || '').localeCompare(b.v.nameEn || ''));

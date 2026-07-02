@@ -6,9 +6,8 @@ import { isGridWorthy } from '../../lib/bandGrid.js';
 import { C, TABLES } from '../../lib/constants.js';
 import { fmtCur, fmtNum, num, round2 } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
-import { nextDocNumber } from '../../lib/ids.js';
 import { commitPurchase, voidPurchase, nextNumber } from '../../lib/engine.js';
-import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, SearchBar, Select } from '../../ui/components.jsx';
+import { Btn, Card, EmptyState, Field, Input, Modal, PageHeader, SearchBar, Select } from '../../ui/components.jsx';
 
 const variantLabel = (v) => {
   if (!v) return '—';

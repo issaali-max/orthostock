@@ -3,7 +3,7 @@ import { useApp } from '../../app/AppProvider.jsx';
 import { C, TABLES } from '../../lib/constants.js';
 import { fmtCur, fmtNum, num, round2 } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
-import { PageHeader, Card, Btn, Field, Input, Select, Modal, Badge, EmptyState } from '../../ui/components.jsx';
+import { PageHeader, Card, Btn, Field, Input, Select, Modal, Badge } from '../../ui/components.jsx';
 import { customerStats, supplierDebt } from '../../lib/engine.js';
 
 // Net of a personal debt: +lend (they owe me) − collect (I owe / they repaid). > 0 they owe

@@ -5,7 +5,7 @@ import { C, TABLES, SHADOW } from '../lib/constants.js';
 import { fmtCur, fmtNum, num } from '../lib/money.js';
 import { todayISO } from '../lib/dates.js';
 import RestockList from './catalogue/RestockList.jsx';
-import { pnl, monthlyTrend, periodTrend, buildAlerts, emirateStats, topProducts, topCustomers, openingDebtTotal, vatLiability } from '../lib/engine.js';
+import { pnl, periodTrend, buildAlerts, emirateStats, topProducts, topCustomers, openingDebtTotal, vatLiability } from '../lib/engine.js';
 import FinancialPanel from './dashboard/FinancialPanel.jsx';
 import { Badge, Card, EmptyState, Modal, PageHeader } from '../ui/components.jsx';
 

@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
 import { useApp } from '../../app/AppProvider.jsx';
 import { C, TABLES } from '../../lib/constants.js';
-import { num, fmtNum, round2, fmtCur } from '../../lib/money.js';
+import { num, fmtNum, round2 } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
-import { PageHeader, Card, Btn, Field, Input, Select, Modal, Badge, EmptyState } from '../../ui/components.jsx';
+import { PageHeader, Card, Btn, Field, Input, Select, Modal, EmptyState } from '../../ui/components.jsx';
 import { accountLedger, portfolioStats, setChequeStatus, transferBetweenAccounts, transferLegs, ACCOUNT_CURRENCY, investmentMovements } from '../../lib/engine.js';
 
 const ccy = (v, code = 'AED') => (code === 'USD' ? `$${fmtNum(round2(v))}` : `${fmtNum(round2(v))} ${code}`);

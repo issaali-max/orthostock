@@ -4,7 +4,6 @@ import QuickOrder from '../orders/QuickOrder.jsx';
 import { C, TABLES, emirateOptions, citiesOfEmirate, allCities } from '../../lib/constants.js';
 import { fmtCur, fmtNum, num, round2, safeDiv } from '../../lib/money.js';
 import { todayISO } from '../../lib/dates.js';
-import { nextDocNumber } from '../../lib/ids.js';
 import { saveInvoiceAtomic, invoiceTotals, deleteInvoiceAtomic, nextNumber } from '../../lib/engine.js';
 import { Btn, Field, Input, Modal, Select } from '../../ui/components.jsx';
 import { BandGrid } from '../../ui/BandGrid.jsx';

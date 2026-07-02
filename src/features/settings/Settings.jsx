@@ -5,9 +5,9 @@ import { Badge, Btn, Card, Field, Input, Modal, PageHeader, Select } from '../..
 import { resetStore, dbMode } from '../../db/db.js';
 import { isHashed, makeHashedPassword } from '../../lib/auth.js';
 import { subscribeSync, pushAllLocal, pull, cloudReady, wipeCloud, forcePushOverwrite, restoreSnapshotToCloud, fullRestoreFromBackup } from '../../db/sync.js';
-import { exportBackup, importBackup } from '../../lib/backup.js';
-import { exportExcel, importExcel } from '../../lib/excel.js';
-import { dataHealth, mergeCustomers, reconcileStock } from '../../lib/engine.js';
+import { exportBackup } from '../../lib/backup.js';
+import { exportExcel } from '../../lib/excel.js';
+import { mergeCustomers, reconcileStock } from '../../lib/engine.js';
 import { num, fmtCur } from '../../lib/money.js';
 
 

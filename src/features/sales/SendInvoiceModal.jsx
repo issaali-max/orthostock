@@ -2,8 +2,7 @@ import { useState } from 'react';
 import { useApp } from '../../app/AppProvider.jsx';
 import { Modal, Btn, Field, Input } from '../../ui/components.jsx';
 import { C, TABLES } from '../../lib/constants.js';
-import { num } from '../../lib/money.js';
-import { variantLabel, invoiceBreakdown } from '../../lib/engine.js';
+import { invoiceBreakdown } from '../../lib/engine.js';
 import { normalizePhone, isValidPhone, invoiceMessage, sendInvoiceWhatsApp, downloadBlob } from '../../lib/whatsapp.js';
 import { generateInvoicePdf } from '../../lib/invoicePdf.js';
 

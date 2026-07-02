@@ -6,16 +6,7 @@ import { num, fmtNum, round2 } from '../../lib/money.js';
 import { money } from '../../lib/whatsapp.js';
 import { parseBand } from '../../lib/bandGrid.js';
 
-// Status of a material for buying: out / low (≤ min) / near (close to min) / ok.
-export const statusOf = (v) => {
-  const stock = num(v.stockQty), min = num(v.stockMin);
-  if (stock <= 0) return 'out';
-  if (min > 0 && stock <= min) return 'low';
-  if (min > 0 && stock <= min + Math.max(1, Math.ceil(min * 0.5))) return 'near';
-  return 'ok';
-};
-// Suggested order qty: refill to minimum; manual items keep their own listQty.
-const autoQty = (v) => { const stock = num(v.stockQty), min = num(v.stockMin); return min > 0 ? Math.max(0, Math.ceil(min - stock)) : 0; };
+import { stockStatus as statusOf, suggestedQty as autoQty } from '../../lib/stock.js';
 const sortKey = (v) => { const n = parseFloat(String(parseBand(v).size).split('/')[0]); return isNaN(n) ? (v.nameEn || '') : n; };
 
 // Purchase planning / shopping list. Materials land here automatically when stock is low/near,
