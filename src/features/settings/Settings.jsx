@@ -6,13 +6,14 @@ import { resetStore, dbMode } from '../../db/db.js';
 import { isHashed, makeHashedPassword } from '../../lib/auth.js';
 import { subscribeSync, pushAllLocal, pull, cloudReady, wipeCloud, forcePushOverwrite, restoreSnapshotToCloud, fullRestoreFromBackup } from '../../db/sync.js';
 import { exportBackup } from '../../lib/backup.js';
-import { exportExcel } from '../../lib/excel.js';
-import { mergeCustomers, reconcileStock } from '../../lib/engine.js';
+import { exportExcel, importExcel } from '../../lib/excel.js';
+import { mergeCustomers, reconcileStock, dataHealth } from '../../lib/engine.js';
 import { num, fmtCur } from '../../lib/money.js';
 
 
 export default function Settings() {
-  const { t, settings, updateSettings, setLang, loading, showToast, data, refresh, createRow, updateRow, deleteRow, user, displayCurrency, usdRate } = useApp();
+  const app = useApp();
+  const { t, settings, updateSettings, setLang, loading, showToast, data, refresh, createRow, updateRow, deleteRow, user, displayCurrency, usdRate } = app;
   // Guarded currency formatter: never throws, so a missing/broken formatter can
   // never crash the Settings page — it degrades to a plain number instead.
   const cur = (v) => { try { return fmtCur(v, displayCurrency, usdRate); } catch { return String(v ?? ''); } };

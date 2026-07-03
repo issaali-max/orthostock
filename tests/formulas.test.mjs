@@ -48,3 +48,30 @@ const pl = pnl({
 });
 eqn(pl.businessExp, 417.25, 'مصاريف العمل: $100×3.6725 + 50 = 417.25 (لا خلط عملات)');
 console.log('P&L CURRENCY TEST PASSED');
+
+// ═══ اتساق ذهبي: نقد الداشبورد (cashEvents) ≡ بنك+درج من دفتر الأموال ═══
+import { cashEvents, accountLedger } from '../src/lib/engine.js';
+const mix = {
+  customers: [{ id: 'c1', name: 'د. س' }], suppliers: [], expenseGroups: [],
+  invoices: [{ id: 'i1', isActive: true, invoiceNumber: 'X1', customerId: 'c1', date: '2026-07-01', total: 900, paidAmount: 900, payments: [
+    { date: '2026-07-01', amount: 400, method: 'transfer' },
+    { date: '2026-07-01', amount: 200, method: 'cash' },
+    { date: '2026-07-01', amount: 300, method: 'cheque', chequeStatus: 'received' }, // معلّق: ليس نقداً
+  ]}],
+  expenses: [{ id: 'e1', date: '2026-07-01', amount: 50, currency: 'AED', paidFrom: 'drawer' }],
+  purchases: [], supplierPayments: [], externalDebts: [],
+  cashFlows: [
+    { id: 'f1', account: 'drawer', type: 'deposit', amount: 1000, currency: 'AED', date: '2026-07-01' },
+    { id: 'f2', account: 'drawer', type: 'transferOut', amount: 300, currency: 'AED', date: '2026-07-02', toAccount: 'bank' },
+    { id: 'f3', account: 'bank', type: 'transferIn', amount: 300, currency: 'AED', date: '2026-07-02', fromAccount: 'drawer' },
+    { id: 'f4', account: 'bank', type: 'withdraw', amount: 100, currency: 'AED', date: '2026-07-03', reason: 'سحب' },
+    { id: 'f5', type: 'deposit', amount: 5000, date: '2026-01-01' }, // استثمار قديم: خارج نقد الأعمال
+  ],
+};
+const evs = cashEvents(mix);
+const dashAED = evs.filter((e) => e.currency === 'AED').reduce((s, e) => s + (e.direction === 'in' ? e.amount : -e.amount), 0);
+const led = accountLedger(mix);
+const ledAED = led.balances.bank.AED + led.balances.drawer.AED;
+eqn(dashAED, ledAED, 'نقد الداشبورد = بنك+درج (شيك معلّق مستثنى، تحويل داخلي صفري)');
+eqn(led.pendingChequesTotal, 300, 'الشيك المعلّق خارج الطرفين');
+console.log('CONSISTENCY TEST PASSED');

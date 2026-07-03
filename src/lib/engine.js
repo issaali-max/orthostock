@@ -1359,7 +1359,11 @@ export function cashEvents(app) {
     if (inv.isActive === false || inv.status === 'returned') continue;
     const cur = inv.currency || 'AED';
     if (Array.isArray(inv.payments) && inv.payments.length) {
-      for (const p of inv.payments) push(p.date || inv.date, cur, p.amount, 'in', 'invoice', inv.invoiceNumber);
+      for (const p of inv.payments) {
+        const method = p.method || inv.paymentMethod;
+        if (method === 'cheque' && p.chequeStatus !== 'cleared') continue; // a cheque is cash only once CLEARED
+        push(p.date || inv.date, cur, p.amount, 'in', 'invoice', inv.invoiceNumber);
+      }
     } else if (num(inv.paidAmount) > 0) {
       push(inv.date, cur, inv.paidAmount, 'in', 'invoice', inv.invoiceNumber);
     }
@@ -1380,6 +1384,17 @@ export function cashEvents(app) {
   for (const e of (data[TABLES.expenses] || [])) {
     if (e.isActive === false) continue;
     push(e.date, e.currency || 'AED', e.amount, 'out', 'expense', e.note || '');
+  }
+
+  // 3.5) Manual money movements on bank/drawer (the Money section): deposits IN,
+  //      withdrawals OUT, and transfer legs (bank↔drawer nets to zero; the bank/drawer
+  //      leg of an investment transfer moves business cash for real).
+  for (const f of (data[TABLES.cashFlows] || [])) {
+    if (f.isActive === false) continue;
+    const account = f.account || 'investment';
+    if (account !== 'bank' && account !== 'drawer') continue;
+    const dirIn = f.type === 'deposit' || f.type === 'transferIn';
+    push(f.date, f.currency || 'AED', f.amount, dirIn ? 'in' : 'out', 'manual', f.reason || f.notes || '');
   }
 
   // 4) Personal debts (externalDebts): lending money OUT, collecting it back IN.

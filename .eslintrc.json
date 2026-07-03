@@ -1,0 +1,36 @@
+{
+  "root": true,
+  "env": {
+    "browser": true,
+    "es2022": true,
+    "node": true
+  },
+  "parserOptions": {
+    "ecmaVersion": 2022,
+    "sourceType": "module",
+    "ecmaFeatures": {
+      "jsx": true
+    }
+  },
+  "plugins": [
+    "react-hooks"
+  ],
+  "rules": {
+    "no-undef": "error",
+    "no-unused-vars": [
+      "warn",
+      {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_"
+      }
+    ],
+    "no-dupe-keys": "error",
+    "react-hooks/rules-of-hooks": "error",
+    "no-unreachable": "error",
+    "eqeqeq": "off"
+  },
+  "globals": {
+    "__BUILD_ID__": "readonly",
+    "__BUILD_SHA__": "readonly"
+  }
+}
