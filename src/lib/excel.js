@@ -11,6 +11,7 @@
 // ExcelJS is lazy-loaded so it never bloats the initial bundle.
 // ─────────────────────────────────────────────────────────────
 import { TABLES, EMIRATES, WEEKDAYS } from './constants.js';
+import { accountLedger } from './engine.js';
 import { num, round2 } from './money.js';
 import * as db from '../db/db.js';
 
@@ -200,13 +201,14 @@ export async function exportExcel(data, lang = 'ar', scope = 'all', opts = {}) {
     { header: 'SKU', key: 'sku', width: 16 },
     { header: 'Name', key: 'name', width: 26 },
     { header: 'Category', key: 'cat', width: 20 },
+    { header: 'Group', key: 'grp', width: 22 },
     { header: 'Cost', key: 'cost', width: 12, money: true },
     { header: 'Selling', key: 'sell', width: 12, money: true },
     { header: 'Stock', key: 'stock', width: 10 },
     { header: 'Min', key: 'min', width: 8 },
-    { header: 'StockValue', key: 'sv', width: 13, money: true, formula: (r) => `IF($B${r}="","",$E${r}*$G${r})` },
+    { header: 'StockValue', key: 'sv', width: 13, money: true, formula: (r) => `IF($B${r}="","",$F${r}*$H${r})` },
     { header: 'Brand', key: 'brand', width: 18 },
-  ], vars, (v) => { const p = prods.find((x) => x.id === v.productId); return { id: v.id, sku: v.sku, name: varName(v), cat: p ? catName(p.categoryId) : '', cost: num(v.purchasePriceAvg), sell: num(v.sellingPriceDefault), stock: num(v.stockQty), min: num(v.stockMin), brand: p?.brand || '' }; }, exportErrors);
+  ], vars, (v) => { const p = prods.find((x) => x.id === v.productId); return { id: v.id, sku: v.sku, name: varName(v), cat: p ? catName(p.categoryId) : '', grp: p?.isGroup ? (p.nameEn || p.nameAr || '') : '', cost: num(v.purchasePriceAvg), sell: num(v.sellingPriceDefault), stock: num(v.stockQty), min: num(v.stockMin), brand: p?.brand || '' }; }, exportErrors);
 
   if (want('customers')) buildSheet(wb, 'Customers', [
     { header: 'id', key: 'id', width: 14 },
@@ -322,6 +324,44 @@ export async function exportExcel(data, lang = 'ar', scope = 'all', opts = {}) {
   // Company / business details (editable Field→Value; re-imported by importExcel).
   if (scope === 'all') {
     const s = (data[TABLES.settings] || [])[0] || {};
+  // ── التواصي (doctor orders) ──
+  if (scope === 'all') {
+    const orders = (data[TABLES.orders] || []).filter((o) => o.isActive !== false);
+    const oItems = (data[TABLES.orderItems] || []).filter((it) => it.isActive !== false);
+    buildSheet(wb, 'Orders', [
+      { header: 'Date', key: 'date', width: 14 }, { header: 'Customer', key: 'cust', width: 24 },
+      { header: 'Status', key: 'st', width: 12 }, { header: 'Priority', key: 'pr', width: 10 },
+      { header: 'PlannedDate', key: 'pd', width: 14 }, { header: 'Notes', key: 'no', width: 30 },
+    ], orders, (o) => ({ date: o.date, cust: custName(o.customerId), st: o.status, pr: o.priority, pd: o.plannedDate, no: o.notes }), exportErrors);
+    buildSheet(wb, 'OrderItems', [
+      { header: 'OrderDate', key: 'date', width: 14 }, { header: 'Customer', key: 'cust', width: 24 },
+      { header: 'SKU', key: 'sku', width: 16 }, { header: 'Material', key: 'mat', width: 26 }, { header: 'Qty', key: 'qty', width: 8 },
+    ], oItems, (it) => { const o = orders.find((x) => x.id === it.orderId) || {}; return { date: o.date, cust: custName(o.customerId), sku: varSku(it.variantId), mat: varName(vars.find((v) => v.id === it.variantId) || {}), qty: num(it.qty) }; }, exportErrors);
+    buildSheet(wb, 'Visits', [
+      { header: 'Date', key: 'date', width: 14 }, { header: 'Customer', key: 'cust', width: 24 },
+      { header: 'Emirate', key: 'em', width: 14 }, { header: 'City', key: 'ci', width: 14 }, { header: 'Notes', key: 'no', width: 30 },
+    ], (data[TABLES.visits] || []).filter((v) => v.isActive !== false), (v) => ({ date: v.date, cust: custName(v.customerId), em: v.emirate, ci: v.city, no: v.notes }), exportErrors);
+    buildSheet(wb, 'Projects', [
+      { header: 'Name', key: 'name', width: 26 }, { header: 'Invested', key: 'inv', width: 13, money: true },
+      { header: 'ExpectedReturn', key: 'er', width: 14, money: true }, { header: 'Currency', key: 'cur', width: 10 },
+      { header: 'StartDate', key: 'sd', width: 13 }, { header: 'Months', key: 'mo', width: 9 },
+      { header: 'Status', key: 'st', width: 12 }, { header: 'Note', key: 'no', width: 28 },
+    ], (data[TABLES.projects] || []).filter((x) => x.isActive !== false), (x) => ({ name: x.name, inv: num(x.amount), er: num(x.expectedReturn), cur: x.currency, sd: x.startDate, mo: num(x.durationMonths), st: x.status, no: x.note }), exportErrors);
+    buildSheet(wb, 'SupplierPayments', [
+      { header: 'Date', key: 'date', width: 14 }, { header: 'Supplier', key: 'sup', width: 24 },
+      { header: 'Amount', key: 'am', width: 12, money: true }, { header: 'Method', key: 'me', width: 12 }, { header: 'Note', key: 'no', width: 28 },
+    ], (data[TABLES.supplierPayments] || []).filter((x) => x.isActive !== false), (x) => ({ date: x.date, sup: (sups.find((z) => z.id === x.supplierId) || {}).name || '', am: num(x.amount), me: x.method, no: x.note }), exportErrors);
+    // ── حركات الأموال: bank/drawer statement (mirrors the Money section) ──
+    const led = accountLedger(data);
+    buildSheet(wb, 'Money', [
+      { header: 'Date', key: 'date', width: 14 }, { header: 'Account', key: 'acc', width: 10 },
+      { header: 'Type', key: 'ty', width: 14 }, { header: 'InOut', key: 'io', width: 8 },
+      { header: 'Amount', key: 'am', width: 12, money: true }, { header: 'Currency', key: 'cur', width: 9 },
+      { header: 'Party', key: 'pa', width: 24 }, { header: 'Invoice', key: 'inv', width: 12 },
+      { header: 'ChequeStatus', key: 'cs', width: 13 }, { header: 'Reason', key: 're', width: 28 },
+    ], led.moves, (m) => ({ date: m.date, acc: m.account, ty: m.type, io: m.direction, am: num(m.amount), cur: m.currency, pa: m.customerName || m.supplierName || '', inv: m.invoiceNumber || '', cs: m.chequeStatus || (m.pending ? 'pending' : ''), re: m.reason || '' }), exportErrors);
+  }
+
     buildSheet(wb, 'Company', [
       { header: 'Field', key: 'k', width: 22 },
       { header: 'Value', key: 'v', width: 44 },
@@ -459,6 +499,19 @@ export async function importExcel(file, data) {
         if (sell !== undefined && sell !== '') patch.sellingPriceDefault = round2(sell);
         if (stock !== undefined && stock !== '') patch.stockQty = round2(stock);
         if (min !== undefined && min !== '') patch.stockMin = num(min);
+        // Group column: move the material into the named group (find-or-create it in the
+        // material's category) — enables bulk re-organisation straight from Excel.
+        const grpCell = norm(cellVal(row, idx, 'Group'));
+        if (grpCell) {
+          const curProd = products.find((pp) => pp.id === v.productId);
+          const curName = norm(curProd?.nameEn || curProd?.nameAr || '');
+          if (!curProd?.isGroup || curName.toLowerCase() !== grpCell.toLowerCase()) {
+            const catId = curProd?.categoryId || null;
+            let g = products.find((pp) => pp.isGroup === true && norm(pp.nameEn).toLowerCase() === grpCell.toLowerCase() && pp.categoryId === catId);
+            if (!g) { g = await db.insert(TABLES.products, { nameAr: grpCell, nameEn: grpCell, categoryId: catId, brand: curProd?.brand || '', icon: curProd?.icon || '📦', image_url: '', description: '', isGroup: true, isActive: true }); products.push(g); }
+            patch.productId = g.id;
+          }
+        }
         if (Object.keys(patch).length) { await db.update(TABLES.variants, v.id, patch); summary.materialsUpdated++; }
         // Keep the standalone product-shell name in sync (skip real multi-size groups).
         if (patch.nameEn) {
@@ -472,8 +525,16 @@ export async function importExcel(file, data) {
       const catName = norm(cellVal(row, idx, 'Category'));
       let cat = findCat(catName);
       if (!cat && catName) { cat = await db.insert(TABLES.categories, { nameAr: catName, nameEn: catName, icon: '📦', color: '#0D3B6E', attributes: [], isActive: true }); cats.push(cat); summary.categoriesAdded++; }
-      let prod = products.find((pp) => norm(pp.nameEn).toLowerCase() === name.toLowerCase() && pp.categoryId === (cat ? cat.id : null));
-      if (!prod) { prod = await db.insert(TABLES.products, { nameAr: name, nameEn: name, categoryId: cat ? cat.id : null, brand: norm(cellVal(row, idx, 'Brand')), icon: '📦', image_url: '', description: '', isActive: true }); products.push(prod); }
+      const grpNew = norm(cellVal(row, idx, 'Group'));
+      let prod;
+      if (grpNew) {
+        // Category → Group → Material: attach to (or create) the named group.
+        prod = products.find((pp) => pp.isGroup === true && norm(pp.nameEn).toLowerCase() === grpNew.toLowerCase() && pp.categoryId === (cat ? cat.id : null));
+        if (!prod) { prod = await db.insert(TABLES.products, { nameAr: grpNew, nameEn: grpNew, categoryId: cat ? cat.id : null, brand: norm(cellVal(row, idx, 'Brand')), icon: '📦', image_url: '', description: '', isGroup: true, isActive: true }); products.push(prod); }
+      } else {
+        prod = products.find((pp) => norm(pp.nameEn).toLowerCase() === name.toLowerCase() && pp.categoryId === (cat ? cat.id : null));
+        if (!prod) { prod = await db.insert(TABLES.products, { nameAr: name, nameEn: name, categoryId: cat ? cat.id : null, brand: norm(cellVal(row, idx, 'Brand')), icon: '📦', image_url: '', description: '', isActive: true }); products.push(prod); }
+      }
       await db.insert(TABLES.variants, {
         productId: prod.id, sku: String(sku).trim(), nameEn: name, attributes: {}, image_url: '',
         purchasePriceLatest: round2(cost || 0), purchasePriceAvg: round2(cost || 0), purchasePriceMin: round2(cost || 0), purchasePriceMax: round2(cost || 0),
