@@ -1,303 +1,279 @@
--- ════════════════════════════════════════════════════════════
--- OrthoStock — Supabase / PostgreSQL schema (v2.6)
--- Run once in the Supabase SQL editor.
--- Column names are quoted camelCase so they match the JS data model
--- 1:1 (no mapping layer needed in dbSupabase.js).
--- Soft-delete: tables with transaction history keep an "isActive" flag.
--- ════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════
+-- OrthoStock — canonical Supabase schema (AUTO-GENERATED from src/lib/constants.js TABLES)
+-- Model: one jsonb envelope per row → { id text PK, "updatedAt" bigint (ms epoch), data jsonb }
+-- Safe to run repeatedly (idempotent). Covers ALL 27 synced tables.
+--
+-- ⚠️ ONE-TIME FIX if your project predates the envelope model (legacy timestamptz columns):
+--    the old "externalDebts" table must be dropped first — uncomment the next line once:
+-- drop table if exists public."externalDebts" cascade;
+-- ═══════════════════════════════════════════════════════════════════
 
--- ── Settings (single row, id = 'singleton') ──
-create table if not exists settings (
-  id text primary key default 'singleton',
-  "baseCurrency" text not null default 'AED',
-  "usdRate" numeric not null default 3.6725,
-  "taxEnabled" boolean not null default true,
-  "taxRate" numeric not null default 5,
-  "companyName" text not null default 'OrthoStock',
-  lang text not null default 'ar',
-  "oneDrive" jsonb not null default '{"connected":false,"folderPath":"","lastBackupAt":null}'
+create table if not exists public."categories" (
+  id text primary key,
+  "updatedAt" bigint,
+  data jsonb
 );
-
--- ── Users & roles (optional; single admin by default) ──
-create table if not exists users (
-  id uuid primary key default gen_random_uuid(),
-  name text not null,
-  email text unique not null,
-  role text not null default 'admin' check (role in ('admin','employee')),
-  "isActive" boolean not null default true
-);
-
--- ── Categories (dynamic attributes in jsonb) ──
-create table if not exists categories (
-  id uuid primary key default gen_random_uuid(),
-  "nameAr" text not null,
-  "nameEn" text not null,
-  icon text default '',
-  image_url text default '',
-  color text default '#0D3B6E',
-  attributes jsonb not null default '[]',
-  "isActive" boolean not null default true
-);
-
--- ── Products ──
-create table if not exists products (
-  id uuid primary key default gen_random_uuid(),
-  "nameAr" text not null,
-  "nameEn" text not null,
-  "categoryId" uuid references categories(id),
-  brand text default '',
-  icon text default '',
-  image_url text default '',
-  description text default '',
-  "isActive" boolean not null default true
-);
-
--- ── Variants (sku unique; stockQty is a CACHE recomputed from movements) ──
-create table if not exists variants (
-  id uuid primary key default gen_random_uuid(),
-  "productId" uuid references products(id),
-  sku text unique not null,
-  "nameEn" text default '',
-  image_url text default '',
-  attributes jsonb not null default '{}',
-  "purchasePriceLatest" numeric not null default 0,
-  "purchasePriceAvg" numeric not null default 0,
-  "purchasePriceMin" numeric not null default 0,
-  "purchasePriceMax" numeric not null default 0,
-  "sellingPriceDefault" numeric not null default 0,
-  "stockQty" numeric not null default 0,
-  "stockMin" numeric not null default 0,
-  unit text default 'piece',
-  notes text default '',
-  "isActive" boolean not null default true
-);
-
--- ── Suppliers ──
-create table if not exists suppliers (
-  id uuid primary key default gen_random_uuid(),
-  name text not null,
-  phone text default '',
-  whatsapp text default '',
-  city text default '',
-  currency text not null default 'AED' check (currency in ('AED','USD')),
-  notes text default '',
-  "isActive" boolean not null default true
-);
-
--- ── Customers (phone unique) ──
-create table if not exists customers (
-  id uuid primary key default gen_random_uuid(),
-  type text not null default 'doctor' check (type in ('doctor','center')),
-  name text default '',
-  "nameAr" text default '',
-  "nameEn" text default '',
-  phone text unique,
-  whatsapp text default '',
-  email text default '',
-  city text default '',
-  region text default '',
-  emirate text default '',
-  specialty text default '',
-  notes text default '',
-  "totalPurchased" numeric not null default 0,
-  "debtAmount" numeric not null default 0,
-  "lastVisit" date,
-  "workingDays" jsonb not null default '[]',
-  "isActive" boolean not null default true
-);
-
--- ── Customer special prices ──
-create table if not exists "customerPrices" (
-  id uuid primary key default gen_random_uuid(),
-  "customerId" uuid references customers(id),
-  "variantId" uuid references variants(id),
-  "specialPrice" numeric not null default 0
-);
-
--- ── Purchases (purchaseNumber unique) ──
-create table if not exists purchases (
-  id uuid primary key default gen_random_uuid(),
-  "purchaseNumber" text unique not null,
-  "supplierId" uuid references suppliers(id),
-  date date not null,
-  currency text not null default 'AED',
-  "exchangeRate" numeric not null default 1,
-  "totalOriginal" numeric not null default 0,
-  "totalAED" numeric not null default 0,
-  "paidAmount" numeric not null default 0,
-  "invoiceRef" text default '',
-  notes text default '',
-  "createdAt" timestamptz not null default now()
-);
-
-create table if not exists "purchaseItems" (
-  id uuid primary key default gen_random_uuid(),
-  "purchaseId" uuid references purchases(id) on delete cascade,
-  "variantId" uuid references variants(id),
-  qty numeric not null default 0,
-  "unitCost" numeric not null default 0,
-  total numeric not null default 0
-);
-
--- ── Invoices (invoiceNumber unique) ──
-create table if not exists invoices (
-  id uuid primary key default gen_random_uuid(),
-  "invoiceNumber" text unique not null,
-  "customerId" uuid references customers(id),
-  date date not null,
-  subtotal numeric not null default 0,
-  "discountTotal" numeric not null default 0,
-  total numeric not null default 0,
-  "paidAmount" numeric not null default 0,
-  "paymentStatus" text not null default 'unpaid' check ("paymentStatus" in ('paid','partial','unpaid')),
-  "paymentMethod" text default 'cash' check ("paymentMethod" in ('cash','transfer','cheque')),
-  status text not null default 'active' check (status in ('active','returned')),
-  currency text not null default 'AED',
-  notes text default '',
-  payments jsonb not null default '[]',
-  "createdAt" timestamptz not null default now()
-);
-
-create table if not exists "invoiceItems" (
-  id uuid primary key default gen_random_uuid(),
-  "invoiceId" uuid references invoices(id) on delete cascade,
-  "variantId" uuid references variants(id),
-  qty numeric not null default 0,
-  "listPrice" numeric not null default 0,
-  "unitPrice" numeric not null default 0,
-  "discountAmount" numeric not null default 0,
-  "discountPct" numeric not null default 0,
-  "avgCostAtSale" numeric not null default 0,
-  "lineProfit" numeric not null default 0,
-  total numeric not null default 0
-);
-
--- ── Stock movements (the SOURCE OF TRUTH for stock) ──
-create table if not exists "stockMovements" (
-  id uuid primary key default gen_random_uuid(),
-  "variantId" uuid references variants(id),
-  type text not null check (type in ('purchase','sale','return','adjustment','transfer','opening')),
-  "qtyChange" numeric not null default 0,
-  "qtyAfter" numeric not null default 0,
-  "refType" text default '',
-  "refId" text default '',
-  notes text default '',
-  "createdAt" timestamptz not null default now()
-);
-
--- ── Expense groups (typed business | personal) ──
-create table if not exists "expenseGroups" (
-  id uuid primary key default gen_random_uuid(),
-  "nameAr" text not null,
-  "nameEn" text not null,
-  type text not null default 'business' check (type in ('business','personal')),
-  icon text default '',
-  color text default '#0D3B6E',
-  "isActive" boolean not null default true
-);
-
--- ── Expenses (each belongs to a group; type is inherited from the group) ──
-create table if not exists expenses (
-  id uuid primary key default gen_random_uuid(),
-  "groupId" uuid references "expenseGroups"(id),
-  amount numeric not null default 0,
-  date date not null,
-  note text default '',
-  "createdAt" timestamptz not null default now()
-);
-
--- ── Other debts ──
-create table if not exists "otherDebts" (
-  id uuid primary key default gen_random_uuid(),
-  type text not null check (type in ('receivable','payable','loan','investment')),
-  title text default '',
-  "personName" text default '',
-  amount numeric not null default 0,
-  "paidAmount" numeric not null default 0,
-  "dueDate" date,
-  currency text not null default 'AED',
-  notes text default ''
-);
-
--- ── Investments: securities, cash flows, lots, sells ──
-create table if not exists securities (
-  id uuid primary key default gen_random_uuid(),
-  symbol text not null,
-  name text default '',
-  market text default '',
-  currency text not null default 'AED',
-  "currentPrice" numeric not null default 0,
-  "priceUpdatedAt" timestamptz,
-  notes text default '',
-  "isActive" boolean not null default true
-);
-
-create table if not exists "cashFlows" (
-  id uuid primary key default gen_random_uuid(),
-  type text not null check (type in ('deposit','withdraw','dividend','fee','interest')),
-  date date not null,
-  amount numeric not null default 0,
-  currency text not null default 'AED',
-  "securityId" uuid references securities(id),
-  notes text default '',
-  "createdAt" timestamptz not null default now()
-);
-
-create table if not exists "tradeLots" (
-  id uuid primary key default gen_random_uuid(),
-  "securityId" uuid references securities(id),
-  "buyDate" date not null,
-  "qtyBought" numeric not null default 0,
-  "qtyRemaining" numeric not null default 0,
-  "buyPricePerShare" numeric not null default 0,
-  "buyFees" numeric not null default 0,
-  "costBasis" numeric not null default 0,
-  currency text not null default 'AED',
-  notes text default '',
-  "createdAt" timestamptz not null default now()
-);
-
-create table if not exists "tradeSells" (
-  id uuid primary key default gen_random_uuid(),
-  "securityId" uuid references securities(id),
-  "sellDate" date not null,
-  qty numeric not null default 0,
-  "sellPricePerShare" numeric not null default 0,
-  "sellFees" numeric not null default 0,
-  proceeds numeric not null default 0,
-  "costBasisMatched" numeric not null default 0,
-  "realizedPnL" numeric not null default 0,
-  currency text not null default 'AED',
-  notes text default '',
-  "createdAt" timestamptz not null default now()
-);
-
--- ── Row Level Security ──
--- Private single-admin internal tool that uses a custom login (the anon key
--- is the access boundary). Grant the anon role full access on every table.
--- WHEN you add staff, move to Supabase Auth and tighten per-role.
-do $$
-declare t text;
-begin
-  for t in select tablename from pg_tables where schemaname = 'public' loop
-    execute format('alter table %I enable row level security', t);
-    execute format('drop policy if exists app_all on %I', t);
-    execute format('create policy app_all on %I for all to anon, authenticated using (true) with check (true)', t);
-  end loop;
-end $$;
-
-
-create table if not exists "externalDebts" (
-  id uuid primary key default gen_random_uuid(),
-  "personName" text not null,
-  phone text default '',
-  notes text default '',
-  txns jsonb not null default '[]',
-  "isActive" boolean not null default true,
-  "createdAt" timestamptz default now(),
-  "updatedAt" timestamptz default now()
-);
-alter table "externalDebts" enable row level security;
+alter table public."categories" enable row level security;
 do $$ begin
-  create policy "anon all externalDebts" on "externalDebts" for all using (true) with check (true);
+  create policy "categories all" on public."categories" for all to anon, authenticated using (true) with check (true);
+exception when duplicate_object then null; end $$;
+
+create table if not exists public."products" (
+  id text primary key,
+  "updatedAt" bigint,
+  data jsonb
+);
+alter table public."products" enable row level security;
+do $$ begin
+  create policy "products all" on public."products" for all to anon, authenticated using (true) with check (true);
+exception when duplicate_object then null; end $$;
+
+create table if not exists public."variants" (
+  id text primary key,
+  "updatedAt" bigint,
+  data jsonb
+);
+alter table public."variants" enable row level security;
+do $$ begin
+  create policy "variants all" on public."variants" for all to anon, authenticated using (true) with check (true);
+exception when duplicate_object then null; end $$;
+
+create table if not exists public."customers" (
+  id text primary key,
+  "updatedAt" bigint,
+  data jsonb
+);
+alter table public."customers" enable row level security;
+do $$ begin
+  create policy "customers all" on public."customers" for all to anon, authenticated using (true) with check (true);
+exception when duplicate_object then null; end $$;
+
+create table if not exists public."customerPrices" (
+  id text primary key,
+  "updatedAt" bigint,
+  data jsonb
+);
+alter table public."customerPrices" enable row level security;
+do $$ begin
+  create policy "customerPrices all" on public."customerPrices" for all to anon, authenticated using (true) with check (true);
+exception when duplicate_object then null; end $$;
+
+create table if not exists public."suppliers" (
+  id text primary key,
+  "updatedAt" bigint,
+  data jsonb
+);
+alter table public."suppliers" enable row level security;
+do $$ begin
+  create policy "suppliers all" on public."suppliers" for all to anon, authenticated using (true) with check (true);
+exception when duplicate_object then null; end $$;
+
+create table if not exists public."purchases" (
+  id text primary key,
+  "updatedAt" bigint,
+  data jsonb
+);
+alter table public."purchases" enable row level security;
+do $$ begin
+  create policy "purchases all" on public."purchases" for all to anon, authenticated using (true) with check (true);
+exception when duplicate_object then null; end $$;
+
+create table if not exists public."purchaseItems" (
+  id text primary key,
+  "updatedAt" bigint,
+  data jsonb
+);
+alter table public."purchaseItems" enable row level security;
+do $$ begin
+  create policy "purchaseItems all" on public."purchaseItems" for all to anon, authenticated using (true) with check (true);
+exception when duplicate_object then null; end $$;
+
+create table if not exists public."invoices" (
+  id text primary key,
+  "updatedAt" bigint,
+  data jsonb
+);
+alter table public."invoices" enable row level security;
+do $$ begin
+  create policy "invoices all" on public."invoices" for all to anon, authenticated using (true) with check (true);
+exception when duplicate_object then null; end $$;
+
+create table if not exists public."invoiceItems" (
+  id text primary key,
+  "updatedAt" bigint,
+  data jsonb
+);
+alter table public."invoiceItems" enable row level security;
+do $$ begin
+  create policy "invoiceItems all" on public."invoiceItems" for all to anon, authenticated using (true) with check (true);
+exception when duplicate_object then null; end $$;
+
+create table if not exists public."stockMovements" (
+  id text primary key,
+  "updatedAt" bigint,
+  data jsonb
+);
+alter table public."stockMovements" enable row level security;
+do $$ begin
+  create policy "stockMovements all" on public."stockMovements" for all to anon, authenticated using (true) with check (true);
+exception when duplicate_object then null; end $$;
+
+create table if not exists public."expenses" (
+  id text primary key,
+  "updatedAt" bigint,
+  data jsonb
+);
+alter table public."expenses" enable row level security;
+do $$ begin
+  create policy "expenses all" on public."expenses" for all to anon, authenticated using (true) with check (true);
+exception when duplicate_object then null; end $$;
+
+create table if not exists public."expenseGroups" (
+  id text primary key,
+  "updatedAt" bigint,
+  data jsonb
+);
+alter table public."expenseGroups" enable row level security;
+do $$ begin
+  create policy "expenseGroups all" on public."expenseGroups" for all to anon, authenticated using (true) with check (true);
+exception when duplicate_object then null; end $$;
+
+create table if not exists public."otherDebts" (
+  id text primary key,
+  "updatedAt" bigint,
+  data jsonb
+);
+alter table public."otherDebts" enable row level security;
+do $$ begin
+  create policy "otherDebts all" on public."otherDebts" for all to anon, authenticated using (true) with check (true);
+exception when duplicate_object then null; end $$;
+
+create table if not exists public."securities" (
+  id text primary key,
+  "updatedAt" bigint,
+  data jsonb
+);
+alter table public."securities" enable row level security;
+do $$ begin
+  create policy "securities all" on public."securities" for all to anon, authenticated using (true) with check (true);
+exception when duplicate_object then null; end $$;
+
+create table if not exists public."cashFlows" (
+  id text primary key,
+  "updatedAt" bigint,
+  data jsonb
+);
+alter table public."cashFlows" enable row level security;
+do $$ begin
+  create policy "cashFlows all" on public."cashFlows" for all to anon, authenticated using (true) with check (true);
+exception when duplicate_object then null; end $$;
+
+create table if not exists public."tradeLots" (
+  id text primary key,
+  "updatedAt" bigint,
+  data jsonb
+);
+alter table public."tradeLots" enable row level security;
+do $$ begin
+  create policy "tradeLots all" on public."tradeLots" for all to anon, authenticated using (true) with check (true);
+exception when duplicate_object then null; end $$;
+
+create table if not exists public."tradeSells" (
+  id text primary key,
+  "updatedAt" bigint,
+  data jsonb
+);
+alter table public."tradeSells" enable row level security;
+do $$ begin
+  create policy "tradeSells all" on public."tradeSells" for all to anon, authenticated using (true) with check (true);
+exception when duplicate_object then null; end $$;
+
+create table if not exists public."settings" (
+  id text primary key,
+  "updatedAt" bigint,
+  data jsonb
+);
+alter table public."settings" enable row level security;
+do $$ begin
+  create policy "settings all" on public."settings" for all to anon, authenticated using (true) with check (true);
+exception when duplicate_object then null; end $$;
+
+create table if not exists public."users" (
+  id text primary key,
+  "updatedAt" bigint,
+  data jsonb
+);
+alter table public."users" enable row level security;
+do $$ begin
+  create policy "users all" on public."users" for all to anon, authenticated using (true) with check (true);
+exception when duplicate_object then null; end $$;
+
+create table if not exists public."externalDebts" (
+  id text primary key,
+  "updatedAt" bigint,
+  data jsonb
+);
+alter table public."externalDebts" enable row level security;
+do $$ begin
+  create policy "externalDebts all" on public."externalDebts" for all to anon, authenticated using (true) with check (true);
+exception when duplicate_object then null; end $$;
+
+create table if not exists public."auditLog" (
+  id text primary key,
+  "updatedAt" bigint,
+  data jsonb
+);
+alter table public."auditLog" enable row level security;
+do $$ begin
+  create policy "auditLog all" on public."auditLog" for all to anon, authenticated using (true) with check (true);
+exception when duplicate_object then null; end $$;
+
+create table if not exists public."supplierPayments" (
+  id text primary key,
+  "updatedAt" bigint,
+  data jsonb
+);
+alter table public."supplierPayments" enable row level security;
+do $$ begin
+  create policy "supplierPayments all" on public."supplierPayments" for all to anon, authenticated using (true) with check (true);
+exception when duplicate_object then null; end $$;
+
+create table if not exists public."orders" (
+  id text primary key,
+  "updatedAt" bigint,
+  data jsonb
+);
+alter table public."orders" enable row level security;
+do $$ begin
+  create policy "orders all" on public."orders" for all to anon, authenticated using (true) with check (true);
+exception when duplicate_object then null; end $$;
+
+create table if not exists public."orderItems" (
+  id text primary key,
+  "updatedAt" bigint,
+  data jsonb
+);
+alter table public."orderItems" enable row level security;
+do $$ begin
+  create policy "orderItems all" on public."orderItems" for all to anon, authenticated using (true) with check (true);
+exception when duplicate_object then null; end $$;
+
+create table if not exists public."visits" (
+  id text primary key,
+  "updatedAt" bigint,
+  data jsonb
+);
+alter table public."visits" enable row level security;
+do $$ begin
+  create policy "visits all" on public."visits" for all to anon, authenticated using (true) with check (true);
+exception when duplicate_object then null; end $$;
+
+create table if not exists public."projects" (
+  id text primary key,
+  "updatedAt" bigint,
+  data jsonb
+);
+alter table public."projects" enable row level security;
+do $$ begin
+  create policy "projects all" on public."projects" for all to anon, authenticated using (true) with check (true);
 exception when duplicate_object then null; end $$;

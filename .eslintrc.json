@@ -27,10 +27,19 @@
     "no-dupe-keys": "error",
     "react-hooks/rules-of-hooks": "error",
     "no-unreachable": "error",
-    "eqeqeq": "off"
+    "eqeqeq": "off",
+    "no-empty": [
+      "error",
+      {
+        "allowEmptyCatch": true
+      }
+    ]
   },
   "globals": {
     "__BUILD_ID__": "readonly",
     "__BUILD_SHA__": "readonly"
-  }
+  },
+  "extends": [
+    "eslint:recommended"
+  ]
 }
