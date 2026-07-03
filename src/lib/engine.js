@@ -174,21 +174,17 @@ export async function transferBetweenAccounts(app, { from, to, amount, date, rea
 // The investment account's own statement, everything in AED (the account's currency):
 // manual flows (deposit/withdraw incl. transfer legs, dividend, fee, interest) merged
 // with actual stock trades (buy = cash out, sell = cash in). Sorted newest first.
+// The investment account's CASH statement for the Money section: deposits, withdrawals,
+// transfer legs, dividends, fees, interest — the money that entered or left the account.
+// Individual stock buys/sells are NOT listed here (they move cash↔stock inside the account
+// and are managed in the Investments section); holdings are shown as a read-only summary.
 export function investmentMovements(data) {
   const symbolOf = (sid) => (data[TABLES.securities] || []).find((s) => s.id === sid)?.symbol || '';
   const moves = [];
   for (const f of (data[TABLES.cashFlows] || [])) {
     if (f.isActive === false || (f.account || 'investment') !== 'investment') continue;
-    const dirIn = f.type === 'deposit' || f.type === 'dividend' || f.type === 'interest';
+    const dirIn = f.type === 'deposit' || f.type === 'dividend' || f.type === 'interest' || f.type === 'transferIn';
     moves.push({ account: 'investment', date: f.date, direction: dirIn ? 'in' : 'out', amount: num(f.amount), currency: 'USD', type: f.type, reason: f.reason || f.notes || '', symbol: symbolOf(f.securityId), otherAccount: f.toAccount || f.fromAccount, flowId: f.id });
-  }
-  for (const l of (data[TABLES.tradeLots] || [])) {
-    if (l.isActive === false) continue;
-    moves.push({ account: 'investment', date: l.buyDate, direction: 'out', amount: num(l.costBasis), currency: 'USD', type: 'buy', symbol: symbolOf(l.securityId), qty: num(l.qtyBought), price: num(l.buyPricePerShare), lotId: l.id, securityId: l.securityId });
-  }
-  for (const x of (data[TABLES.tradeSells] || [])) {
-    if (x.isActive === false) continue;
-    moves.push({ account: 'investment', date: x.sellDate, direction: 'in', amount: num(x.proceeds), currency: 'USD', type: 'sell', symbol: symbolOf(x.securityId), qty: num(x.qty), price: num(x.sellPricePerShare), sellId: x.id, securityId: x.securityId });
   }
   moves.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   return moves;

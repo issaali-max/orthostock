@@ -36,12 +36,11 @@ eq(L.balances.drawer.AED, 300, 'الدرج استلم 300 (بلا ازدواج)'
 
 // سجل حركات الاستثمار: يشمل الشراء والبيع والإيداع والتحويل
 const mv = investmentMovements(data);
+// السجل الآن نقد فقط (إيداع/سحب/تحويل) — الصفقات تُدار في قسم الاستثمار
+if (mv.some((m) => m.type === 'buy' || m.type === 'sell')) { console.error('✗ يجب ألا تظهر صفقات في سجل نقد الاستثمار'); process.exit(1); }
 const types = mv.map((m) => m.type).sort().join(',');
-if (types !== 'buy,deposit,sell,withdraw') { console.error('✗ movement types:', types); process.exit(1); }
-console.log('✓ سجل الاستثمار: شراء/بيع/إيداع/سحب-تحويل');
-const buy = mv.find((m) => m.type === 'buy');
-if (buy.symbol !== 'EAND' || buy.direction !== 'out' || buy.amount !== 1500) { console.error('✗ buy row'); process.exit(1); }
-console.log('✓ صف الشراء: EAND −1500');
+if (types !== 'deposit,withdraw') { console.error('✗ movement types:', types); process.exit(1); }
+console.log('✓ سجل نقد الاستثمار: إيداع/سحب فقط (بلا صفقات)');
 console.log('\nALL INVESTMENT TESTS PASSED');
 
 const deq = (a, b, m) => { if (JSON.stringify(a) !== JSON.stringify(b)) { console.error(`✗ ${m}:`, a, 'want', b); process.exit(1); } console.log(`✓ ${m}`); };

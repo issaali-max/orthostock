@@ -4,7 +4,7 @@ import { C, TABLES } from '../../lib/constants.js';
 import { num, fmtNum, round2 } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
 import { PageHeader, Card, Btn, Field, Input, Select, Modal, EmptyState } from '../../ui/components.jsx';
-import { accountLedger, portfolioStats, setChequeStatus, transferBetweenAccounts, transferLegs, ACCOUNT_CURRENCY, investmentMovements, applyTradeChange } from '../../lib/engine.js';
+import { accountLedger, portfolioStats, setChequeStatus, transferBetweenAccounts, transferLegs, ACCOUNT_CURRENCY, investmentMovements } from '../../lib/engine.js';
 
 const ccy = (v, code = 'AED') => (code === 'USD' ? `$${fmtNum(round2(v))}` : `${fmtNum(round2(v))} ${code}`);
 
@@ -46,14 +46,6 @@ export default function Treasury() {
     const currency = r.from === 'investment' ? 'USD' : (r.currency === 'USD' ? 'USD' : 'AED');
     await transferBetweenAccounts(app, { ...r, currency, rate });
     setXfer(null); showToast(t('saved'), 'success');
-  };
-  // Delete a single stock trade (a duplicated or mistaken buy/sell) straight from the log.
-  // Quantities and cash re-derive automatically once the lot/sell is gone.
-  const deleteTrade = async (m) => {
-    const label = `${t(m.type)} ${m.symbol} ×${fmtNum(m.qty)} · $${fmtNum(m.amount)}`;
-    if (!window.confirm(`${t('confirmDeleteTrade') || 'حذف هذه الصفقة نهائياً؟'}\n${label}`)) return;
-    await applyTradeChange(app, m.securityId, m.lotId ? { deleteLot: m.lotId } : { deleteSell: m.sellId });
-    showToast(t('deleted') || t('saved'), 'success');
   };
   const advanceCheque = async (m) => {
     const next = m.chequeStatus === 'deposited' ? 'cleared' : 'deposited';
@@ -120,11 +112,6 @@ export default function Treasury() {
       title = m.supplierName || t('purchases');
       chip = <span style={{ fontSize: 9.5, fontWeight: 800, color: C.textMid, background: C.surfaceAlt, borderRadius: 999, padding: '2px 7px' }}>{t('purchases')}</span>;
       if (m.reason) detail += ` · ${m.reason}`;
-    } else if (m.type === 'buy' || m.type === 'sell') {
-      icon = m.type === 'buy' ? '📥' : '📤';
-      title = `${t(m.type)} ${m.symbol || ''}`.trim();
-      if (m.qty) detail += ` · ×${fmtNum(m.qty)}${m.price ? ` @ $${fmtNum(m.price)}` : ''}`;
-      chip = <span style={{ fontSize: 9.5, fontWeight: 800, color: C.warning, background: C.warning + '16', borderRadius: 999, padding: '2px 7px' }}>{t('portfolio')}</span>;
     } else if (m.type === 'dividend' || m.type === 'fee' || m.type === 'interest') {
       icon = m.type === 'dividend' ? '💰' : m.type === 'fee' ? '🧾' : '🏦';
       title = `${t(m.type)}${m.symbol ? ` · ${m.symbol}` : ''}`;
@@ -147,9 +134,6 @@ export default function Treasury() {
           <button onClick={() => advanceCheque(m)} style={{ border: 'none', background: C.warning, color: '#fff', borderRadius: 8, padding: '5px 8px', fontSize: 10.5, fontWeight: 800, cursor: 'pointer' }}>
             {m.chequeStatus === 'deposited' ? `✓ ${t('chequeCleared')}` : `🏦 ${t('chequeDeposited')}`}
           </button>
-        )}
-        {(m.lotId || m.sellId) && (
-          <button onClick={() => deleteTrade(m)} title={t('delete')} style={{ border: `1px solid ${C.border}`, background: '#fff', color: C.danger, borderRadius: 8, width: 26, height: 26, fontSize: 12, cursor: 'pointer', flexShrink: 0 }}>🗑</button>
         )}
         {m.flowId && !m.symbol && ['deposit', 'withdraw', 'transferIn', 'transferOut'].includes(m.type) && (
           <button onClick={() => deleteManualFlow(m)} title={t('delete')} style={{ border: `1px solid ${C.border}`, background: '#fff', color: C.danger, borderRadius: 8, width: 26, height: 26, fontSize: 12, cursor: 'pointer', flexShrink: 0 }}>🗑</button>
@@ -278,7 +262,28 @@ export default function Treasury() {
               ))}
             </div>}
 
-            <div style={{ fontSize: 12.5, fontWeight: 900, color: C.textMid }}>📜 {t('movements')} ({viewMoves.length})</div>
+            {view === 'investment' && (inv.positions || []).filter((p) => p.qty > 0).length > 0 && (
+              <div>
+                <div style={{ fontSize: 12.5, fontWeight: 900, color: C.textMid, marginBottom: 6 }}>📊 {t('holdings')} ({(inv.positions || []).filter((p) => p.qty > 0).length})</div>
+                <div style={{ display: 'grid', gap: 5 }}>
+                  {(inv.positions || []).filter((p) => p.qty > 0).sort((a, b) => b.marketValue - a.marketValue).map((p) => (
+                    <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fff', borderRadius: 10, padding: '8px 10px' }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 800, color: C.text }}>{p.symbol}</div>
+                        <div style={{ fontSize: 10.5, color: C.textMuted }}>{fmtNum(p.qty)} × ${fmtNum(p.avgCost)} → ${fmtNum(p.price)}</div>
+                      </div>
+                      <div style={{ textAlign: 'end' }}>
+                        <div style={{ fontSize: 13, fontWeight: 800, color: C.text }}>${fmtNum(p.marketValue)}</div>
+                        <div style={{ fontSize: 10.5, fontWeight: 800, color: p.unrealized >= 0 ? C.success : C.danger }}>{p.unrealized >= 0 ? '+' : ''}${fmtNum(p.unrealized)}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ fontSize: 10.5, color: C.textMuted, textAlign: 'center', marginTop: 6 }}>{t('manageInInvestments') || 'لإدارة الأسهم (شراء/بيع/تعديل) افتح قسم 📈 الاستثمار'}</div>
+              </div>
+            )}
+
+            <div style={{ fontSize: 12.5, fontWeight: 900, color: C.textMid }}>📜 {view === 'investment' ? (t('cashMovements') || 'حركات النقد') : t('movements')} ({viewMoves.length})</div>
             {viewMoves.length === 0 ? <EmptyState icon="📜" text={t('noData')} /> : (
               <div style={{ display: 'grid', gap: 5, background: C.surfaceAlt, borderRadius: 12, padding: 8 }}>
                 {viewMoves.slice(0, 150).map((m, i) => <MoveRow key={i} m={m} />)}
