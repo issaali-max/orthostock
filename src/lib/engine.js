@@ -184,11 +184,11 @@ export function investmentMovements(data) {
   }
   for (const l of (data[TABLES.tradeLots] || [])) {
     if (l.isActive === false) continue;
-    moves.push({ account: 'investment', date: l.buyDate, direction: 'out', amount: num(l.costBasis), currency: 'USD', type: 'buy', symbol: symbolOf(l.securityId), qty: num(l.qtyBought) });
+    moves.push({ account: 'investment', date: l.buyDate, direction: 'out', amount: num(l.costBasis), currency: 'USD', type: 'buy', symbol: symbolOf(l.securityId), qty: num(l.qtyBought), price: num(l.buyPricePerShare), lotId: l.id, securityId: l.securityId });
   }
   for (const x of (data[TABLES.tradeSells] || [])) {
     if (x.isActive === false) continue;
-    moves.push({ account: 'investment', date: x.sellDate, direction: 'in', amount: num(x.proceeds), currency: 'USD', type: 'sell', symbol: symbolOf(x.securityId), qty: num(x.qty) });
+    moves.push({ account: 'investment', date: x.sellDate, direction: 'in', amount: num(x.proceeds), currency: 'USD', type: 'sell', symbol: symbolOf(x.securityId), qty: num(x.qty), price: num(x.sellPricePerShare), sellId: x.id, securityId: x.securityId });
   }
   moves.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   return moves;

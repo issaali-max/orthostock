@@ -4,7 +4,7 @@ import { C, TABLES } from '../../lib/constants.js';
 import { num, fmtNum, round2 } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
 import { PageHeader, Card, Btn, Field, Input, Select, Modal, EmptyState } from '../../ui/components.jsx';
-import { accountLedger, portfolioStats, setChequeStatus, transferBetweenAccounts, transferLegs, ACCOUNT_CURRENCY, investmentMovements } from '../../lib/engine.js';
+import { accountLedger, portfolioStats, setChequeStatus, transferBetweenAccounts, transferLegs, ACCOUNT_CURRENCY, investmentMovements, applyTradeChange } from '../../lib/engine.js';
 
 const ccy = (v, code = 'AED') => (code === 'USD' ? `$${fmtNum(round2(v))}` : `${fmtNum(round2(v))} ${code}`);
 
@@ -46,6 +46,14 @@ export default function Treasury() {
     const currency = r.from === 'investment' ? 'USD' : (r.currency === 'USD' ? 'USD' : 'AED');
     await transferBetweenAccounts(app, { ...r, currency, rate });
     setXfer(null); showToast(t('saved'), 'success');
+  };
+  // Delete a single stock trade (a duplicated or mistaken buy/sell) straight from the log.
+  // Quantities and cash re-derive automatically once the lot/sell is gone.
+  const deleteTrade = async (m) => {
+    const label = `${t(m.type)} ${m.symbol} ×${fmtNum(m.qty)} · $${fmtNum(m.amount)}`;
+    if (!window.confirm(`${t('confirmDeleteTrade') || 'حذف هذه الصفقة نهائياً؟'}\n${label}`)) return;
+    await applyTradeChange(app, m.securityId, m.lotId ? { deleteLot: m.lotId } : { deleteSell: m.sellId });
+    showToast(t('deleted') || t('saved'), 'success');
   };
   const advanceCheque = async (m) => {
     const next = m.chequeStatus === 'deposited' ? 'cleared' : 'deposited';
@@ -115,7 +123,7 @@ export default function Treasury() {
     } else if (m.type === 'buy' || m.type === 'sell') {
       icon = m.type === 'buy' ? '📥' : '📤';
       title = `${t(m.type)} ${m.symbol || ''}`.trim();
-      if (m.qty) detail += ` · ×${fmtNum(m.qty)}`;
+      if (m.qty) detail += ` · ×${fmtNum(m.qty)}${m.price ? ` @ $${fmtNum(m.price)}` : ''}`;
       chip = <span style={{ fontSize: 9.5, fontWeight: 800, color: C.warning, background: C.warning + '16', borderRadius: 999, padding: '2px 7px' }}>{t('portfolio')}</span>;
     } else if (m.type === 'dividend' || m.type === 'fee' || m.type === 'interest') {
       icon = m.type === 'dividend' ? '💰' : m.type === 'fee' ? '🧾' : '🏦';
@@ -139,6 +147,9 @@ export default function Treasury() {
           <button onClick={() => advanceCheque(m)} style={{ border: 'none', background: C.warning, color: '#fff', borderRadius: 8, padding: '5px 8px', fontSize: 10.5, fontWeight: 800, cursor: 'pointer' }}>
             {m.chequeStatus === 'deposited' ? `✓ ${t('chequeCleared')}` : `🏦 ${t('chequeDeposited')}`}
           </button>
+        )}
+        {(m.lotId || m.sellId) && (
+          <button onClick={() => deleteTrade(m)} title={t('delete')} style={{ border: `1px solid ${C.border}`, background: '#fff', color: C.danger, borderRadius: 8, width: 26, height: 26, fontSize: 12, cursor: 'pointer', flexShrink: 0 }}>🗑</button>
         )}
         {m.flowId && !m.symbol && ['deposit', 'withdraw', 'transferIn', 'transferOut'].includes(m.type) && (
           <button onClick={() => deleteManualFlow(m)} title={t('delete')} style={{ border: `1px solid ${C.border}`, background: '#fff', color: C.danger, borderRadius: 8, width: 26, height: 26, fontSize: 12, cursor: 'pointer', flexShrink: 0 }}>🗑</button>
