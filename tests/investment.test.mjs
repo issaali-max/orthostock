@@ -43,3 +43,33 @@ const buy = mv.find((m) => m.type === 'buy');
 if (buy.symbol !== 'EAND' || buy.direction !== 'out' || buy.amount !== 1500) { console.error('✗ buy row'); process.exit(1); }
 console.log('✓ صف الشراء: EAND −1500');
 console.log('\nALL INVESTMENT TESTS PASSED');
+
+const deq = (a, b, m) => { if (JSON.stringify(a) !== JSON.stringify(b)) { console.error(`✗ ${m}:`, a, 'want', b); process.exit(1); } console.log(`✓ ${m}`); };
+const nq = (a, b, m) => { if (Math.abs(a - b) > 0.001) { console.error(`✗ ${m}: ${a} != ${b}`); process.exit(1); } console.log(`✓ ${m} = ${a}`); };
+// ═══ مثال عيسى حرفياً: أودع ~98 ألفاً، الأسهم الآن 115 ألفاً → ربح 17 ألفاً ═══
+import { planSecurityMerge, projectsTotalAED, portfolioStats as pstats2 } from '/home/claude/orthostock/src/lib/engine.js';
+{
+  const d = {
+    securities: [{ id: 's1', symbol: 'TTD', currentPrice: 115 }],
+    tradeLots: [{ id: 'l1', securityId: 's1', buyDate: '2025-03-07', qtyBought: 1000, qtyRemaining: 1000, buyPricePerShare: 98, buyFees: 0, costBasis: 98000 }],
+    tradeSells: [], cashFlows: [{ id: 'f1', type: 'deposit', amount: 98000, date: '2025-03-07' }],
+  };
+  const st = pstats2(d);
+  deq({ dep: st.deposits, val: st.holdingsValue, cash: st.cash, pnl: st.pnlSimple },
+      { dep: 98000, val: 115000, cash: 0, pnl: 17000 }, 'أودع 98k → القيمة 115k → الربح 17k');
+}
+{
+  const plan = planSecurityMerge([
+    { id: 'a', symbol: 'UNH' }, { id: 'b', symbol: 'unh ' }, { id: 'c', symbol: 'ZETA' }, { id: 'd', symbol: 'UNH', isActive: false },
+  ]);
+  deq(plan, [{ symbol: 'UNH', keepId: 'a', dropIds: ['b'] }], 'خطة الدمج: UNH+unh→a والملغى مستثنى');
+}
+{
+  const total = projectsTotalAED({ projects: [
+    { id: 'p1', amount: 50000, currency: 'AED', isActive: true },
+    { id: 'p2', amount: 1000, currency: 'USD', isActive: true },
+    { id: 'p3', amount: 999, currency: 'AED', isActive: false },
+  ]}, 3.6725);
+  nq(total, 53672.5, 'المشاريع: 50000 + 1000$×3.6725 والملغى مستثنى');
+}
+console.log('SIMPLE-PNL / MERGE / PROJECTS TESTS PASSED');

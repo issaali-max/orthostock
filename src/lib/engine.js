@@ -1018,12 +1018,62 @@ export function portfolioStats(data, priceOf) {
   const sellsProceeds = sells.reduce((a, x) => a + num(x.proceeds), 0);
   const netCapital = round2(deposits - withdrawals);
   const cash = round2(netCapital - buysCost + sellsProceeds + dividends + interest - fees);
+  const accountValue = round2(cash + holdingsValue);
   return {
     positions, holdingsValue, totalUnrealized, totalRealized,
     netCapital, cash, dividends: round2(dividends),
-    accountValue: round2(cash + holdingsValue),
+    deposits: round2(deposits), withdrawals: round2(withdrawals),
+    accountValue,
     totalPnL: round2(totalRealized + totalUnrealized + dividends),
+    // The owner's mental model: profit = what the account is worth now − what was put in.
+    pnlSimple: round2(accountValue - netCapital),
   };
+}
+
+// ── Duplicate securities (e.g. UNH entered twice) ──
+// Pure planner: group active securities by normalized symbol; for each duplicate group
+// keep the first record and list the rest for merging. Testable without a DB.
+export function planSecurityMerge(securities) {
+  const bySym = new Map();
+  for (const s of securities) {
+    if (s.isActive === false || !s.symbol) continue;
+    const key = String(s.symbol).trim().toUpperCase();
+    if (!bySym.has(key)) bySym.set(key, []);
+    bySym.get(key).push(s);
+  }
+  const plan = [];
+  for (const [symbol, group] of bySym) {
+    if (group.length < 2) continue;
+    const keep = group[0];
+    plan.push({ symbol, keepId: keep.id, dropIds: group.slice(1).map((x) => x.id) });
+  }
+  return plan;
+}
+
+// Apply the plan: repoint every lot/sell/flow of the duplicates to the kept record,
+// carry over a price if the kept one lacks it, then deactivate the duplicates.
+export async function mergeDuplicateSecurities(app) {
+  const data = app.data;
+  const plan = planSecurityMerge(data[TABLES.securities] || []);
+  for (const { keepId, dropIds } of plan) {
+    const keep = (data[TABLES.securities] || []).find((x) => x.id === keepId);
+    for (const dropId of dropIds) {
+      for (const l of (data[TABLES.tradeLots] || []).filter((x) => x.securityId === dropId)) await db.update(TABLES.tradeLots, l.id, { securityId: keepId });
+      for (const x of (data[TABLES.tradeSells] || []).filter((y) => y.securityId === dropId)) await db.update(TABLES.tradeSells, x.id, { securityId: keepId });
+      for (const f of (data[TABLES.cashFlows] || []).filter((y) => y.securityId === dropId)) await db.update(TABLES.cashFlows, f.id, { securityId: keepId });
+      const dup = (data[TABLES.securities] || []).find((x) => x.id === dropId);
+      if (!num(keep?.currentPrice) && num(dup?.currentPrice)) await db.update(TABLES.securities, keepId, { currentPrice: num(dup.currentPrice) });
+      await db.update(TABLES.securities, dropId, { isActive: false });
+    }
+  }
+  if (plan.length) { await app.refresh(TABLES.securities); await app.refresh(TABLES.tradeLots); await app.refresh(TABLES.tradeSells); await app.refresh(TABLES.cashFlows); }
+  return plan.length;
+}
+
+// Projects (off-market investments) valued in AED, USD ones converted at the rate.
+export function projectsTotalAED(data, rate) {
+  return round2((data[TABLES.projects] || []).filter((p) => p.isActive !== false)
+    .reduce((s, p) => s + toAED(p.amount, p.currency, rate), 0));
 }
 
 // Unified, chronological transaction ledger for one security.

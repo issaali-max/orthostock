@@ -4,7 +4,7 @@ import { C, TABLES } from '../../lib/constants.js';
 import { fmtCur, fmtNum, num, round2 } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
 import { refreshAllPrices, searchSymbols } from '../../lib/prices.js';
-import { commitBuy, commitSell, commitDividend, portfolioStats, stockLedger, applyTradeChange, deleteSecurityCascade } from '../../lib/engine.js';
+import { commitBuy, commitSell, commitDividend, portfolioStats, stockLedger, applyTradeChange, deleteSecurityCascade, planSecurityMerge, mergeDuplicateSecurities, projectsTotalAED } from '../../lib/engine.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, Select, Textarea } from '../../ui/components.jsx';
 
 const blankSec = () => ({ symbol: '', name: '', market: '', currency: 'USD', currentPrice: '', qty: '', notes: '', isActive: true });
@@ -99,6 +99,13 @@ export default function Investments() {
       .then(() => updateSettings({ ccyMigrated: true }));
   }, [securities.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const allUSD = securities.filter((x) => x.isActive !== false).every((x) => (x.currency || 'USD') !== 'AED');
+  // Auto-heal duplicate securities (e.g. UNH entered twice): repoint their trades to one
+  // record and deactivate the twin. Runs once whenever duplicates are detected.
+  useEffect(() => {
+    if (planSecurityMerge(securities).length === 0) return;
+    mergeDuplicateSecurities(app).then((n) => { if (n) showToast(`🧹 ${t('mergedDuplicates') || 'تم دمج أسهم مكررة'}`, 'success'); });
+  }, [securities.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  const projectsAED = projectsTotalAED(data, num(usdRate) || 3.6725);
   const curTot = (v) => moneyIn(v, allUSD ? 'USD' : 'AED');
   const cur = (v) => moneyIn(v, 'USD');
   const pnlColor = (v) => (v > 0 ? C.success : v < 0 ? C.danger : C.textMid);
@@ -113,6 +120,8 @@ export default function Investments() {
     try {
       if (r.id) { await updateRow(TABLES.securities, r.id, payload); }
       else {
+        const dupSym = securities.find((x) => x.isActive !== false && String(x.symbol).trim().toUpperCase() === payload.symbol);
+        if (dupSym) { showToast(`⚠ ${payload.symbol} ${t('alreadyExists') || 'موجود مسبقاً — افتحه وأضف الشراء عليه'}`, 'error'); return; }
         const created = await createRow(TABLES.securities, payload);
         if (created?.id && num(r.qty) > 0) await commitBuy(app, { securityId: created.id, buyDate: todayISO(), qty: num(r.qty), pricePerShare: num(r.currentPrice), fees: 0 });
       }
@@ -310,15 +319,22 @@ export default function Investments() {
 
       <div style={{ borderRadius: 18, padding: 16, marginBottom: 14, color: '#fff', background: `linear-gradient(135deg, ${C.primary}, ${C.primaryLight})`, boxShadow: '0 10px 26px rgba(13,59,110,.25)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <div><div style={{ fontSize: 12, opacity: .85, fontWeight: 700 }}>{t('accountValue')}</div>
-          <div style={{ fontSize: 30, fontWeight: 800, margin: '2px 0 12px' }}>{cur(stats.accountValue)}</div></div>
+          <div>
+            <div style={{ fontSize: 12, opacity: .85, fontWeight: 700 }}>💹 {t('pnlNow') || 'الربح / الخسارة الآن'}</div>
+            <div style={{ fontSize: 30, fontWeight: 800, margin: '2px 0 2px', color: stats.pnlSimple >= 0 ? '#BFF3D6' : '#FFD0D0' }}>{stats.pnlSimple >= 0 ? '+' : ''}{cur(stats.pnlSimple)}</div>
+            <div style={{ fontSize: 11.5, opacity: .9 }}>{t('accountValue')} {cur(stats.accountValue)} − {t('depositedTotal') || 'المودع'} {cur(stats.netCapital)}</div>
+          </div>
           {liveToggle}
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          <Mini label={`${t('cashBalance')} →💰`} value={cur(stats.cash)} accent={stats.cash < 0 ? '#FFD9D9' : undefined} />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 12 }}>
+          <Mini label={t('depositedTotal') || 'المودع منذ البداية'} value={cur(stats.deposits)} />
           <Mini label={t('holdings')} value={curTot(stats.holdingsValue)} />
-          <Mini label={t('capital')} value={cur(stats.netCapital)} />
-          <Mini label={t('totalPnL')} value={curTot(stats.totalPnL)} accent={stats.totalPnL >= 0 ? '#BFF3D6' : '#FFD9D9'} />
+          <Mini label={`${t('cashBalance')} →💰`} value={cur(stats.cash)} accent={stats.cash < 0 ? '#FFD9D9' : undefined} />
+          <Mini label={`🏗️ ${t('projects')}`} value={`${fmtNum(round2(projectsAED))} AED`} />
+        </div>
+        <div style={{ marginTop: 10, paddingTop: 9, borderTop: '1px solid rgba(255,255,255,.25)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12.5, fontWeight: 800 }}>
+          <span>Σ {t('grandInvestment') || 'إجمالي الاستثمار الكامل'}</span>
+          <span>{cur(stats.accountValue)} + {fmtNum(round2(projectsAED))} AED</span>
         </div>
       </div>
 

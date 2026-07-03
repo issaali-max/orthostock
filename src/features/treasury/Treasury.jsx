@@ -53,6 +53,20 @@ export default function Treasury() {
     showToast(next === 'cleared' ? `✓ ${t('chequeCleared')}` : `🏦 ${t('chequeDeposited')}`, 'success');
   };
   // Undo a mistaken tap: step the cheque one state BACK (cleared → deposited → received).
+  // Delete a MANUAL operation only (deposit / withdraw / transfer legs). Expenses,
+  // invoice payments and trades are managed from their own sections — never from here.
+  const deleteManualFlow = async (m) => {
+    const flow = (data[TABLES.cashFlows] || []).find((f) => f.id === m.flowId);
+    if (!flow) return;
+    const isTransfer = !!flow.transferId;
+    const msg = isTransfer
+      ? (t('confirmDeleteTransfer') || 'هل أنت متأكد أنك تريد حذف هذا التحويل؟ سيُحذف طرفاه معاً وسيتم تحديث الرصيدين تلقائياً.')
+      : (t('confirmDeleteFlow') || 'هل أنت متأكد أنك تريد حذف هذه العملية؟ سيتم تحديث الرصيد تلقائياً.');
+    if (!window.confirm(msg)) return;
+    const victims = isTransfer ? (data[TABLES.cashFlows] || []).filter((f) => f.transferId === flow.transferId) : [flow];
+    for (const v of victims) await app.deleteRow(TABLES.cashFlows, v.id);
+    showToast(t('deleted') || t('saved'), 'success');
+  };
   const stepChequeBack = async (m) => {
     const prev = m.chequeStatus === 'cleared' ? 'deposited' : 'received';
     if (m.chequeStatus === 'received' || !m.chequeStatus) return;
@@ -125,6 +139,9 @@ export default function Treasury() {
           <button onClick={() => advanceCheque(m)} style={{ border: 'none', background: C.warning, color: '#fff', borderRadius: 8, padding: '5px 8px', fontSize: 10.5, fontWeight: 800, cursor: 'pointer' }}>
             {m.chequeStatus === 'deposited' ? `✓ ${t('chequeCleared')}` : `🏦 ${t('chequeDeposited')}`}
           </button>
+        )}
+        {m.flowId && !m.symbol && ['deposit', 'withdraw', 'transferIn', 'transferOut'].includes(m.type) && (
+          <button onClick={() => deleteManualFlow(m)} title={t('delete')} style={{ border: `1px solid ${C.border}`, background: '#fff', color: C.danger, borderRadius: 8, width: 26, height: 26, fontSize: 12, cursor: 'pointer', flexShrink: 0 }}>🗑</button>
         )}
         {m.method === 'cheque' && m.chequeStatus && m.chequeStatus !== 'received' && (
           <button onClick={() => stepChequeBack(m)} title={t('undo') || 'تراجع'} style={{ border: `1px solid ${C.border}`, background: '#fff', color: C.textMid, borderRadius: 8, width: 26, height: 26, fontSize: 12, cursor: 'pointer', flexShrink: 0 }}>↩</button>
