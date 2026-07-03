@@ -7,6 +7,14 @@ import { refreshAllPrices, searchSymbols } from '../../lib/prices.js';
 import { commitBuy, commitSell, commitDividend, portfolioStats, stockLedger, applyTradeChange, deleteSecurityCascade, planSecurityMerge, mergeDuplicateSecurities, projectsTotalAED } from '../../lib/engine.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, Select, Textarea } from '../../ui/components.jsx';
 
+function MiniStat({ label, value, color }) {
+  return (
+    <div style={{ textAlign: 'center' }}>
+      <div style={{ fontSize: 9.5, color: '#8792A8', fontWeight: 700 }}>{label}</div>
+      <div style={{ fontSize: 12.5, fontWeight: 800, color: color || '#1C2A3E', marginTop: 1 }}>{value}</div>
+    </div>
+  );
+}
 const blankSec = () => ({ symbol: '', name: '', market: '', currency: 'USD', currentPrice: '', qty: '', notes: '', isActive: true });
 const blankTrade = (securityId, mode) => ({ securityId, mode, date: todayISO(), qty: '', pricePerShare: '', fees: '' });
 const blankDiv = (securityId) => ({ securityId, date: todayISO(), amount: '' });
@@ -272,35 +280,37 @@ export default function Investments() {
     );
   }
 
-  const posRow = (p) => { const curP = curFor(p.id); return (
+  const posRow = (p) => { const curP = curFor(p.id); const sec = securities.find((x) => x.id === p.id); return (
     <Card key={p.id} style={{ cursor: 'pointer' }} onClick={() => setDetailId(p.id)}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: p.fullySold ? 0 : 10 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 800, color: C.text, display: 'flex', gap: 6, alignItems: 'center' }}>
+          <div style={{ fontWeight: 900, color: C.text, fontSize: 16, display: 'flex', gap: 6, alignItems: 'center' }}>
             {p.symbol} {p.market && <Badge tone="neutral">{p.market}</Badge>}
           </div>
-          {p.name && <div style={{ fontSize: 11, color: C.textMuted }}>{p.name}</div>}
-        </div>
-        <div style={{ textAlign: 'end' }}>
-          <div style={{ fontWeight: 800, color: C.text }}>{curP(p.price)}{live && <span style={{ color: C.success, fontSize: 10 }}> ●</span>}</div>
+          {p.name && <div style={{ fontSize: 11, color: C.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>}
           {(() => {
-            const sec = securities.find((x) => x.id === p.id);
             const pc = num(sec?.prevClose);
             if (!(pc > 0) || !(num(p.price) > 0)) return null;
             const ch = ((num(p.price) - pc) / pc) * 100;
-            return <div style={{ fontSize: 10, fontWeight: 800, color: ch >= 0 ? C.success : C.danger }}>{ch >= 0 ? '▲' : '▼'} {Math.abs(ch).toFixed(2)}%{sec?.priceUpdatedAt ? ` · ${sec.priceUpdatedAt}` : ''}</div>;
+            return <div style={{ fontSize: 11, fontWeight: 800, color: ch >= 0 ? C.success : C.danger, marginTop: 2 }}>{ch >= 0 ? '▲' : '▼'} {Math.abs(ch).toFixed(2)}%</div>;
           })()}
-          <div style={{ fontSize: 11, color: pnlColor(p.fullySold ? p.realized : p.totalPnL), fontWeight: 700 }}>
+        </div>
+        <div style={{ textAlign: 'end' }}>
+          <div style={{ fontWeight: 900, fontSize: 17, color: C.text }}>{curP(p.price)}{live && <span style={{ color: C.success, fontSize: 10 }}> ●</span>}</div>
+          <div style={{ fontSize: 11.5, fontWeight: 800, color: pnlColor(p.fullySold ? p.realized : p.totalPnL) }}>
             {(p.fullySold ? p.realized : p.totalPnL) >= 0 ? '+' : ''}{curP(p.fullySold ? p.realized : p.totalPnL)}
           </div>
         </div>
         <span style={{ color: C.textMuted }}>›</span>
       </div>
       {!p.fullySold && (
-        <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 11, color: C.textMid }}>
-          <span>{t('shares')}: <b>{fmtNum(p.qty)}</b></span>
-          <span>{t('avgCost')}: <b>{curP(p.avgCost)}</b></span>
-          <span>{t('marketValue')}: <b>{curP(p.marketValue)}</b></span>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, background: C.surfaceAlt, borderRadius: 10, padding: '8px 6px' }}>
+          <MiniStat label={t('shares')} value={fmtNum(p.qty)} />
+          <MiniStat label={t('buyPrice') || 'سعر الشراء'} value={curP(p.avgCost)} />
+          <MiniStat label={t('currentPrice') || 'السعر الحالي'} value={curP(p.price)} />
+          <MiniStat label={t('marketValue')} value={curP(p.marketValue)} />
+          <MiniStat label={t('cost') || 'التكلفة'} value={curP(p.remainingCost)} />
+          <MiniStat label={t('pnl') || 'ربح/خسارة'} value={`${p.unrealized >= 0 ? '+' : ''}${curP(p.unrealized)}`} color={pnlColor(p.unrealized)} />
         </div>
       )}
     </Card>
@@ -320,9 +330,9 @@ export default function Investments() {
       <div style={{ borderRadius: 18, padding: 16, marginBottom: 14, color: '#fff', background: `linear-gradient(135deg, ${C.primary}, ${C.primaryLight})`, boxShadow: '0 10px 26px rgba(13,59,110,.25)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
-            <div style={{ fontSize: 12, opacity: .85, fontWeight: 700 }}>💹 {t('pnlNow') || 'الربح / الخسارة الآن'}</div>
-            <div style={{ fontSize: 30, fontWeight: 800, margin: '2px 0 2px', color: stats.pnlSimple >= 0 ? '#BFF3D6' : '#FFD0D0' }}>{stats.pnlSimple >= 0 ? '+' : ''}{cur(stats.pnlSimple)}</div>
-            <div style={{ fontSize: 11.5, opacity: .9 }}>{t('accountValue')} {cur(stats.accountValue)} − {t('depositedTotal') || 'المودع'} {cur(stats.netCapital)}</div>
+            <div style={{ fontSize: 12, opacity: .85, fontWeight: 700 }}>💹 {t('stocksPnL') || 'ربح / خسارة الأسهم'}</div>
+            <div style={{ fontSize: 30, fontWeight: 800, margin: '2px 0 2px', color: stats.totalPnL >= 0 ? '#BFF3D6' : '#FFD0D0' }}>{stats.totalPnL >= 0 ? '+' : ''}{cur(stats.totalPnL)}</div>
+            <div style={{ fontSize: 11.5, opacity: .9 }}>{t('holdings')} {cur(stats.holdingsValue)} − {t('cost') || 'التكلفة'} {cur(round2(stats.holdingsValue - stats.totalUnrealized))}</div>
           </div>
           {liveToggle}
         </div>
@@ -337,6 +347,23 @@ export default function Investments() {
           <span>{cur(stats.accountValue)} + {fmtNum(round2(projectsAED))} AED</span>
         </div>
       </div>
+
+      {stats.cash < -1 && (() => {
+        const gap = round2(-stats.cash); // buys exceeded recorded deposits by this much
+        return (
+          <div style={{ background: C.warning + '18', border: `1px solid ${C.warning}55`, borderRadius: 14, padding: 12, marginBottom: 14 }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: C.text }}>⚠ {t('depositGapTitle') || 'إيداعات ناقصة'}</div>
+            <div style={{ fontSize: 12, color: C.textMid, margin: '4px 0 9px', lineHeight: 1.5 }}>
+              {(t('depositGapBody') || 'مشترياتك أكبر من إيداعاتك المسجّلة بمقدار {x}. أضف هذا الإيداع الناقص ليصبح النقد صحيحاً والربح واضحاً.').replace('{x}', `$${fmtNum(gap)}`)}
+            </div>
+            <Btn size="sm" onClick={async () => {
+              if (!window.confirm((t('confirmAddDeposit') || 'إضافة إيداع ${x} لحساب الاستثمار؟').replace('${x}', `$${fmtNum(gap)}`))) return;
+              await createRow(TABLES.cashFlows, { account: 'investment', type: 'deposit', amount: gap, currency: 'USD', date: todayISO(), reason: t('depositGapReason') || 'تسوية إيداعات سابقة' });
+              showToast('✓', 'success');
+            }}>＋ {t('addMissingDeposit') || 'أضف الإيداع الناقص'} (${fmtNum(gap)})</Btn>
+          </div>
+        );
+      })()}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 14 }}>
         <StatCard label={t('realizedPnL')} value={curTot(stats.totalRealized)} color={pnlColor(stats.totalRealized)} />
