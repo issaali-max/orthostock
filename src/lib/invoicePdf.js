@@ -79,243 +79,210 @@ function statusInfo(status, ar) {
   return { label: ar ? 'غير مدفوعة' : 'UNPAID', bg: '#FBECEC', fg: '#C0392B' };
 }
 
-function buildHtml({ invoice, items, settings, customer, variantById }) {
-  const b = invoiceBreakdown(invoice, items, settings);
-  const taxOn = b.taxEnabled;
-  const cur = b.currency;
-  const m = (v) => money(v, cur);
+// ── Reference-style document engine ─────────────────────────────────────────
+// Modelled on a supplier QUOTATION: a full company header + a meta table repeat
+// on EVERY page, the item table flows with a repeating column header, a Terms &
+// Signature strip and a bank-line footer sit at the bottom of every page, and each
+// page is labelled "Page X of Y". One template powers Invoice, Quotation & Receipt.
 
-  // Company block — all editable in Settings; empty fields simply don't render.
-  const company = esc(settings?.companyName || 'HO Orthodontics');
-  const cTagline = esc(settings?.companyTagline || 'Orthodontic Supplies');
-  const cAddr = esc(settings?.companyAddress || '');
-  const cPhone = esc(settings?.companyPhone || '');
-  const cEmail = esc(settings?.companyEmail || '');
-  const cWeb = esc(settings?.companyWebsite || '');
-  const cTrn = esc(settings?.companyTrn || '');
-  const cLic = esc(settings?.companyLicenseNo || '');
-  const cBank = esc(settings?.companyBankLine || '');
-  const cNotes = esc(settings?.invoiceNotes || '');
-  const showStamp = settings?.invoiceStamp !== false;
-  const st = statusInfo(invoice.paymentStatus, false);
-  // Customer: prefer the English name, fall back to the Arabic name.
-  const custName = esc(customer?.nameEn || customer?.name || '—');
-
-  const rows = b.lines.map((l, i) => {
-    const v = variantById(l.variantId);
-    const code = esc(v?.sku || '');
-    const name = esc(v?.nameEn || v?.sku || '—');   // material NAME (English), not the code
-    const giftTag = l.gift ? ' <span style="color:#1E8E5A;font-weight:800;font-size:.82em">· Gift</span>' : '';
-    const lineTotal = l.lineTotal;
-    const lineNet = taxOn ? Math.round(lineTotal * (1 + b.vatRate / 100) * 100) / 100 : lineTotal;
-    const zebra = i % 2 ? 'background:#F7F9FC;' : '';
-    return `
-      <tr style="${zebra}">
-        <td style="text-align:center;padding:7px 6px;border-bottom:1px solid #eef1f5;color:${MUTE}">${i + 1}</td>
-        <td style="text-align:left;padding:7px 8px;border-bottom:1px solid #eef1f5;font-weight:600">${name}${giftTag}${code ? ` <span style="color:${MUTE};font-weight:500;font-size:.85em">· ${code}</span>` : ''}</td>
-        <td style="text-align:center;padding:7px 6px;border-bottom:1px solid #eef1f5">${l.qty.toFixed(2)}</td>
-        <td style="text-align:center;padding:7px 6px;border-bottom:1px solid #eef1f5">${m(l.qty > 0 ? lineTotal / l.qty : l.unitPrice)}</td>
-        ${taxOn ? `<td style="text-align:center;padding:7px 6px;border-bottom:1px solid #eef1f5;color:${MUTE}">${b.vatRate}%</td>` : ''}
-        <td style="text-align:center;padding:7px 6px;border-bottom:1px solid #eef1f5">${m(lineTotal)}</td>
-        <td style="text-align:center;padding:7px 6px;border-bottom:1px solid #eef1f5;font-weight:800">${m(lineNet)}</td>
-      </tr>`;
-  }).join('');
-
-  const sumRow = (label, val, opts = {}) => `
-    <div style="display:flex;justify-content:space-between;padding:4px 0;${opts.border ? `border-top:1px solid ${LINE};margin-top:3px;padding-top:7px;` : ''}">
-      <span style="color:${opts.strong ? INK : MUTE};font-weight:${opts.strong ? 800 : 600};font-size:${opts.strong ? '14px' : '12.5px'}">${label}</span>
-      <span style="color:${opts.color || INK};font-weight:${opts.strong ? 900 : 700};font-size:${opts.strong ? '14px' : '12.5px'}">${m(val)}</span>
-    </div>`;
-
-  const payHist = Array.isArray(invoice.payments) && invoice.payments.length > 1
-    ? `<div style="margin-top:10px"><div style="font-size:10.5px;color:${MUTE};margin-bottom:3px">Payments</div>
-        ${invoice.payments.map((p) => `<div style="display:flex;justify-content:space-between;font-size:11px;color:${MUTE}"><span>${esc((p.date || '').slice(0, 10))}</span><span>${m(p.amount)}</span></div>`).join('')}</div>`
-    : '';
-
-  return `
-  <div dir="ltr" style="width:780px;background:#fff;color:${INK};font-family:Arial,Helvetica,sans-serif;padding:0;box-sizing:border-box;font-size:12.5px">
-
-    <!-- Header band -->
-    <div style="background:${NAVY};color:#fff;padding:22px 30px;display:flex;justify-content:space-between;align-items:flex-start">
-      <div style="flex:1;display:flex;gap:14px;align-items:center">
-        ${logoSvg(company)}
-        <div>
-          <div style="font-size:24px;font-weight:900;letter-spacing:.3px">${company}</div>
-          ${cTagline ? `<div style="opacity:.85;margin-top:3px;font-size:12px">${cTagline}</div>` : ''}
-          ${cAddr ? `<div style="opacity:.85;margin-top:4px;font-size:12px">${cAddr}</div>` : ''}
-          <div style="opacity:.85;font-size:12px">${[cPhone ? `Tel: ${cPhone}` : '', cEmail, cWeb].filter(Boolean).join(' · ')}</div>
-        </div>
-      </div>
-      <div style="text-align:right">
-        <div style="font-size:22px;font-weight:900">${taxOn ? 'TAX INVOICE' : 'INVOICE'}</div>
-        ${cTrn ? `<div style="opacity:.85;font-size:12px;margin-top:4px">TRN: ${cTrn}</div>` : ''}
-        ${cLic ? `<div style="opacity:.85;font-size:12px">License: ${cLic}</div>` : ''}
-      </div>
-    </div>
-
-    <div style="padding:22px 30px">
-      <!-- Meta row -->
-      <div style="display:flex;gap:14px;margin-bottom:18px">
-        <div style="flex:1;border:1px solid ${LINE};border-radius:10px;padding:11px 13px">
-          <div style="font-size:10.5px;color:${MUTE};letter-spacing:.5px;margin-bottom:4px">BILL TO</div>
-          <div style="font-size:15px;font-weight:800">${custName}</div>
-          ${customer?.phone ? `<div style="color:${MUTE};font-size:11.5px">Tel: ${esc(customer.phone)}</div>` : ''}
-          ${(customer?.city || customer?.emirate) ? `<div style="color:${MUTE};font-size:11.5px">${esc([customer.city, customer.emirate].filter(Boolean).join(', '))}</div>` : ''}
-          ${customer?.trn ? `<div style="color:${MUTE};font-size:11.5px">TRN: ${esc(customer.trn)}</div>` : ''}
-        </div>
-        <div style="width:250px;border:1px solid ${LINE};border-radius:10px;padding:11px 13px">
-          <div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:${MUTE}">Invoice No</span><b>${esc(invoice.invoiceNumber)}</b></div>
-          <div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:${MUTE}">Date</span><b>${esc(invoice.date || '')}</b></div>
-          <div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:${MUTE}">Payment</span><b>${esc(payMethodLabel(invoice.paymentMethod, false))}</b></div>
-          <div style="margin-top:6px;text-align:center;background:${st.bg};color:${st.fg};border-radius:6px;padding:4px;font-weight:900;font-size:12px;letter-spacing:.5px">${st.label}</div>
-        </div>
-      </div>
-
-      <!-- Items -->
-      <table style="width:100%;border-collapse:collapse;font-size:12px">
-        <thead>
-          <tr style="background:${NAVY};color:#fff">
-            <th style="padding:9px 6px;width:30px">#</th>
-            <th style="padding:9px 8px;text-align:left">Item Description</th>
-            <th style="padding:9px 6px;width:50px">Qty</th>
-            <th style="padding:9px 6px;width:82px">Unit Price</th>
-            ${taxOn ? '<th style="padding:9px 6px;width:48px">VAT</th>' : ''}
-            <th style="padding:9px 6px;width:86px">Net Price</th>
-            <th style="padding:9px 6px;width:90px">Total${taxOn ? ' w/ VAT' : ''}</th>
-          </tr>
-        </thead>
-        <tbody>${rows || `<tr><td colspan="${taxOn ? 7 : 6}" style="padding:16px;text-align:center;color:#94a3b8">—</td></tr>`}</tbody>
-      </table>
-
-      <!-- Totals + payment -->
-      <div style="display:flex;gap:14px;margin-top:18px;align-items:stretch">
-        <div style="flex:1;border:1px solid ${LINE};border-radius:10px;padding:13px 15px;display:flex;flex-direction:column;justify-content:center">
-          <div style="display:flex;justify-content:space-between;padding:3px 0;font-size:13px"><span style="color:${MUTE};font-weight:600">Payment method</span><b>${esc(payMethodLabel(invoice.paymentMethod, false))}</b></div>
-          <div style="display:flex;justify-content:space-between;padding:3px 0;font-size:13px"><span style="color:${MUTE};font-weight:600">Paid</span><b style="color:#1E7A46">${m(b.paid)}</b></div>
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;background:${b.remaining > 0 ? '#FBECEC' : '#E7F5EC'};border-radius:8px;padding:9px 11px">
-            <span style="font-weight:800;color:${b.remaining > 0 ? '#C0392B' : '#1E7A46'}">Balance Due</span>
-            <span style="font-weight:900;font-size:16px;color:${b.remaining > 0 ? '#C0392B' : '#1E7A46'}">${m(b.remaining)}</span>
-          </div>
-          ${payHist}
-        </div>
-        <div style="width:280px;border:1px solid ${LINE};border-radius:10px;padding:13px 15px">
-          ${sumRow('Subtotal', b.subtotal)}
-          ${taxOn ? sumRow(`VAT (${b.vatRate}%)`, b.vat) : ''}
-          ${b.discountTotal > 0 ? sumRow('Discount', b.discountTotal, { color: '#C0392B' }) : ''}
-          ${sumRow('Grand Total', b.total, { strong: true, border: true })}
-        </div>
-      </div>
-
-      ${cNotes ? `<div style="margin-top:16px;border:1px solid ${LINE};border-radius:10px;padding:11px 13px"><div style="font-size:10.5px;color:${MUTE};letter-spacing:.5px;margin-bottom:4px">NOTES</div><div style="font-size:11.5px;color:${INK};white-space:pre-line">${cNotes}</div></div>` : ''}
-
-      <!-- Signature + footer -->
-      <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:36px">
-        <div style="font-size:11px;color:#94a3b8;max-width:340px">
-          Thank you for your business${cBank ? `<div style="margin-top:6px">${cBank}</div>` : ''}
-        </div>
-        <div style="text-align:center;position:relative">
-          ${showStamp ? `<div style="position:absolute;left:-150px;bottom:-8px;opacity:.92">${stampSvg({ name: company, place: settings?.companyStampPlace || 'AJMAN', license: cLic })}</div>` : ''}
-          <div style="width:180px;border-top:1px solid ${MUTE};padding-top:5px;font-size:11px;color:${MUTE}">Stamp & Signature</div>
-        </div>
-      </div>
-    </div>
-  </div>`;
-}
-
-export function buildInvoiceHtml(args) { return buildHtml(args); }
-
-// ── Shared bits for the other documents (receipt, quotation) ──
 function companyBits(settings) {
   return {
     company: esc(settings?.companyName || 'HO Orthodontics'),
-    cTagline: esc(settings?.companyTagline || 'Orthodontic Supplies'),
+    cTagline: esc(settings?.companyTagline || ''),
     cAddr: esc(settings?.companyAddress || ''),
     cPhone: esc(settings?.companyPhone || ''),
+    cFax: esc(settings?.companyFax || ''),
     cEmail: esc(settings?.companyEmail || ''),
     cWeb: esc(settings?.companyWebsite || ''),
     cTrn: esc(settings?.companyTrn || ''),
     cLic: esc(settings?.companyLicenseNo || ''),
     cBank: esc(settings?.companyBankLine || ''),
+    cEmirate: esc(settings?.companyEmirate || ''),
+    cNotes: esc(settings?.invoiceNotes || 'Quotations remain valid for the period indicated. No orders may be withdrawn or cancelled once ready. Special/offer-price items cannot be returned or exchanged.'),
     showStamp: settings?.invoiceStamp !== false,
+    stampPlace: settings?.companyStampPlace || 'AJMAN',
   };
 }
-function headerBand(settings, title, subtitle = '') {
+
+// The header that repeats on every page: logo + company (left), big DOC TITLE + TRN
+// (right), then a two-column meta band (customer block | doc-number block).
+function docHeader({ settings, title, meta, party }) {
   const c = companyBits(settings);
+  const contact = [c.cAddr, c.cEmirate ? `Emirate: ${c.cEmirate}` : '', c.cEmail ? `E-Mail: ${c.cEmail}` : ''].filter(Boolean);
   return `
-    <div style="background:${NAVY};color:#fff;padding:22px 30px;display:flex;justify-content:space-between;align-items:flex-start">
-      <div style="flex:1;display:flex;gap:14px;align-items:center">
-        ${logoSvg(c.company)}
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:10px;border-bottom:2px solid ${NAVY}">
+      <div style="display:flex;gap:12px;align-items:flex-start">
+        <div style="margin-top:2px">${logoSvg(c.company, 54)}</div>
         <div>
-          <div style="font-size:24px;font-weight:900;letter-spacing:.3px">${c.company}</div>
-          ${c.cTagline ? `<div style="opacity:.85;margin-top:3px;font-size:12px">${c.cTagline}</div>` : ''}
-          ${c.cAddr ? `<div style="opacity:.85;margin-top:4px;font-size:12px">${c.cAddr}</div>` : ''}
-          <div style="opacity:.85;font-size:12px">${[c.cPhone ? `Tel: ${c.cPhone}` : '', c.cEmail, c.cWeb].filter(Boolean).join(' · ')}</div>
+          <div style="font-size:20px;font-weight:900;color:${NAVY};letter-spacing:.3px">${c.company}</div>
+          ${c.cTagline ? `<div style="font-size:11px;color:${MUTE};margin-top:1px">${c.cTagline}</div>` : ''}
+          ${contact.map((l) => `<div style="font-size:10.5px;color:${MUTE};margin-top:2px">${l}</div>`).join('')}
         </div>
       </div>
       <div style="text-align:right">
-        <div style="font-size:22px;font-weight:900">${title}</div>
-        ${subtitle ? `<div style="opacity:.85;font-size:12px;margin-top:2px">${subtitle}</div>` : ''}
-        ${c.cTrn ? `<div style="opacity:.85;font-size:12px;margin-top:4px">TRN: ${c.cTrn}</div>` : ''}
-        ${c.cLic ? `<div style="opacity:.85;font-size:12px">License: ${c.cLic}</div>` : ''}
+        <div style="font-size:26px;font-weight:900;color:${NAVY};letter-spacing:1px">${title}</div>
+        ${c.cTrn ? `<div style="font-size:10.5px;color:${MUTE};margin-top:3px">TRN : ${c.cTrn}</div>` : ''}
+        ${c.cLic ? `<div style="font-size:10.5px;color:${MUTE}">License : ${c.cLic}</div>` : ''}
       </div>
-    </div>`;
-}
-function signatureFooter(settings, leftText = '') {
-  const c = companyBits(settings);
-  return `
-    <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:40px">
-      <div style="font-size:11px;color:#94a3b8;max-width:340px">${leftText}${c.cBank ? `<div style="margin-top:6px">${c.cBank}</div>` : ''}</div>
-      <div style="text-align:center;position:relative">
-        ${c.showStamp ? `<div style="position:absolute;left:-150px;bottom:-8px;opacity:.92">${stampSvg({ name: c.company, place: settings?.companyStampPlace || 'AJMAN', license: c.cLic })}</div>` : ''}
-        <div style="width:180px;border-top:1px solid ${MUTE};padding-top:5px;font-size:11px;color:${MUTE}">Authorised Signature</div>
-      </div>
-    </div>`;
-}
-
-// ── RECEIPT VOUCHER ── proof that a doctor paid (a partial, a cheque, cash…) ──
-// `receipt` = { voucherNo, date, amount, method, currency, throughLine, note, forInvoice }
-function buildReceiptHtml({ receipt, settings, customer }) {
-  const cur = receipt.currency || 'AED';
-  const m = (v) => money(v, cur);
-  const custName = esc(customer?.nameEn || customer?.name || receipt.accountName || '—');
-  const words = esc(amountToWords(receipt.amount, cur));
-  const row = (k, v) => `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eef1f5"><span style="color:${MUTE}">${k}</span><b>${v}</b></div>`;
-  return `
-  <div dir="ltr" style="width:780px;background:#fff;color:${INK};font-family:Arial,Helvetica,sans-serif;font-size:12.5px">
-    ${headerBand(settings, 'RECEIPT VOUCHER', 'Payment received')}
-    <div style="padding:22px 30px">
-      <div style="display:flex;gap:14px;margin-bottom:18px">
-        <div style="flex:1;border:1px solid ${LINE};border-radius:10px;padding:11px 13px">
-          <div style="font-size:10.5px;color:${MUTE};letter-spacing:.5px;margin-bottom:4px">RECEIVED FROM</div>
-          <div style="font-size:15px;font-weight:800">${custName}</div>
-          ${customer?.phone ? `<div style="color:${MUTE};font-size:11.5px">Tel: ${esc(customer.phone)}</div>` : ''}
-          ${(customer?.city || customer?.emirate) ? `<div style="color:${MUTE};font-size:11.5px">${esc([customer.city, customer.emirate].filter(Boolean).join(', '))}</div>` : ''}
-        </div>
-        <div style="width:250px;border:1px solid ${LINE};border-radius:10px;padding:11px 13px">
-          <div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:${MUTE}">Voucher No</span><b>${esc(receipt.voucherNo)}</b></div>
-          <div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:${MUTE}">Date</span><b>${esc(receipt.date || '')}</b></div>
-          <div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:${MUTE}">Method</span><b>${esc(payMethodLabel(receipt.method, false))}</b></div>
-        </div>
-      </div>
-
-      <div style="border:1px solid ${LINE};border-radius:10px;padding:14px 16px">
-        ${row('Particulars', esc(receipt.note || receipt.forInvoice ? `Payment${receipt.forInvoice ? ` · Invoice ${esc(receipt.forInvoice)}` : ''}` : 'Payment on account'))}
-        ${receipt.throughLine ? row('Through', esc(receipt.throughLine)) : ''}
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;background:#E7F5EC;border-radius:8px;padding:12px 14px">
-          <span style="font-weight:800;color:#1E7A46;font-size:14px">Amount Received</span>
-          <span style="font-weight:900;font-size:20px;color:#1E7A46">${m(receipt.amount)}</span>
-        </div>
-        <div style="margin-top:10px;font-size:12px;color:${MUTE}"><b style="color:${INK}">Amount in words:</b> ${words}</div>
-      </div>
-
-      ${signatureFooter(settings, 'Thank you for your payment')}
     </div>
-  </div>`;
+    <div style="display:flex;gap:0;margin-top:10px;font-size:11px">
+      <div style="flex:1.4;display:grid;grid-template-columns:auto 1fr;gap:2px 10px;align-content:start">
+        ${party.map(([k, v]) => `<div style="color:${NAVY};font-weight:800">${k}</div><div style="color:${INK}">${v}</div>`).join('')}
+      </div>
+      <div style="flex:1;display:grid;grid-template-columns:auto 1fr;gap:2px 10px;align-content:start">
+        ${meta.map(([k, v]) => `<div style="color:${NAVY};font-weight:800">${k}</div><div style="color:${INK}">${v}</div>`).join('')}
+      </div>
+    </div>`;
 }
 
-// ── QUOTATION ── same items table as an invoice but a price offer, with validity ──
+// The footer that repeats on every page: terms (left) + stamp/signature (right),
+// then the bank line, then "Page X of Y".
+function docFooter(settings, pageNo, pageCount) {
+  const c = companyBits(settings);
+  const contactLine = [
+    c.company,
+    c.cBank,
+    c.cAddr,
+    c.cPhone ? `TEL: ${c.cPhone}` : '',
+    c.cFax ? `FAX: ${c.cFax}` : '',
+  ].filter(Boolean).join(' | ');
+  const webLine = [c.cEmail, c.cWeb].filter(Boolean).join(' | ');
+  return `
+    <div style="margin-top:auto;padding-top:10px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:20px">
+        <div style="flex:1;text-align:center;font-size:9.5px;color:${MUTE};font-style:italic;line-height:1.6">
+          <div style="font-weight:800;color:${NAVY};font-style:normal;margin-bottom:2px">Terms and Conditions</div>
+          ${c.cNotes.split('.').map((s) => s.trim()).filter(Boolean).map((s) => `<div>${s}.</div>`).join('')}
+        </div>
+        <div style="width:220px;text-align:center;position:relative;height:76px">
+          ${c.showStamp ? `<div style="position:absolute;left:6px;top:-14px;opacity:.9">${stampSvg({ name: c.company, place: c.stampPlace, license: c.cLic }, 92)}</div>` : ''}
+          <div style="position:absolute;bottom:0;right:0;width:200px;border-top:1px solid ${MUTE};padding-top:4px;font-size:10px;color:${MUTE}">Customer Stamp and Signature</div>
+        </div>
+      </div>
+      <div style="border-top:1px solid ${LINE};margin-top:8px;padding-top:5px;text-align:center;font-size:8.5px;color:${MUTE};line-height:1.5">
+        <div>${contactLine}</div>
+        ${webLine ? `<div>${webLine}</div>` : ''}
+        <div style="margin-top:2px;font-weight:700;color:${NAVY}">Page ${pageNo} of ${pageCount}</div>
+      </div>
+    </div>`;
+}
+
+// The repeating column header for the items table.
+function itemsHead(taxOn) {
+  const th = (w, txt, align = 'center') => `<th style="background:${NAVY};color:#fff;padding:7px 5px;font-size:10px;font-weight:700;text-align:${align};${w ? `width:${w};` : ''}border:1px solid ${NAVY}">${txt}</th>`;
+  return `<tr>
+    ${th('26px', 'No')}
+    ${th('', 'Item Description', 'left')}
+    ${th('42px', 'Qty')}
+    ${th('46px', 'UOM')}
+    ${th('60px', 'Unit<br>Price')}
+    ${th('60px', 'Net<br>Price')}
+    ${th('40px', 'VAT')}
+    ${taxOn ? th('34px', 'VAT<br>%') : ''}
+    ${th('66px', 'Total w/<br>VAT')}
+  </tr>`;
+}
+
+// One item row.
+function itemRow(n, { name, qty, uom, unit, net, vat, vatPct, total }, taxOn) {
+  const td = (txt, align = 'center', bold = false) => `<td style="padding:5px;font-size:10px;text-align:${align};border:1px solid ${LINE};${bold ? 'font-weight:700;' : ''}">${txt}</td>`;
+  return `<tr>
+    ${td(n)}
+    ${td(name, 'left')}
+    ${td(qty)}
+    ${td(uom)}
+    ${td(unit)}
+    ${td(net)}
+    ${td(vat)}
+    ${taxOn ? td(vatPct) : ''}
+    ${td(total, 'center', true)}
+  </tr>`;
+}
+
+// The totals block that appears once, under the last page's table.
+function totalsBlock({ subtotal, discount, vat, grand, taxOn, m, words }) {
+  const row = (label, val, strong) => `<tr>
+    <td style="border:1px solid ${LINE};padding:5px 10px;font-weight:800;color:${NAVY};font-size:${strong ? '12px' : '11px'};background:#F4F7FA">${label}</td>
+    <td style="border:1px solid ${LINE};padding:5px 10px;text-align:right;font-weight:${strong ? 900 : 700};font-size:${strong ? '12px' : '11px'};width:110px">${m(val)}</td>
+  </tr>`;
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-top:8px;gap:16px">
+      <div style="flex:1;align-self:flex-end;font-size:10.5px;color:${INK}">
+        <b style="color:${NAVY}">Total Amount in words:</b><br><i>${words}</i>
+      </div>
+      <table style="border-collapse:collapse">
+        ${row('Total', subtotal)}
+        ${discount > 0 ? row('Discounts', discount) : ''}
+        ${row('VAT', taxOn ? vat : 0)}
+        ${row('Grand Total', grand, true)}
+      </table>
+    </div>`;
+}
+
+// Assemble a full multi-page A4 document. `rowsHtml` is the array of <tr> strings;
+// they are packed onto pages (ROWS_PER_PAGE), the totals go under the last table,
+// and header+footer repeat on every page with correct Page X of Y.
+const ROWS_FIRST = 34;   // matches the reference density (≈37 on page 1)
+const ROWS_NEXT = 42;    // continuation pages have no meta band
+function paginate(rowsHtml, { settings, title, meta, party, taxOn, totalsHtml }) {
+  const pages = [];
+  let idx = 0;
+  while (idx < rowsHtml.length || pages.length === 0) {
+    const cap = pages.length === 0 ? ROWS_FIRST : ROWS_NEXT;
+    pages.push(rowsHtml.slice(idx, idx + cap));
+    idx += cap;
+  }
+  const count = pages.length;
+  return pages.map((rows, i) => {
+    const last = i === count - 1;
+    const metaWithPage = meta.map(([k, v]) => (k === 'Page #' ? [k, `${i + 1} of ${count}`] : [k, v]));
+    return `
+    <div class="page" style="width:794px;min-height:1123px;box-sizing:border-box;background:#fff;color:${INK};font-family:Arial,Helvetica,sans-serif;padding:24px 26px;display:flex;flex-direction:column;${last ? '' : 'page-break-after:always;'}">
+      ${docHeader({ settings, title, meta: metaWithPage, party })}
+      <table style="width:100%;border-collapse:collapse;margin-top:10px">
+        <thead>${itemsHead(taxOn)}</thead>
+        <tbody>${rows.join('')}</tbody>
+      </table>
+      ${last ? totalsHtml : ''}
+      ${docFooter(settings, i + 1, count)}
+    </div>`;
+  }).join('');
+}
+
+// ── INVOICE ──
+function buildHtml({ invoice, items, settings, customer, variantById }) {
+  const b = invoiceBreakdown(invoice, items, settings);
+  const taxOn = b.taxEnabled; const cur = b.currency; const m = (v) => money(v, cur);
+  const st = statusInfo(invoice.paymentStatus, false);
+  const custName = esc(customer?.nameEn || customer?.name || 'CASH CUSTOMER');
+  const rows = b.lines.map((l, i) => {
+    const v = variantById(l.variantId);
+    const name = esc(v?.nameEn || v?.sku || '—') + (l.gift ? ' <b style="color:#1E8E5A">(Gift)</b>' : '');
+    const unit = l.qty > 0 ? l.lineTotal / l.qty : l.unitPrice;
+    const net = taxOn ? Math.round(l.lineTotal * (1 + b.vatRate / 100) * 100) / 100 : l.lineTotal;
+    return itemRow(i + 1, { name, qty: l.qty.toFixed(2), uom: esc(v?.uom || 'EACH'), unit: m(unit), net: m(l.lineTotal), vat: m(taxOn ? net - l.lineTotal : 0), vatPct: `${taxOn ? b.vatRate : 0}%`, total: m(net) }, taxOn);
+  });
+  const totalsHtml = totalsBlock({ subtotal: b.subtotal, discount: b.discountTotal, vat: b.vat, grand: b.total, taxOn, m, words: esc(amountToWords(b.total, cur)) })
+    + `<div style="display:flex;gap:14px;margin-top:8px">
+        <div style="flex:1;border:1px solid ${LINE};border-radius:6px;padding:8px 11px;font-size:11px">
+          <div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:${MUTE}">Payment method</span><b>${esc(payMethodLabel(invoice.paymentMethod, false))}</b></div>
+          <div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:${MUTE}">Paid</span><b style="color:#1E7A46">${m(b.paid)}</b></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:5px;background:${b.remaining > 0 ? '#FBECEC' : '#E7F5EC'};border-radius:5px;padding:6px 9px">
+            <span style="font-weight:800;color:${b.remaining > 0 ? '#C0392B' : '#1E7A46'}">Balance Due</span>
+            <span style="font-weight:900;font-size:14px;color:${b.remaining > 0 ? '#C0392B' : '#1E7A46'}">${m(b.remaining)}</span>
+          </div>
+        </div>
+        <div style="width:150px;display:flex;align-items:center;justify-content:center;background:${st.bg};color:${st.fg};border-radius:6px;font-weight:900;font-size:14px;letter-spacing:1px">${st.label}</div>
+      </div>`;
+  return paginate(rows, {
+    settings, title: taxOn ? 'TAX INVOICE' : 'INVOICE', taxOn, totalsHtml,
+    party: [['Customer', custName], ['Customer TRN#', esc(customer?.trn || 'n/a')], ['Notes', esc(invoice.notes || customer?.name || '')]],
+    meta: [['Invoice No.', esc(invoice.invoiceNumber)], ['Invoice Date', esc(invoice.date || '')], ['Page #', '']],
+  });
+}
+
+// ── QUOTATION ──
 function buildQuotationHtml({ quotation, items, settings, customer, variantById }) {
-  // Reuse the invoice breakdown by treating the quotation like an unpaid invoice.
   const inv = { ...quotation, paymentStatus: 'quote', paidAmount: 0, payments: [] };
   const b = invoiceBreakdown(inv, items, settings);
   const taxOn = b.taxEnabled; const cur = b.currency; const m = (v) => money(v, cur);
@@ -324,156 +291,98 @@ function buildQuotationHtml({ quotation, items, settings, customer, variantById 
   const rows = b.lines.map((l, i) => {
     const v = variantById(l.variantId);
     const name = esc(v?.nameEn || v?.sku || '—');
-    const code = esc(v?.sku || '');
-    const lineTotal = l.lineTotal;
-    const lineNet = taxOn ? Math.round(lineTotal * (1 + b.vatRate / 100) * 100) / 100 : lineTotal;
-    const zebra = i % 2 ? 'background:#F7F9FC;' : '';
-    return `<tr style="${zebra}">
-      <td style="text-align:center;padding:7px 6px;border-bottom:1px solid #eef1f5;color:${MUTE}">${i + 1}</td>
-      <td style="text-align:left;padding:7px 8px;border-bottom:1px solid #eef1f5;font-weight:600">${name}${code ? ` <span style="color:${MUTE};font-weight:500;font-size:.85em">· ${code}</span>` : ''}</td>
-      <td style="text-align:center;padding:7px 6px;border-bottom:1px solid #eef1f5">${l.qty.toFixed(2)}</td>
-      <td style="text-align:center;padding:7px 6px;border-bottom:1px solid #eef1f5">${m(l.qty > 0 ? lineTotal / l.qty : l.unitPrice)}</td>
-      ${taxOn ? `<td style="text-align:center;padding:7px 6px;border-bottom:1px solid #eef1f5;color:${MUTE}">${b.vatRate}%</td>` : ''}
-      <td style="text-align:center;padding:7px 6px;border-bottom:1px solid #eef1f5;font-weight:800">${m(lineNet)}</td>
-    </tr>`;
-  }).join('');
-  const sumRow = (label, val, opts = {}) => `<div style="display:flex;justify-content:space-between;padding:4px 0;${opts.border ? `border-top:1px solid ${LINE};margin-top:3px;padding-top:7px;` : ''}"><span style="color:${opts.strong ? INK : MUTE};font-weight:${opts.strong ? 800 : 600};font-size:${opts.strong ? '14px' : '12.5px'}">${label}</span><span style="font-weight:${opts.strong ? 900 : 700};font-size:${opts.strong ? '14px' : '12.5px'};color:${opts.color || INK}">${m(val)}</span></div>`;
-  const cNotes = esc(settings?.invoiceNotes || '');
+    const unit = l.qty > 0 ? l.lineTotal / l.qty : l.unitPrice;
+    const net = taxOn ? Math.round(l.lineTotal * (1 + b.vatRate / 100) * 100) / 100 : l.lineTotal;
+    return itemRow(i + 1, { name, qty: l.qty.toFixed(2), uom: esc(v?.uom || 'EACH'), unit: m(unit), net: m(l.lineTotal), vat: m(taxOn ? net - l.lineTotal : 0), vatPct: `${taxOn ? b.vatRate : 0}%`, total: m(net) }, taxOn);
+  });
+  const totalsHtml = totalsBlock({ subtotal: b.subtotal, discount: b.discountTotal, vat: b.vat, grand: b.total, taxOn, m, words: esc(amountToWords(b.total, cur)) });
+  return paginate(rows, {
+    settings, title: 'QUOTATION', taxOn, totalsHtml,
+    party: [['Customer', custName], ['Customer TRN#', esc(customer?.trn || 'n/a')], ['Notes', esc(quotation.notes || customer?.name || '')]],
+    meta: [['Quotation No.', esc(quotation.quotationNumber || '—')], ['Quotation Date', esc(quotation.date || '')], ['Quote Validity', `${validity} Days`], ['Page #', '']],
+  });
+}
+
+// ── RECEIPT VOUCHER ── (single page, no items table) ──
+function buildReceiptHtml({ receipt, settings, customer }) {
+  const cur = receipt.currency || 'AED';
+  const m = (v) => money(v, cur);
+  const custName = esc(customer?.nameEn || customer?.name || receipt.accountName || '—');
+  const words = esc(amountToWords(receipt.amount, cur));
   return `
-  <div dir="ltr" style="width:780px;background:#fff;color:${INK};font-family:Arial,Helvetica,sans-serif;font-size:12.5px">
-    ${headerBand(settings, 'QUOTATION', 'Price offer')}
-    <div style="padding:22px 30px">
-      <div style="display:flex;gap:14px;margin-bottom:18px">
-        <div style="flex:1;border:1px solid ${LINE};border-radius:10px;padding:11px 13px">
-          <div style="font-size:10.5px;color:${MUTE};letter-spacing:.5px;margin-bottom:4px">QUOTATION FOR</div>
-          <div style="font-size:15px;font-weight:800">${custName}</div>
-          ${customer?.phone ? `<div style="color:${MUTE};font-size:11.5px">Tel: ${esc(customer.phone)}</div>` : ''}
-          ${customer?.trn ? `<div style="color:${MUTE};font-size:11.5px">TRN: ${esc(customer.trn)}</div>` : ''}
+  <div class="page" style="width:794px;min-height:1123px;box-sizing:border-box;background:#fff;color:${INK};font-family:Arial,Helvetica,sans-serif;padding:24px 26px;display:flex;flex-direction:column">
+    ${docHeader({
+      settings, title: 'RECEIPT VOUCHER',
+      party: [['Received From', custName], ['Customer TRN#', esc(customer?.trn || 'n/a')]],
+      meta: [['Voucher No.', esc(receipt.voucherNo)], ['Date', esc(receipt.date || '')], ['Method', esc(payMethodLabel(receipt.method, false))]],
+    })}
+    <div style="margin-top:16px;border:1px solid ${LINE};border-radius:8px;overflow:hidden">
+      <div style="display:flex;background:${NAVY};color:#fff;font-weight:700;font-size:11px">
+        <div style="flex:1;padding:8px 12px">Particulars</div><div style="width:160px;padding:8px 12px;text-align:right">Amount</div>
+      </div>
+      <div style="display:flex;font-size:12px;border-bottom:1px solid ${LINE}">
+        <div style="flex:1;padding:10px 12px">
+          <div style="font-weight:700">${custName}</div>
+          <div style="color:${MUTE};font-size:11px;margin-top:2px">${esc(receipt.note || (receipt.forInvoice ? `Payment · Invoice ${esc(receipt.forInvoice)}` : 'Payment on account'))}</div>
+          ${receipt.throughLine ? `<div style="color:${MUTE};font-size:11px">Through : ${esc(receipt.throughLine)}</div>` : ''}
         </div>
-        <div style="width:250px;border:1px solid ${LINE};border-radius:10px;padding:11px 13px">
-          <div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:${MUTE}">Quotation No</span><b>${esc(quotation.quotationNumber || quotation.invoiceNumber || '—')}</b></div>
-          <div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:${MUTE}">Date</span><b>${esc(quotation.date || '')}</b></div>
-          <div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:${MUTE}">Valid for</span><b>${validity} days</b></div>
+        <div style="width:160px;padding:10px 12px;text-align:right;font-weight:800">${m(receipt.amount)} Cr</div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;background:#E7F5EC">
+        <div style="width:260px;padding:11px 12px;display:flex;justify-content:space-between;align-items:center">
+          <span style="font-weight:800;color:#1E7A46">Total</span>
+          <span style="font-weight:900;font-size:18px;color:#1E7A46">${m(receipt.amount)}</span>
         </div>
       </div>
-      <table style="width:100%;border-collapse:collapse;font-size:12px">
-        <thead><tr style="background:${NAVY};color:#fff">
-          <th style="padding:9px 6px;width:30px">#</th>
-          <th style="padding:9px 8px;text-align:left">Item Description</th>
-          <th style="padding:9px 6px;width:50px">Qty</th>
-          <th style="padding:9px 6px;width:82px">Unit Price</th>
-          ${taxOn ? '<th style="padding:9px 6px;width:48px">VAT</th>' : ''}
-          <th style="padding:9px 6px;width:96px">Total${taxOn ? ' w/ VAT' : ''}</th>
-        </tr></thead>
-        <tbody>${rows || `<tr><td colspan="${taxOn ? 6 : 5}" style="padding:16px;text-align:center;color:#94a3b8">—</td></tr>`}</tbody>
-      </table>
-      <div style="display:flex;justify-content:flex-end;margin-top:16px">
-        <div style="width:280px;border:1px solid ${LINE};border-radius:10px;padding:13px 15px">
-          ${sumRow('Subtotal', b.subtotal)}
-          ${taxOn ? sumRow(`VAT (${b.vatRate}%)`, b.vat) : ''}
-          ${b.discountTotal > 0 ? sumRow('Discount', b.discountTotal, { color: '#C0392B' }) : ''}
-          ${sumRow('Grand Total', b.total, { strong: true, border: true })}
-        </div>
-      </div>
-      ${cNotes ? `<div style="margin-top:16px;border:1px solid ${LINE};border-radius:10px;padding:11px 13px"><div style="font-size:10.5px;color:${MUTE};letter-spacing:.5px;margin-bottom:4px">TERMS & CONDITIONS</div><div style="font-size:11.5px;white-space:pre-line">${cNotes}</div></div>` : ''}
-      ${signatureFooter(settings, `This quotation is valid for ${validity} days from the date above.`)}
     </div>
+    <div style="margin-top:12px;font-size:11.5px;color:${INK}"><b style="color:${NAVY}">Amount (in words) :</b> ${words}</div>
+    ${docFooter(settings, 1, 1)}
   </div>`;
 }
 
-// Generic: render any document HTML to a print window.
-function printDoc(inner, title) {
-  const html = `<!doctype html><html dir="ltr" lang="en"><head><meta charset="utf-8"><title>${esc(title)}</title>
-    <style>@page{size:A4;margin:8mm}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}html,body{margin:0;padding:0;background:#fff}.wrap{display:flex;justify-content:center}.wrap>div{width:100%!important;box-shadow:0 0 0 1px #e5e9ef}@media screen{body{padding:16px;background:#eef1f5}}</style></head>
-    <body><div class="wrap">${inner}</div><script>window.onload=function(){setTimeout(function(){window.focus();window.print();},250);};</script></body></html>`;
-  const w = window.open('', '_blank'); if (!w) return false;
-  w.document.open(); w.document.write(html); w.document.close(); return true;
-}
+export function buildInvoiceHtml(args) { return buildHtml(args); }
 
-// Generic: render document HTML to a PDF blob (reuses the invoice slicing logic).
+// ── Render helpers: print window + PDF (real page breaks, no image slicing) ──
+function wrapPages(inner, title) {
+  return `<!doctype html><html dir="ltr" lang="en"><head><meta charset="utf-8"><title>${esc(title)}</title>
+    <style>
+      @page { size: A4; margin: 0; }
+      * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing:border-box; }
+      html,body { margin:0; padding:0; background:#eef1f5; }
+      .page { margin:0 auto; background:#fff; }
+      @media screen { body { padding:16px } .page { box-shadow:0 1px 6px rgba(0,0,0,.15); margin-bottom:16px } }
+      @media print { body { background:#fff; padding:0 } .page { box-shadow:none; margin:0 } }
+    </style></head><body>${inner}
+    <script>window.onload=function(){setTimeout(function(){window.focus();window.print();},250);};</script>
+    </body></html>`;
+}
+function printDoc(inner, title) {
+  const w = window.open('', '_blank'); if (!w) return false;
+  w.document.open(); w.document.write(wrapPages(inner, title)); w.document.close(); return true;
+}
+// PDF: render each .page node to its own A4 page (crisp, correct breaks).
 async function docToPdf(inner, filename) {
   const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([import('jspdf'), import('html2canvas')]);
   const host = document.createElement('div');
   host.style.cssText = 'position:fixed;left:-10000px;top:0;z-index:-1;';
   host.innerHTML = inner; document.body.appendChild(host);
   try {
-    const canvas = await html2canvas(host.firstElementChild, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false });
+    const pages = [...host.querySelectorAll('.page')];
     const pdf = new jsPDF({ unit: 'pt', format: 'a4', compress: true });
     const pw = pdf.internal.pageSize.getWidth(), ph = pdf.internal.pageSize.getHeight();
-    const margin = 22, iw = pw - margin * 2, ih = (canvas.height / canvas.width) * iw;
-    if (ih <= ph - margin * 2) {
-      pdf.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', margin, margin, iw, ih);
-    } else {
-      const ratio = canvas.width / iw, pageH = ph - margin * 2; let remaining = ih, sy = 0;
-      while (remaining > 0) {
-        const sliceH = Math.min(pageH, remaining) * ratio;
-        const c2 = document.createElement('canvas'); c2.width = canvas.width; c2.height = sliceH;
-        c2.getContext('2d').drawImage(canvas, 0, sy, canvas.width, sliceH, 0, 0, canvas.width, sliceH);
-        pdf.addImage(c2.toDataURL('image/jpeg', 0.92), 'JPEG', margin, margin, iw, sliceH / ratio);
-        remaining -= pageH; sy += sliceH; if (remaining > 0) pdf.addPage();
-      }
+    for (let i = 0; i < pages.length; i++) {
+      const canvas = await html2canvas(pages[i], { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false });
+      const iw = pw, ih = (canvas.height / canvas.width) * iw;
+      if (i > 0) pdf.addPage();
+      pdf.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, iw, Math.min(ih, ph));
     }
     return { blob: pdf.output('blob'), filename: filename.replace(/[^\w.-]/g, '_') };
   } finally { host.remove(); }
 }
 
+export function printInvoice(args) { return printDoc(buildHtml(args), args.invoice?.invoiceNumber || 'invoice'); }
+export function generateInvoicePdf(args) { return docToPdf(buildHtml(args), `${args.invoice?.invoiceNumber || 'invoice'}.pdf`); }
 export function printReceipt(args) { return printDoc(buildReceiptHtml(args), args.receipt?.voucherNo || 'receipt'); }
 export function generateReceiptPdf(args) { return docToPdf(buildReceiptHtml(args), `Receipt-${args.receipt?.voucherNo || ''}.pdf`); }
 export function printQuotation(args) { return printDoc(buildQuotationHtml(args), args.quotation?.quotationNumber || 'quotation'); }
 export function generateQuotationPdf(args) { return docToPdf(buildQuotationHtml(args), `Quotation-${args.quotation?.quotationNumber || ''}.pdf`); }
-
-
-export function printInvoice({ invoice, items, settings, customer, variantById }) {
-  const inner = buildHtml({ invoice, items, settings, customer, variantById });
-
-  const html = `<!doctype html><html dir="ltr" lang="en"><head>
-    <meta charset="utf-8"><title>${(invoice.invoiceNumber || 'invoice')}</title>
-    <style>
-      @page { size: A4; margin: 8mm; }
-      * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-      html,body { margin:0; padding:0; background:#fff; }
-      .wrap { display:flex; justify-content:center; }
-      .wrap > div { width:100% !important; box-shadow:0 0 0 1px #e5e9ef; }
-      @media screen { body { padding:16px; background:#eef1f5; } }
-    </style></head>
-    <body><div class="wrap">${inner}</div>
-    <script>window.onload=function(){setTimeout(function(){window.focus();window.print();},250);};</script>
-    </body></html>`;
-  const w = window.open('', '_blank');
-  if (!w) return false;
-  w.document.open(); w.document.write(html); w.document.close();
-  return true;
-}
-
-export async function generateInvoicePdf({ invoice, items, settings, customer, variantById }) {
-  const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([import('jspdf'), import('html2canvas')]);
-  const host = document.createElement('div');
-  host.style.cssText = 'position:fixed;left:-10000px;top:0;z-index:-1;';
-  host.innerHTML = buildHtml({ invoice, items, settings, customer, variantById });
-  document.body.appendChild(host);
-  try {
-    const node = host.firstElementChild;
-    const canvas = await html2canvas(node, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false });
-    const img = canvas.toDataURL('image/jpeg', 0.92);
-    const pdf = new jsPDF({ unit: 'pt', format: 'a4', compress: true });
-    const pw = pdf.internal.pageSize.getWidth(), ph = pdf.internal.pageSize.getHeight();
-    const margin = 22, iw = pw - margin * 2, ih = (canvas.height / canvas.width) * iw;
-    if (ih <= ph - margin * 2) {
-      pdf.addImage(img, 'JPEG', margin, margin, iw, ih);
-    } else {
-      const ratio = canvas.width / iw, pageH = ph - margin * 2;
-      let remaining = ih, sy = 0;
-      while (remaining > 0) {
-        const sliceH = Math.min(pageH, remaining) * ratio;
-        const c2 = document.createElement('canvas');
-        c2.width = canvas.width; c2.height = sliceH;
-        c2.getContext('2d').drawImage(canvas, 0, sy, canvas.width, sliceH, 0, 0, canvas.width, sliceH);
-        pdf.addImage(c2.toDataURL('image/jpeg', 0.92), 'JPEG', margin, margin, iw, sliceH / ratio);
-        remaining -= pageH; sy += sliceH;
-        if (remaining > 0) pdf.addPage();
-      }
-    }
-    const filename = `${(invoice.invoiceNumber || 'invoice')}.pdf`.replace(/[^\w.-]/g, '_');
-    return { blob: pdf.output('blob'), filename };
-  } finally { host.remove(); }
-}

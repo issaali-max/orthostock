@@ -68,7 +68,7 @@ export default function Settings() {
       companyName: form.companyName || 'OrthoStock', companyAddress: form.companyAddress || '', companyPhone: form.companyPhone || '', companyTrn: form.companyTrn || '',
       companyLicenseNo: form.companyLicenseNo || '', companyStampPlace: form.companyStampPlace || '', invoiceStamp: form.invoiceStamp !== false,
       companyTagline: form.companyTagline || '', companyEmail: form.companyEmail || '', companyWebsite: form.companyWebsite || '',
-      companyBankLine: form.companyBankLine || '', invoiceNotes: form.invoiceNotes || '',
+      companyBankLine: form.companyBankLine || '', invoiceNotes: form.invoiceNotes || '', companyFax: form.companyFax || '', companyEmirate: form.companyEmirate || '',
       usdRate: num(form.usdRate, 3.6725) || 3.6725,
       taxEnabled: !!form.taxEnabled,
       taxRate: num(form.taxRate, 5),
@@ -251,6 +251,12 @@ export default function Settings() {
         </Field>
         <Field label={t('companyTrn')}>
           <Input value={form.companyTrn || ''} onChange={(v) => set('companyTrn', v)} />
+        </Field>
+        <Field label={t('companyFax') || 'الفاكس'}>
+          <Input value={form.companyFax || ''} onChange={(v) => set('companyFax', v)} placeholder="+971 ..." />
+        </Field>
+        <Field label={t('companyEmirate') || 'الإمارة'}>
+          <Input value={form.companyEmirate || ''} onChange={(v) => set('companyEmirate', v)} placeholder="Ajman" />
         </Field>
         <Field label={t('companyTagline') || 'وصف الشركة (تحت الاسم)'}>
           <Input value={form.companyTagline || ''} onChange={(v) => set('companyTagline', v)} placeholder="Orthodontic Supplies" />

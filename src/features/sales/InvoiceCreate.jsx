@@ -18,7 +18,7 @@ const variantLabel = (v) => {
 // `editing` (an invoice row) switches the modal into edit mode.
 export default function InvoiceCreate({ open, onClose, editing }) {
   const app = useApp();
-  const { t, lang, data, settings, displayCurrency, usdRate, showToast, updateRow } = app;
+  const { t, lang, data, settings, displayCurrency, usdRate, showToast } = app;
   const categories = (data[TABLES.categories] || []).filter((c) => c.isActive !== false);
   const products = (data[TABLES.products] || []).filter((p) => p.isActive !== false);
   const variants = (data[TABLES.variants] || []).filter((v) => v.isActive !== false);
@@ -323,14 +323,8 @@ export default function InvoiceCreate({ open, onClose, editing }) {
                 </div>
                 )}
                 {num(l.unitPrice) > 0 && Math.abs(num(l.unitPrice) - list) >= 0.01 && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                    <span style={{ fontSize: 10, color: num(l.unitPrice) > list ? C.success : C.warning }}>
-                      {t('defaultPrice')} {fmtCur(list, displayCurrency, usdRate)} → {fmtCur(num(l.unitPrice), displayCurrency, usdRate)}
-                    </span>
-                    <button onClick={async () => { await updateRow(TABLES.variants, l.variantId, { sellingPriceDefault: num(l.unitPrice) }); showToast(t('defaultPriceUpdated') || 'تم تحديث سعر البيع الافتراضي', 'success'); }}
-                      style={{ fontSize: 9.5, fontWeight: 800, color: C.primary, background: C.primary + '12', border: 'none', borderRadius: 999, padding: '3px 9px', cursor: 'pointer' }}>
-                      ⤴ {t('saveAsDefault') || 'اجعله السعر الافتراضي'}
-                    </button>
+                  <div style={{ fontSize: 10, marginTop: 4, textAlign: 'end', color: num(l.unitPrice) > list ? C.success : C.warning }}>
+                    {t('defaultPrice')} {fmtCur(list, displayCurrency, usdRate)} → {fmtCur(num(l.unitPrice), displayCurrency, usdRate)}
                   </div>
                 )}
                 {(loss || lowStk) && (
