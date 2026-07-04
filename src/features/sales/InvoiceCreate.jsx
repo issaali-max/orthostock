@@ -18,7 +18,7 @@ const variantLabel = (v) => {
 // `editing` (an invoice row) switches the modal into edit mode.
 export default function InvoiceCreate({ open, onClose, editing }) {
   const app = useApp();
-  const { t, lang, data, settings, displayCurrency, usdRate, showToast } = app;
+  const { t, lang, data, settings, displayCurrency, usdRate, showToast, updateRow } = app;
   const categories = (data[TABLES.categories] || []).filter((c) => c.isActive !== false);
   const products = (data[TABLES.products] || []).filter((p) => p.isActive !== false);
   const variants = (data[TABLES.variants] || []).filter((v) => v.isActive !== false);
@@ -64,7 +64,10 @@ export default function InvoiceCreate({ open, onClose, editing }) {
         if (it.gift) { e.giftQty = round2(e.giftQty + num(it.qty)); }
         else {
           e.qty = round2(e.qty + num(it.qty));
-          e.unitPrice = num(it.listPrice) > 0 ? round2(num(it.listPrice) - safeDiv(num(it.discountAmount), num(it.qty))) : num(it.unitPrice);
+          // Use the price SAVED on this invoice line, verbatim. A per-invoice price the
+          // user set must never be recomputed from the material's current selling price.
+          e.unitPrice = num(it.unitPrice) > 0 ? num(it.unitPrice)
+            : (num(it.listPrice) > 0 ? round2(num(it.listPrice) - safeDiv(num(it.discountAmount), num(it.qty))) : 0);
         }
         byVar.set(it.variantId, e);
       });
@@ -290,7 +293,6 @@ export default function InvoiceCreate({ open, onClose, editing }) {
             const cost = num(v?.purchasePriceAvg);
             const stock = num(v?.stockQty);
             const giftQty = num(l.giftQty);
-            const disc = Math.max(0, (list - num(l.unitPrice)) * num(l.qty));
             const loss = num(l.unitPrice) < cost && num(l.unitPrice) > 0;
             const lowStk = (num(l.qty) + giftQty) > stock;
             return (
@@ -309,9 +311,15 @@ export default function InvoiceCreate({ open, onClose, editing }) {
                   <span style={{ width: 24 }} />
                 </div>
                 )}
-                {disc > 0 && (
-                  <div style={{ fontSize: 10, color: C.warning, marginTop: 3, textAlign: 'end' }}>
-                    {t('defaultPrice')} {fmtCur(list, displayCurrency, usdRate)} · {t('discount')} {fmtCur(disc, displayCurrency, usdRate)}
+                {num(l.unitPrice) > 0 && Math.abs(num(l.unitPrice) - list) >= 0.01 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    <span style={{ fontSize: 10, color: num(l.unitPrice) > list ? C.success : C.warning }}>
+                      {t('defaultPrice')} {fmtCur(list, displayCurrency, usdRate)} → {fmtCur(num(l.unitPrice), displayCurrency, usdRate)}
+                    </span>
+                    <button onClick={async () => { await updateRow(TABLES.variants, l.variantId, { sellingPriceDefault: num(l.unitPrice) }); showToast(t('defaultPriceUpdated') || 'تم تحديث سعر البيع الافتراضي', 'success'); }}
+                      style={{ fontSize: 9.5, fontWeight: 800, color: C.primary, background: C.primary + '12', border: 'none', borderRadius: 999, padding: '3px 9px', cursor: 'pointer' }}>
+                      ⤴ {t('saveAsDefault') || 'اجعله السعر الافتراضي'}
+                    </button>
                   </div>
                 )}
                 {(loss || lowStk) && (
