@@ -168,7 +168,6 @@ function CustomerProfile({ customer, onBack, onEdit, t, lang, displayCurrency, u
   const custOrders = useMemo(() => orderList(app).filter((o) => o.customerId === customer.id), [app.data, customer.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const custGifts = useMemo(() => giftsToCenters(app, { customerId: customer.id }), [app.data, customer.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const variants = app.data[TABLES.variants] || [];
-  const skuOf = (id) => variants.find((v) => v.id === id)?.sku || '—';
   const [payFor, setPayFor] = useState(null);
   const [debtModal, setDebtModal] = useState(null);   // 'set' | 'pay' | null
 
@@ -335,12 +334,19 @@ function CustomerProfile({ customer, onBack, onEdit, t, lang, displayCurrency, u
                 </div>
                 <div style={{ fontSize: 11, color: C.textMuted, margin: '2px 0 6px' }}>{fmtDate(inv.date, lang)} · {fmtCur(inv.total, displayCurrency, usdRate)}</div>
                 <div style={{ display: 'grid', gap: 2, marginBottom: 6 }}>
-                  {lines.map((l) => (
-                    <div key={l.id} style={{ fontSize: 12, color: C.textMid, display: 'flex', justifyContent: 'space-between' }}>
-                      <span>{skuOf(l.variantId)} × {l.qty}</span>
-                      <span>{fmtCur(l.total, displayCurrency, usdRate)}</span>
-                    </div>
-                  ))}
+                  {lines.map((l) => {
+                    const v = variants.find((x) => x.id === l.variantId);
+                    const name = v ? (v.nameEn || v.sku) : '—';
+                    const code = v?.sku;
+                    return (
+                      <div key={l.id} style={{ fontSize: 12, color: C.textMid, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                        <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {name}{code && name !== code ? <span style={{ color: C.textMuted, fontSize: 10.5 }}> · {code}</span> : ''} × {l.qty}
+                        </span>
+                        <span style={{ flexShrink: 0 }}>{fmtCur(l.total, displayCurrency, usdRate)}</span>
+                      </div>
+                    );
+                  })}
                 </div>
                 {remaining > 0 && (
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: `1px solid ${C.surfaceAlt}`, paddingTop: 8 }}>
