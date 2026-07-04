@@ -1010,8 +1010,14 @@ export function portfolioStats(data, priceOf) {
   const totalRealized = round2(sells.reduce((a, x) => a + num(x.realizedPnL), 0));
   const deposits = sum(flows, 'deposit'), withdrawals = sum(flows, 'withdraw');
   const dividends = sum(flows, 'dividend'), fees = sum(flows, 'fee'), interest = sum(flows, 'interest');
-  const buysCost = lots.reduce((a, l) => a + num(l.costBasis), 0);
-  const sellsProceeds = sells.reduce((a, x) => a + num(x.proceeds), 0);
+  // Cash must be consistent with holdings: only count trades of ACTIVE securities.
+  // A deleted or merged-away duplicate leaves orphan lots pointing at an inactive
+  // security; those must NOT keep draining cash while being absent from holdings.
+  const activeIds = new Set(securities.map((s) => s.id));
+  const liveLots = lots.filter((l) => activeIds.has(l.securityId));
+  const liveSells = sells.filter((x) => activeIds.has(x.securityId));
+  const buysCost = liveLots.reduce((a, l) => a + num(l.costBasis), 0);
+  const sellsProceeds = liveSells.reduce((a, x) => a + num(x.proceeds), 0);
   const netCapital = round2(deposits - withdrawals);
   const cash = round2(netCapital - buysCost + sellsProceeds + dividends + interest - fees);
   const accountValue = round2(cash + holdingsValue);

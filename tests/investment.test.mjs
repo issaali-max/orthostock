@@ -72,3 +72,25 @@ import { planSecurityMerge, projectsTotalAED, portfolioStats as pstats2 } from '
   nq(total, 53672.5, 'المشاريع: 50000 + 1000$×3.6725 والملغى مستثنى');
 }
 console.log('SIMPLE-PNL / MERGE / PROJECTS TESTS PASSED');
+
+// ═══ صفقة سهم محذوف/مكرر (رمز غير نشط) يجب ألا تستنزف النقد ═══
+{
+  const d = {
+    securities: [
+      { id: 'unh1', symbol: 'UNH', currentPrice: 425, isActive: true },
+      { id: 'unh2', symbol: 'UNH', currentPrice: 425, isActive: false }, // مكرر مُعطّل
+    ],
+    tradeLots: [
+      { id: 'L1', securityId: 'unh1', qtyBought: 80, qtyRemaining: 80, buyPricePerShare: 258.75, costBasis: 20700 },
+      { id: 'L2', securityId: 'unh2', qtyBought: 80, qtyRemaining: 80, buyPricePerShare: 409, costBasis: 32720 }, // يتيمة
+    ],
+    tradeSells: [],
+    cashFlows: [{ id: 'f1', type: 'deposit', amount: 20700, date: '2025-01-01' }],
+  };
+  const st = pstats2(d);
+  nq(st.cash, 0, 'النقد: إيداع 20700 − شراء UNH النشط 20700 (اليتيمة المعطّلة لا تُطرح)');
+  nq(st.holdingsValue, 34000, 'الأسهم: 80×425 (UNH مرة واحدة)');
+  if (st.positions.filter((p) => p.symbol === 'UNH' && p.qty > 0).length !== 1) { console.error('✗ UNH يجب أن يظهر مرة واحدة'); process.exit(1); }
+  console.log('✓ UNH مرة واحدة، والصفقة المكررة لا تستنزف النقد');
+}
+console.log('ORPHAN-LOT CASH TEST PASSED');
