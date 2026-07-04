@@ -26,17 +26,34 @@ export function toDisplay(amountAED, displayCurrency, usdRate) {
 
 // THE unified currency formatter. Pass the AED amount; it converts + formats.
 export function fmtCur(amountAED, displayCurrency = 'AED', usdRate = 3.6725) {
-  const v = toDisplay(amountAED, displayCurrency, usdRate);
-  const symbol = displayCurrency === 'USD' ? '$' : 'AED';
-  const text = round2(v).toLocaleString('en-US', {
+  const v = round2(toDisplay(amountAED, displayCurrency, usdRate));
+  const neg = v < 0 ? '-' : '';
+  const text = Math.abs(v).toLocaleString('en-US', {
     minimumFractionDigits: 2, maximumFractionDigits: 2,
   });
-  return displayCurrency === 'USD' ? `${symbol}${text}` : `${text} ${symbol}`;
+  // Sign before the symbol, whole token LTR-isolated (renders correctly inside Arabic).
+  const body = displayCurrency === 'USD' ? `${neg}$${text}` : `${neg}${text} AED`;
+  return `\u2066${body}\u2069`;
 }
 
 // Plain number formatting (quantities etc.).
 export function fmtNum(v) {
   return num(v).toLocaleString('en-US');
+}
+
+// Bidi-safe money strings. Two rules that fix RTL display:
+//  1) the sign goes BEFORE the symbol  (-$709.48, never $-709.48)
+//  2) the whole token is wrapped in a Left-To-Right Isolate (U+2066…U+2069)
+//     so it never gets visually reordered when placed inside Arabic text.
+export function fmtUSD(v) {
+  const n = round2(num(v));
+  const body = `${n < 0 ? '-' : ''}$${fmtNum(Math.abs(n))}`;
+  return `\u2066${body}\u2069`;
+}
+export function fmtAED(v) {
+  const n = round2(num(v));
+  const body = `${n < 0 ? '-' : ''}${fmtNum(Math.abs(n))} AED`;
+  return `\u2066${body}\u2069`;
 }
 
 // Pretty-print a material name with sensible capitalization, preserving common

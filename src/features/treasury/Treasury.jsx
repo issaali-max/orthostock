@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react';
 import { useApp } from '../../app/AppProvider.jsx';
 import { C, TABLES } from '../../lib/constants.js';
-import { num, fmtNum, round2 } from '../../lib/money.js';
+import { num, fmtNum, round2, fmtUSD, fmtAED } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
 import { PageHeader, Card, Btn, Field, Input, Select, Modal, EmptyState } from '../../ui/components.jsx';
 import { accountLedger, portfolioStats, setChequeStatus, transferBetweenAccounts, transferLegs, ACCOUNT_CURRENCY, investmentMovements } from '../../lib/engine.js';
 
-const ccy = (v, code = 'AED') => (code === 'USD' ? `$${fmtNum(round2(v))}` : `${fmtNum(round2(v))} ${code}`);
+const ccy = (v, code = 'AED') => (code === 'USD' ? fmtUSD(v) : fmtAED(v));
 
 // «الأموال» — where the money physically is: bank / drawer / investment. Balances are
 // derived from real records (invoice payments by method, expenses & purchases by source,
@@ -270,11 +270,11 @@ export default function Treasury() {
                     <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fff', borderRadius: 10, padding: '8px 10px' }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 13, fontWeight: 800, color: C.text }}>{p.symbol}</div>
-                        <div style={{ fontSize: 10.5, color: C.textMuted }}>{fmtNum(p.qty)} × ${fmtNum(p.avgCost)} → ${fmtNum(p.price)}</div>
+                        <div style={{ fontSize: 10.5, color: C.textMuted }}>{fmtNum(p.qty)} × {fmtUSD(p.avgCost)} → {fmtUSD(p.price)}</div>
                       </div>
                       <div style={{ textAlign: 'end' }}>
-                        <div style={{ fontSize: 13, fontWeight: 800, color: C.text }}>${fmtNum(p.marketValue)}</div>
-                        <div style={{ fontSize: 10.5, fontWeight: 800, color: p.unrealized >= 0 ? C.success : C.danger }}>{p.unrealized >= 0 ? '+' : ''}${fmtNum(p.unrealized)}</div>
+                        <div style={{ fontSize: 13, fontWeight: 800, color: C.text }}>{fmtUSD(p.marketValue)}</div>
+                        <div style={{ fontSize: 10.5, fontWeight: 800, color: p.unrealized >= 0 ? C.success : C.danger }}>{p.unrealized >= 0 ? '+' : ''}{fmtUSD(p.unrealized)}</div>
                       </div>
                     </div>
                   ))}

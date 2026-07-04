@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useApp } from '../../app/AppProvider.jsx';
 import { C, TABLES } from '../../lib/constants.js';
-import { fmtCur, fmtNum, num, round2 } from '../../lib/money.js';
+import { fmtCur, fmtNum, num, round2, fmtUSD } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
 import { refreshAllPrices, searchSymbols } from '../../lib/prices.js';
 import { commitBuy, commitSell, commitDividend, portfolioStats, stockLedger, applyTradeChange, deleteSecurityCascade, planSecurityMerge, mergeDuplicateSecurities, projectsTotalAED } from '../../lib/engine.js';
@@ -98,7 +98,7 @@ export default function Investments() {
   // AED formatting exists only for the rare AED-denominated security.
   const aedFmt = (v) => fmtCur(v, displayCurrency, usdRate);
   const ccyOf = (id) => (securities.find((x) => x.id === id)?.currency) === 'AED' ? 'AED' : 'USD';
-  const moneyIn = (v, ccy) => ccy === 'USD' ? `$${fmtNum(round2(num(v)))}` : aedFmt(v);
+  const moneyIn = (v, ccy) => ccy === 'USD' ? fmtUSD(v) : aedFmt(v);
   const curFor = (id) => (v) => moneyIn(v, ccyOf(id));
   useEffect(() => {
     if (settings.ccyMigrated) return;
@@ -339,7 +339,7 @@ export default function Investments() {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 12 }}>
           <Mini label={t('depositedTotal') || 'المودع منذ البداية'} value={cur(stats.deposits)} />
           <Mini label={t('holdings')} value={curTot(stats.holdingsValue)} />
-          <Mini label={`${t('cashBalance')} →💰`} value={cur(stats.cash)} accent={stats.cash < 0 ? '#FFD9D9' : undefined} />
+          <Mini label={t('cashInAccount') || 'النقد داخل الحساب'} value={cur(stats.cash)} accent={stats.cash < 0 ? '#FFD9D9' : undefined} />
           <Mini label={`🏗️ ${t('projects')}`} value={`${fmtNum(round2(projectsAED))} AED`} />
         </div>
         <div style={{ marginTop: 10, paddingTop: 9, borderTop: '1px solid rgba(255,255,255,.25)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12.5, fontWeight: 800 }}>
