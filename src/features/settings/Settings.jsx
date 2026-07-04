@@ -67,6 +67,8 @@ export default function Settings() {
     await updateSettings({
       companyName: form.companyName || 'OrthoStock', companyAddress: form.companyAddress || '', companyPhone: form.companyPhone || '', companyTrn: form.companyTrn || '',
       companyLicenseNo: form.companyLicenseNo || '', companyStampPlace: form.companyStampPlace || '', invoiceStamp: form.invoiceStamp !== false,
+      companyTagline: form.companyTagline || '', companyEmail: form.companyEmail || '', companyWebsite: form.companyWebsite || '',
+      companyBankLine: form.companyBankLine || '', invoiceNotes: form.invoiceNotes || '',
       usdRate: num(form.usdRate, 3.6725) || 3.6725,
       taxEnabled: !!form.taxEnabled,
       taxRate: num(form.taxRate, 5),
@@ -249,6 +251,21 @@ export default function Settings() {
         </Field>
         <Field label={t('companyTrn')}>
           <Input value={form.companyTrn || ''} onChange={(v) => set('companyTrn', v)} />
+        </Field>
+        <Field label={t('companyTagline') || 'وصف الشركة (تحت الاسم)'}>
+          <Input value={form.companyTagline || ''} onChange={(v) => set('companyTagline', v)} placeholder="Orthodontic Supplies" />
+        </Field>
+        <Field label={t('companyEmail') || 'البريد الإلكتروني'}>
+          <Input value={form.companyEmail || ''} onChange={(v) => set('companyEmail', v)} placeholder="info@company.com" />
+        </Field>
+        <Field label={t('companyWebsite') || 'الموقع الإلكتروني'}>
+          <Input value={form.companyWebsite || ''} onChange={(v) => set('companyWebsite', v)} placeholder="www.company.com" />
+        </Field>
+        <Field label={t('companyBankLine') || 'بيانات الحساب البنكي (أسفل الفاتورة)'}>
+          <Input value={form.companyBankLine || ''} onChange={(v) => set('companyBankLine', v)} placeholder="Bank · A/c No · IBAN · Swift" />
+        </Field>
+        <Field label={t('invoiceNotes') || 'ملاحظات الفاتورة (الشروط)'}>
+          <Input value={form.invoiceNotes || ''} onChange={(v) => set('invoiceNotes', v)} placeholder="Prices valid for 15 days · No return, no exchange" />
         </Field>
         <Field label={t('companyLicenseNo')}>
           <Input value={form.companyLicenseNo || ''} onChange={(v) => set('companyLicenseNo', v)} />

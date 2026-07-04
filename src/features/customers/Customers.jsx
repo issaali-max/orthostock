@@ -8,7 +8,7 @@ import { fmtDate, todayISO } from '../../lib/dates.js';
 import { customerStats, clinicRating, recordInvoicePayment, recordOpeningDebtPayment, orderList, giftsToCenters } from '../../lib/engine.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, PaymentModal, SearchBar, Select, Textarea } from '../../ui/components.jsx';
 
-const blank = () => ({ name: '', type: 'doctor', phone: '', emirate: '', city: '', specialty: '', trn: '', workingDays: WEEKDAYS.map((d) => d.key), notes: '', isActive: true });
+const blank = () => ({ name: '', nameEn: '', type: 'doctor', phone: '', emirate: '', city: '', specialty: '', trn: '', workingDays: WEEKDAYS.map((d) => d.key), notes: '', isActive: true });
 
 export default function Customers() {
   const app = useApp();
@@ -53,7 +53,7 @@ export default function Customers() {
   const save = async () => {
     const r = editing;
     if (!r.name?.trim()) return;
-    const payload = { name: r.name.trim(), type: r.type || 'doctor', phone: r.phone || '', trn: r.trn || '',
+    const payload = { name: r.name.trim(), nameEn: (r.nameEn || '').trim(), type: r.type || 'doctor', phone: r.phone || '', trn: r.trn || '',
       emirate: r.emirate || '', city: r.city || '', specialty: r.specialty || '', workingDays: r.workingDays || [], notes: r.notes || '', isActive: true };
     try { if (r.id) await updateRow(TABLES.customers, r.id, payload); else await createRow(TABLES.customers, payload); setEditing(null); }
     catch { /* toast shown (duplicate phone) */ }
@@ -121,6 +121,7 @@ export default function Customers() {
         {editing && (
           <div>
             <Field label={t('name')} required><Input value={editing.name} onChange={(v) => setEditing((r) => ({ ...r, name: v }))} /></Field>
+            <Field label={t('customerNameEn')}><Input value={editing.nameEn || ''} onChange={(v) => setEditing((r) => ({ ...r, nameEn: v }))} placeholder="English name" /></Field>
             <Field label={t('type')}>
               <Select value={editing.type} onChange={(v) => setEditing((r) => ({ ...r, type: v }))}
                 options={[{ value: 'doctor', label: t('doctor') }, { value: 'center', label: t('center') }]} />
