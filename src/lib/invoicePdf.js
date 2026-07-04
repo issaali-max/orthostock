@@ -6,6 +6,7 @@
 // invoiceBreakdown() (single source of truth). jspdf/html2canvas load on demand.
 // ─────────────────────────────────────────────────────────────
 import { invoiceBreakdown } from './engine.js';
+import { amountToWords } from './numberToWords.js';
 import { money } from './whatsapp.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -222,6 +223,205 @@ function buildHtml({ invoice, items, settings, customer, variantById }) {
 }
 
 export function buildInvoiceHtml(args) { return buildHtml(args); }
+
+// ── Shared bits for the other documents (receipt, quotation) ──
+function companyBits(settings) {
+  return {
+    company: esc(settings?.companyName || 'HO Orthodontics'),
+    cTagline: esc(settings?.companyTagline || 'Orthodontic Supplies'),
+    cAddr: esc(settings?.companyAddress || ''),
+    cPhone: esc(settings?.companyPhone || ''),
+    cEmail: esc(settings?.companyEmail || ''),
+    cWeb: esc(settings?.companyWebsite || ''),
+    cTrn: esc(settings?.companyTrn || ''),
+    cLic: esc(settings?.companyLicenseNo || ''),
+    cBank: esc(settings?.companyBankLine || ''),
+    showStamp: settings?.invoiceStamp !== false,
+  };
+}
+function headerBand(settings, title, subtitle = '') {
+  const c = companyBits(settings);
+  return `
+    <div style="background:${NAVY};color:#fff;padding:22px 30px;display:flex;justify-content:space-between;align-items:flex-start">
+      <div style="flex:1;display:flex;gap:14px;align-items:center">
+        ${logoSvg(c.company)}
+        <div>
+          <div style="font-size:24px;font-weight:900;letter-spacing:.3px">${c.company}</div>
+          ${c.cTagline ? `<div style="opacity:.85;margin-top:3px;font-size:12px">${c.cTagline}</div>` : ''}
+          ${c.cAddr ? `<div style="opacity:.85;margin-top:4px;font-size:12px">${c.cAddr}</div>` : ''}
+          <div style="opacity:.85;font-size:12px">${[c.cPhone ? `Tel: ${c.cPhone}` : '', c.cEmail, c.cWeb].filter(Boolean).join(' · ')}</div>
+        </div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:22px;font-weight:900">${title}</div>
+        ${subtitle ? `<div style="opacity:.85;font-size:12px;margin-top:2px">${subtitle}</div>` : ''}
+        ${c.cTrn ? `<div style="opacity:.85;font-size:12px;margin-top:4px">TRN: ${c.cTrn}</div>` : ''}
+        ${c.cLic ? `<div style="opacity:.85;font-size:12px">License: ${c.cLic}</div>` : ''}
+      </div>
+    </div>`;
+}
+function signatureFooter(settings, leftText = '') {
+  const c = companyBits(settings);
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:40px">
+      <div style="font-size:11px;color:#94a3b8;max-width:340px">${leftText}${c.cBank ? `<div style="margin-top:6px">${c.cBank}</div>` : ''}</div>
+      <div style="text-align:center;position:relative">
+        ${c.showStamp ? `<div style="position:absolute;left:-150px;bottom:-8px;opacity:.92">${stampSvg({ name: c.company, place: settings?.companyStampPlace || 'AJMAN', license: c.cLic })}</div>` : ''}
+        <div style="width:180px;border-top:1px solid ${MUTE};padding-top:5px;font-size:11px;color:${MUTE}">Authorised Signature</div>
+      </div>
+    </div>`;
+}
+
+// ── RECEIPT VOUCHER ── proof that a doctor paid (a partial, a cheque, cash…) ──
+// `receipt` = { voucherNo, date, amount, method, currency, throughLine, note, forInvoice }
+function buildReceiptHtml({ receipt, settings, customer }) {
+  const cur = receipt.currency || 'AED';
+  const m = (v) => money(v, cur);
+  const custName = esc(customer?.nameEn || customer?.name || receipt.accountName || '—');
+  const words = esc(amountToWords(receipt.amount, cur));
+  const row = (k, v) => `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eef1f5"><span style="color:${MUTE}">${k}</span><b>${v}</b></div>`;
+  return `
+  <div dir="ltr" style="width:780px;background:#fff;color:${INK};font-family:Arial,Helvetica,sans-serif;font-size:12.5px">
+    ${headerBand(settings, 'RECEIPT VOUCHER', 'Payment received')}
+    <div style="padding:22px 30px">
+      <div style="display:flex;gap:14px;margin-bottom:18px">
+        <div style="flex:1;border:1px solid ${LINE};border-radius:10px;padding:11px 13px">
+          <div style="font-size:10.5px;color:${MUTE};letter-spacing:.5px;margin-bottom:4px">RECEIVED FROM</div>
+          <div style="font-size:15px;font-weight:800">${custName}</div>
+          ${customer?.phone ? `<div style="color:${MUTE};font-size:11.5px">Tel: ${esc(customer.phone)}</div>` : ''}
+          ${(customer?.city || customer?.emirate) ? `<div style="color:${MUTE};font-size:11.5px">${esc([customer.city, customer.emirate].filter(Boolean).join(', '))}</div>` : ''}
+        </div>
+        <div style="width:250px;border:1px solid ${LINE};border-radius:10px;padding:11px 13px">
+          <div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:${MUTE}">Voucher No</span><b>${esc(receipt.voucherNo)}</b></div>
+          <div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:${MUTE}">Date</span><b>${esc(receipt.date || '')}</b></div>
+          <div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:${MUTE}">Method</span><b>${esc(payMethodLabel(receipt.method, false))}</b></div>
+        </div>
+      </div>
+
+      <div style="border:1px solid ${LINE};border-radius:10px;padding:14px 16px">
+        ${row('Particulars', esc(receipt.note || receipt.forInvoice ? `Payment${receipt.forInvoice ? ` · Invoice ${esc(receipt.forInvoice)}` : ''}` : 'Payment on account'))}
+        ${receipt.throughLine ? row('Through', esc(receipt.throughLine)) : ''}
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;background:#E7F5EC;border-radius:8px;padding:12px 14px">
+          <span style="font-weight:800;color:#1E7A46;font-size:14px">Amount Received</span>
+          <span style="font-weight:900;font-size:20px;color:#1E7A46">${m(receipt.amount)}</span>
+        </div>
+        <div style="margin-top:10px;font-size:12px;color:${MUTE}"><b style="color:${INK}">Amount in words:</b> ${words}</div>
+      </div>
+
+      ${signatureFooter(settings, 'Thank you for your payment')}
+    </div>
+  </div>`;
+}
+
+// ── QUOTATION ── same items table as an invoice but a price offer, with validity ──
+function buildQuotationHtml({ quotation, items, settings, customer, variantById }) {
+  // Reuse the invoice breakdown by treating the quotation like an unpaid invoice.
+  const inv = { ...quotation, paymentStatus: 'quote', paidAmount: 0, payments: [] };
+  const b = invoiceBreakdown(inv, items, settings);
+  const taxOn = b.taxEnabled; const cur = b.currency; const m = (v) => money(v, cur);
+  const custName = esc(customer?.nameEn || customer?.name || 'CASH CUSTOMER');
+  const validity = esc(quotation.validityDays || settings?.quoteValidityDays || 15);
+  const rows = b.lines.map((l, i) => {
+    const v = variantById(l.variantId);
+    const name = esc(v?.nameEn || v?.sku || '—');
+    const code = esc(v?.sku || '');
+    const lineTotal = l.lineTotal;
+    const lineNet = taxOn ? Math.round(lineTotal * (1 + b.vatRate / 100) * 100) / 100 : lineTotal;
+    const zebra = i % 2 ? 'background:#F7F9FC;' : '';
+    return `<tr style="${zebra}">
+      <td style="text-align:center;padding:7px 6px;border-bottom:1px solid #eef1f5;color:${MUTE}">${i + 1}</td>
+      <td style="text-align:left;padding:7px 8px;border-bottom:1px solid #eef1f5;font-weight:600">${name}${code ? ` <span style="color:${MUTE};font-weight:500;font-size:.85em">· ${code}</span>` : ''}</td>
+      <td style="text-align:center;padding:7px 6px;border-bottom:1px solid #eef1f5">${l.qty.toFixed(2)}</td>
+      <td style="text-align:center;padding:7px 6px;border-bottom:1px solid #eef1f5">${m(l.qty > 0 ? lineTotal / l.qty : l.unitPrice)}</td>
+      ${taxOn ? `<td style="text-align:center;padding:7px 6px;border-bottom:1px solid #eef1f5;color:${MUTE}">${b.vatRate}%</td>` : ''}
+      <td style="text-align:center;padding:7px 6px;border-bottom:1px solid #eef1f5;font-weight:800">${m(lineNet)}</td>
+    </tr>`;
+  }).join('');
+  const sumRow = (label, val, opts = {}) => `<div style="display:flex;justify-content:space-between;padding:4px 0;${opts.border ? `border-top:1px solid ${LINE};margin-top:3px;padding-top:7px;` : ''}"><span style="color:${opts.strong ? INK : MUTE};font-weight:${opts.strong ? 800 : 600};font-size:${opts.strong ? '14px' : '12.5px'}">${label}</span><span style="font-weight:${opts.strong ? 900 : 700};font-size:${opts.strong ? '14px' : '12.5px'};color:${opts.color || INK}">${m(val)}</span></div>`;
+  const cNotes = esc(settings?.invoiceNotes || '');
+  return `
+  <div dir="ltr" style="width:780px;background:#fff;color:${INK};font-family:Arial,Helvetica,sans-serif;font-size:12.5px">
+    ${headerBand(settings, 'QUOTATION', 'Price offer')}
+    <div style="padding:22px 30px">
+      <div style="display:flex;gap:14px;margin-bottom:18px">
+        <div style="flex:1;border:1px solid ${LINE};border-radius:10px;padding:11px 13px">
+          <div style="font-size:10.5px;color:${MUTE};letter-spacing:.5px;margin-bottom:4px">QUOTATION FOR</div>
+          <div style="font-size:15px;font-weight:800">${custName}</div>
+          ${customer?.phone ? `<div style="color:${MUTE};font-size:11.5px">Tel: ${esc(customer.phone)}</div>` : ''}
+          ${customer?.trn ? `<div style="color:${MUTE};font-size:11.5px">TRN: ${esc(customer.trn)}</div>` : ''}
+        </div>
+        <div style="width:250px;border:1px solid ${LINE};border-radius:10px;padding:11px 13px">
+          <div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:${MUTE}">Quotation No</span><b>${esc(quotation.quotationNumber || quotation.invoiceNumber || '—')}</b></div>
+          <div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:${MUTE}">Date</span><b>${esc(quotation.date || '')}</b></div>
+          <div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:${MUTE}">Valid for</span><b>${validity} days</b></div>
+        </div>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="background:${NAVY};color:#fff">
+          <th style="padding:9px 6px;width:30px">#</th>
+          <th style="padding:9px 8px;text-align:left">Item Description</th>
+          <th style="padding:9px 6px;width:50px">Qty</th>
+          <th style="padding:9px 6px;width:82px">Unit Price</th>
+          ${taxOn ? '<th style="padding:9px 6px;width:48px">VAT</th>' : ''}
+          <th style="padding:9px 6px;width:96px">Total${taxOn ? ' w/ VAT' : ''}</th>
+        </tr></thead>
+        <tbody>${rows || `<tr><td colspan="${taxOn ? 6 : 5}" style="padding:16px;text-align:center;color:#94a3b8">—</td></tr>`}</tbody>
+      </table>
+      <div style="display:flex;justify-content:flex-end;margin-top:16px">
+        <div style="width:280px;border:1px solid ${LINE};border-radius:10px;padding:13px 15px">
+          ${sumRow('Subtotal', b.subtotal)}
+          ${taxOn ? sumRow(`VAT (${b.vatRate}%)`, b.vat) : ''}
+          ${b.discountTotal > 0 ? sumRow('Discount', b.discountTotal, { color: '#C0392B' }) : ''}
+          ${sumRow('Grand Total', b.total, { strong: true, border: true })}
+        </div>
+      </div>
+      ${cNotes ? `<div style="margin-top:16px;border:1px solid ${LINE};border-radius:10px;padding:11px 13px"><div style="font-size:10.5px;color:${MUTE};letter-spacing:.5px;margin-bottom:4px">TERMS & CONDITIONS</div><div style="font-size:11.5px;white-space:pre-line">${cNotes}</div></div>` : ''}
+      ${signatureFooter(settings, `This quotation is valid for ${validity} days from the date above.`)}
+    </div>
+  </div>`;
+}
+
+// Generic: render any document HTML to a print window.
+function printDoc(inner, title) {
+  const html = `<!doctype html><html dir="ltr" lang="en"><head><meta charset="utf-8"><title>${esc(title)}</title>
+    <style>@page{size:A4;margin:8mm}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}html,body{margin:0;padding:0;background:#fff}.wrap{display:flex;justify-content:center}.wrap>div{width:100%!important;box-shadow:0 0 0 1px #e5e9ef}@media screen{body{padding:16px;background:#eef1f5}}</style></head>
+    <body><div class="wrap">${inner}</div><script>window.onload=function(){setTimeout(function(){window.focus();window.print();},250);};</script></body></html>`;
+  const w = window.open('', '_blank'); if (!w) return false;
+  w.document.open(); w.document.write(html); w.document.close(); return true;
+}
+
+// Generic: render document HTML to a PDF blob (reuses the invoice slicing logic).
+async function docToPdf(inner, filename) {
+  const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([import('jspdf'), import('html2canvas')]);
+  const host = document.createElement('div');
+  host.style.cssText = 'position:fixed;left:-10000px;top:0;z-index:-1;';
+  host.innerHTML = inner; document.body.appendChild(host);
+  try {
+    const canvas = await html2canvas(host.firstElementChild, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false });
+    const pdf = new jsPDF({ unit: 'pt', format: 'a4', compress: true });
+    const pw = pdf.internal.pageSize.getWidth(), ph = pdf.internal.pageSize.getHeight();
+    const margin = 22, iw = pw - margin * 2, ih = (canvas.height / canvas.width) * iw;
+    if (ih <= ph - margin * 2) {
+      pdf.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', margin, margin, iw, ih);
+    } else {
+      const ratio = canvas.width / iw, pageH = ph - margin * 2; let remaining = ih, sy = 0;
+      while (remaining > 0) {
+        const sliceH = Math.min(pageH, remaining) * ratio;
+        const c2 = document.createElement('canvas'); c2.width = canvas.width; c2.height = sliceH;
+        c2.getContext('2d').drawImage(canvas, 0, sy, canvas.width, sliceH, 0, 0, canvas.width, sliceH);
+        pdf.addImage(c2.toDataURL('image/jpeg', 0.92), 'JPEG', margin, margin, iw, sliceH / ratio);
+        remaining -= pageH; sy += sliceH; if (remaining > 0) pdf.addPage();
+      }
+    }
+    return { blob: pdf.output('blob'), filename: filename.replace(/[^\w.-]/g, '_') };
+  } finally { host.remove(); }
+}
+
+export function printReceipt(args) { return printDoc(buildReceiptHtml(args), args.receipt?.voucherNo || 'receipt'); }
+export function generateReceiptPdf(args) { return docToPdf(buildReceiptHtml(args), `Receipt-${args.receipt?.voucherNo || ''}.pdf`); }
+export function printQuotation(args) { return printDoc(buildQuotationHtml(args), args.quotation?.quotationNumber || 'quotation'); }
+export function generateQuotationPdf(args) { return docToPdf(buildQuotationHtml(args), `Quotation-${args.quotation?.quotationNumber || ''}.pdf`); }
+
 
 export function printInvoice({ invoice, items, settings, customer, variantById }) {
   const inner = buildHtml({ invoice, items, settings, customer, variantById });

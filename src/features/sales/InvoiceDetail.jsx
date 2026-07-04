@@ -5,7 +5,7 @@ import { C, TABLES } from '../../lib/constants.js';
 import { fmtDate } from '../../lib/dates.js';
 import { variantLabel, invoiceBreakdown } from '../../lib/engine.js';
 import { money } from '../../lib/whatsapp.js';
-import { generateInvoicePdf, printInvoice } from '../../lib/invoicePdf.js';
+import { generateInvoicePdf, printInvoice, printReceipt, generateReceiptPdf } from '../../lib/invoicePdf.js';
 import { SendInvoiceModal } from './SendInvoiceModal.jsx';
 
 // Read-only invoice detail: shows every sold material with qty/price/total and the
@@ -45,6 +45,29 @@ export default function InvoiceDetail({ invoice, onClose, onEdit }) {
     finally { setBusy(false); }
   };
 
+  // Receipt voucher for a payment: use the most recent payment (or the whole paid amount).
+  const doReceipt = () => {
+    const pays = Array.isArray(invoice.payments) ? invoice.payments : [];
+    const last = pays[pays.length - 1];
+    const amount = last ? Number(last.amount) : Number(invoice.paidAmount) || 0;
+    if (!(amount > 0)) { showToast(t('noPaymentYet') || 'لا توجد دفعة لإصدار وصل لها', 'error'); return; }
+    const method = last?.method || invoice.paymentMethod || 'cash';
+    const receipt = {
+      voucherNo: `RV-${invoice.invoiceNumber}`,
+      date: (last?.date || invoice.date || '').slice(0, 10),
+      amount, method, currency: b.currency,
+      forInvoice: invoice.invoiceNumber,
+      throughLine: method === 'cheque' ? (last?.chequeRef ? `Cheque ${last.chequeRef}` : 'Cheque') : method === 'transfer' ? 'Bank transfer' : '',
+    };
+    try {
+      const ok = printReceipt({ receipt, settings, customer });
+      if (!ok) generateReceiptPdf({ receipt, settings, customer }).then(({ blob, filename }) => {
+        const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
+      });
+    } catch (e) { console.warn('[receipt]', e?.message || e); showToast(t('pdfFailed'), 'error'); }
+  };
+
   const statusTone = invoice.paymentStatus === 'paid' ? C.success : invoice.paymentStatus === 'partial' ? C.warning : C.danger;
 
   return (
@@ -54,6 +77,7 @@ export default function InvoiceDetail({ invoice, onClose, onEdit }) {
           <Btn variant="ghost" onClick={onClose}>{t('close')}</Btn>
           <Btn variant="light" disabled={busy} onClick={doPrint}>🖨️ {t('printA4')}</Btn>
           <Btn variant="light" onClick={() => setSending(true)}>📲 {t('sendWhatsApp')}</Btn>
+          {(Number(invoice.paidAmount) > 0) && <Btn variant="light" onClick={doReceipt}>🧾 {t('receiptVoucher') || 'وصل استلام'}</Btn>}
           <Btn onClick={() => { onClose?.(); onEdit?.(invoice); }}>✏️ {t('edit')}</Btn>
         </>}>
         <div style={{ display: 'grid', gap: 12 }}>

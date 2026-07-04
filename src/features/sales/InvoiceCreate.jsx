@@ -148,6 +148,17 @@ export default function InvoiceCreate({ open, onClose, editing }) {
           onClose();
         }} style={{ color: C.danger }}>🗑 {t('deleteInvoice')}</Btn>}
         <Btn variant="ghost" onClick={onClose}>{t('cancel')}</Btn>
+        <Btn variant="light" disabled={lines.length === 0} onClick={async () => {
+          const { printQuotation, generateQuotationPdf } = await import('../../lib/invoicePdf.js');
+          const cust = data[TABLES.customers]?.find((c) => c.id === customerId);
+          const its = lines.filter((l) => num(l.qty) > 0).map((l) => ({ variantId: l.variantId, qty: num(l.qty), unitPrice: num(l.unitPrice) }));
+          const quotation = { quotationNumber: `QT-${Date.now().toString().slice(-6)}`, date: date, customerId, currency: 'AED' };
+          const variantById = (id) => data[TABLES.variants]?.find((v) => v.id === id);
+          try {
+            const ok = printQuotation({ quotation, items: its, settings, customer: cust, variantById });
+            if (!ok) { const { blob, filename } = await generateQuotationPdf({ quotation, items: its, settings, customer: cust, variantById }); const u = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = u; a.download = filename; a.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }
+          } catch (e) { console.warn('[quotation]', e?.message || e); app.showToast(t('pdfFailed'), 'error'); }
+        }}>📄 {t('quotation')}</Btn>
         <Btn onClick={save} disabled={busy || lines.length === 0}>{t('save')}</Btn>
       </>}>
       <div style={{ background: '#fff', paddingBottom: 8, marginBottom: 4, borderBottom: `1px solid ${C.surfaceAlt}` }}>
