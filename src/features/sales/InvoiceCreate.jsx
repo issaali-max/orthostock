@@ -151,8 +151,16 @@ export default function InvoiceCreate({ open, onClose, editing }) {
         <Btn variant="light" disabled={lines.length === 0} onClick={async () => {
           const { printQuotation, generateQuotationPdf } = await import('../../lib/invoicePdf.js');
           const cust = data[TABLES.customers]?.find((c) => c.id === customerId);
-          const its = lines.filter((l) => num(l.qty) > 0).map((l) => ({ variantId: l.variantId, qty: num(l.qty), unitPrice: num(l.unitPrice) }));
-          const quotation = { quotationNumber: `QT-${Date.now().toString().slice(-6)}`, date: date, customerId, currency: 'AED' };
+          // Each item must carry `total` (qty × unit) and `listPrice`, exactly like a saved
+          // invoice item — invoiceBreakdown derives the unit price from `total`, so without
+          // it every price would read 0. Uses YOUR edited unit price, not the default.
+          const its = lines.filter((l) => num(l.qty) > 0).map((l) => {
+            const vv = data[TABLES.variants]?.find((v) => v.id === l.variantId);
+            const unit = num(l.unitPrice) > 0 ? num(l.unitPrice) : num(vv?.sellingPriceDefault);
+            const list = num(vv?.sellingPriceDefault);
+            return { variantId: l.variantId, qty: num(l.qty), unitPrice: unit, listPrice: list, total: round2(unit * num(l.qty)), discountAmount: Math.max(0, round2((list - unit) * num(l.qty))) };
+          });
+          const quotation = { quotationNumber: `QT-${Date.now().toString().slice(-6)}`, date, customerId, currency: 'AED', discountTotal: 0 };
           const variantById = (id) => data[TABLES.variants]?.find((v) => v.id === id);
           try {
             const ok = printQuotation({ quotation, items: its, settings, customer: cust, variantById });
