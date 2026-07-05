@@ -113,7 +113,7 @@ function docHeader({ settings, title, meta, party }) {
   return `
     <div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:10px;border-bottom:2px solid ${NAVY}">
       <div style="display:flex;gap:12px;align-items:flex-start">
-        <div style="margin-top:2px">${logoSvg(c.company, 62)}</div>
+        <div style="margin-top:2px">${settings?.companyLogo ? `<img src="${settings.companyLogo}" alt="${esc(c.company)}" style="width:74px;height:74px;object-fit:contain;display:block" />` : logoSvg(c.company, 62)}</div>
         <div>
           <div style="font-size:20px;font-weight:900;color:${NAVY};letter-spacing:.3px">${c.company}</div>
           ${c.cTagline ? `<div style="font-size:11px;color:${MUTE};margin-top:1px">${c.cTagline}</div>` : ''}

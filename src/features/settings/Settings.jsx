@@ -7,6 +7,7 @@ import { isHashed, makeHashedPassword } from '../../lib/auth.js';
 import { subscribeSync, pushAllLocal, pull, cloudReady, wipeCloud, forcePushOverwrite, restoreSnapshotToCloud, fullRestoreFromBackup } from '../../db/sync.js';
 import { exportBackup } from '../../lib/backup.js';
 import { exportExcel, importExcel } from '../../lib/excel.js';
+import { resizeImageToDataUrl } from '../../lib/image.js';
 import { mergeCustomers, reconcileStock, dataHealth } from '../../lib/engine.js';
 import { num, fmtCur } from '../../lib/money.js';
 
@@ -68,7 +69,7 @@ export default function Settings() {
       companyName: form.companyName || 'OrthoStock', companyAddress: form.companyAddress || '', companyPhone: form.companyPhone || '', companyTrn: form.companyTrn || '',
       companyLicenseNo: form.companyLicenseNo || '', companyStampPlace: form.companyStampPlace || '', invoiceStamp: form.invoiceStamp !== false,
       companyTagline: form.companyTagline || '', companyEmail: form.companyEmail || '', companyWebsite: form.companyWebsite || '',
-      companyBankLine: form.companyBankLine || '', invoiceNotes: form.invoiceNotes || '', companyFax: form.companyFax || '', companyEmirate: form.companyEmirate || '',
+      companyBankLine: form.companyBankLine || '', invoiceNotes: form.invoiceNotes || '', companyFax: form.companyFax || '', companyEmirate: form.companyEmirate || '', companyLogo: form.companyLogo || '',
       usdRate: num(form.usdRate, 3.6725) || 3.6725,
       taxEnabled: !!form.taxEnabled,
       taxRate: num(form.taxRate, 5),
@@ -240,6 +241,26 @@ export default function Settings() {
       </Card>
 
       <Card>
+        <Field label={t('companyLogo') || 'شعار الشركة (للفاتورة)'} hint={t('companyLogoHint') || 'PNG بخلفية شفافة يظهر أعلى الفاتورة والوصل'}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ width: 64, height: 64, borderRadius: 12, border: `1px solid ${C.border}`, background: form.companyLogo ? `center/contain no-repeat url("${form.companyLogo}")` : C.surfaceAlt, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, flexShrink: 0 }}>
+              {!form.companyLogo && '🦷'}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <label style={{ fontSize: 12.5, fontWeight: 700, color: C.primary, cursor: 'pointer' }}>
+                📤 {t('uploadLogo') || 'رفع شعار'}
+                <input type="file" accept="image/*" style={{ display: 'none' }} onChange={async (e) => {
+                  const file = e.target.files?.[0]; if (!file) return;
+                  try {
+                    const dataUrl = await resizeImageToDataUrl(file, 480);
+                    set('companyLogo', dataUrl);
+                  } catch (err) { showToast(t('imageError') || 'تعذّر قراءة الصورة', 'error'); console.warn(err); }
+                }} />
+              </label>
+              {form.companyLogo && <button onClick={() => set('companyLogo', '')} style={{ fontSize: 11.5, color: C.danger, background: 'none', border: 'none', cursor: 'pointer', textAlign: 'start', padding: 0 }}>🗑 {t('removeLogo') || 'إزالة'}</button>}
+            </div>
+          </div>
+        </Field>
         <Field label={t('companyName')} required>
           <Input value={form.companyName} onChange={(v) => set('companyName', v)} />
         </Field>
