@@ -15,23 +15,23 @@ const NAVY = '#1C3D5A', INK = '#0E1D2E', MUTE = '#5b6b7d', LINE = '#cbd5e1';
 const GOLD = '#C9A24B';
 
 // Initials for the logo monogram (first letters of the first two words, fallback first 2 chars).
-function initialsOf(name) {
-  const words = String(name || '').trim().split(/\s+/).filter(Boolean);
-  if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
-  return String(name || 'OS').slice(0, 2).toUpperCase();
-}
-
-// A clean orthodontic monogram badge: navy rounded square, a gold dental arch with little
-// brackets, and the company initials. Pure SVG so it renders crisply in the PDF/print.
 function logoSvg(name, size = 56) {
-  const ini = esc(initialsOf(name));
-  return `<svg width="${size}" height="${size}" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <rect x="1" y="1" width="54" height="54" rx="13" fill="#ffffff" fill-opacity="0.08" stroke="${GOLD}" stroke-width="1.5"/>
-    <path d="M13 22 Q28 12 43 22" stroke="${GOLD}" stroke-width="2.4" fill="none" stroke-linecap="round"/>
-    <rect x="15.5" y="18.7" width="4.4" height="4.4" rx="1" fill="${GOLD}"/>
-    <rect x="25.8" y="15.4" width="4.4" height="4.4" rx="1" fill="${GOLD}"/>
-    <rect x="36.1" y="18.7" width="4.4" height="4.4" rx="1" fill="${GOLD}"/>
-    <text x="28" y="44" text-anchor="middle" font-family="Tajawal,Arial,sans-serif" font-size="17" font-weight="900" fill="#ffffff" letter-spacing="1">${ini}</text>
+  // HO Orthodontist mark: two teeth forming "H" (left) and "O" (right), crossed by an
+  // archwire — rendered in gold on a TRANSPARENT background (no black block).
+  return `<svg width="${size}" height="${size}" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="${esc(name)}">
+    <defs>
+      <linearGradient id="hoGold" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#F6DF8E"/><stop offset="0.5" stop-color="#D4A63C"/><stop offset="1" stop-color="#B8862A"/>
+      </linearGradient>
+    </defs>
+    <!-- left tooth (H) -->
+    <path d="M20 34 C20 25 30 22 36 27 C41 22 51 25 51 34 C51 52 46 66 42 82 C41 87 35 87 34 82 L32 66 L30 66 L28 82 C27 87 21 87 20 82 C16 66 20 52 20 34 Z" fill="url(#hoGold)"/>
+    <path d="M31 44 h8 M35 40 v14 M31 54 h8" stroke="#1a1a1a" stroke-width="3.2" stroke-linecap="round" opacity="0.5"/>
+    <!-- right tooth (O) -->
+    <path d="M69 34 C69 25 79 22 85 27 C90 22 100 25 100 34 C100 52 95 66 91 82 C90 87 84 87 83 82 L81 66 L79 66 L77 82 C76 87 70 87 69 82 C65 66 69 52 69 34 Z" fill="url(#hoGold)"/>
+    <circle cx="84.5" cy="47" r="9" fill="none" stroke="#1a1a1a" stroke-width="3.4" opacity="0.5"/>
+    <!-- archwire -->
+    <path d="M14 62 Q60 46 106 62" stroke="url(#hoGold)" stroke-width="2.6" fill="none" stroke-linecap="round"/>
   </svg>`;
 }
 
@@ -40,28 +40,29 @@ function logoSvg(name, size = 56) {
 function stampSvg({ name, place, license }, size = 130) {
   const top = esc(String(name || '').toUpperCase()).slice(0, 34);
   const bottom = esc([place, license ? `LIC ${license}` : ''].filter(Boolean).join(' • ').toUpperCase()).slice(0, 40);
+  const G = '#B8862A'; // gold, matching the logo
   return `<svg width="${size}" height="${size}" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" style="transform:rotate(-9deg)">
     <defs>
       <path id="stTop" d="M100,100 m-74,0 a74,74 0 1,1 148,0" />
       <path id="stBot" d="M100,100 m-62,0 a62,62 0 1,0 124,0" />
+      <linearGradient id="stGold" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#D4A63C"/><stop offset="1" stop-color="#9C6F1E"/></linearGradient>
     </defs>
-    <g fill="none" stroke="${NAVY}" stroke-opacity="0.7">
-      <circle cx="100" cy="100" r="92" stroke-width="3"/>
+    <g fill="none" stroke="${G}" stroke-opacity="0.85">
+      <circle cx="100" cy="100" r="92" stroke-width="3.5"/>
       <circle cx="100" cy="100" r="76" stroke-width="1.5"/>
     </g>
-    <text fill="${NAVY}" fill-opacity="0.72" font-family="Tajawal,Arial,sans-serif" font-weight="800" font-size="15" letter-spacing="1.5">
+    <text fill="${G}" fill-opacity="0.9" font-family="Georgia,Arial,sans-serif" font-weight="800" font-size="15" letter-spacing="1.5">
       <textPath href="#stTop" startOffset="50%" text-anchor="middle">${top}</textPath>
     </text>
-    <text fill="${NAVY}" fill-opacity="0.72" font-family="Tajawal,Arial,sans-serif" font-weight="700" font-size="12" letter-spacing="1">
+    <text fill="${G}" fill-opacity="0.9" font-family="Georgia,Arial,sans-serif" font-weight="700" font-size="12" letter-spacing="1">
       <textPath href="#stBot" startOffset="50%" text-anchor="middle">${bottom}</textPath>
     </text>
-    <g stroke="${NAVY}" stroke-opacity="0.7" fill="none">
-      <path d="M70 96 Q100 78 130 96" stroke-width="3" stroke-linecap="round"/>
-      <rect x="75" y="90" width="6" height="6" rx="1.5" fill="${NAVY}" fill-opacity="0.7" stroke="none"/>
-      <rect x="97" y="83" width="6" height="6" rx="1.5" fill="${NAVY}" fill-opacity="0.7" stroke="none"/>
-      <rect x="119" y="90" width="6" height="6" rx="1.5" fill="${NAVY}" fill-opacity="0.7" stroke="none"/>
+    <!-- twin-tooth HO mark, centered -->
+    <g transform="translate(56,58) scale(0.72)" fill="url(#stGold)" opacity="0.92">
+      <path d="M20 34 C20 25 30 22 36 27 C41 22 51 25 51 34 C51 52 46 66 42 82 C41 87 35 87 34 82 L32 66 L30 66 L28 82 C27 87 21 87 20 82 C16 66 20 52 20 34 Z"/>
+      <path d="M69 34 C69 25 79 22 85 27 C90 22 100 25 100 34 C100 52 95 66 91 82 C90 87 84 87 83 82 L81 66 L79 66 L77 82 C76 87 70 87 69 82 C65 66 69 52 69 34 Z"/>
     </g>
-    <text x="100" y="124" text-anchor="middle" fill="${NAVY}" fill-opacity="0.72" font-family="Tajawal,Arial,sans-serif" font-weight="900" font-size="13" letter-spacing="2">F.Z.E</text>
+    <text x="100" y="150" text-anchor="middle" fill="${G}" fill-opacity="0.9" font-family="Georgia,Arial,sans-serif" font-weight="900" font-size="11" letter-spacing="2">F.Z.E</text>
   </svg>`;
 }
 
@@ -112,7 +113,7 @@ function docHeader({ settings, title, meta, party }) {
   return `
     <div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:10px;border-bottom:2px solid ${NAVY}">
       <div style="display:flex;gap:12px;align-items:flex-start">
-        <div style="margin-top:2px">${logoSvg(c.company, 54)}</div>
+        <div style="margin-top:2px">${logoSvg(c.company, 62)}</div>
         <div>
           <div style="font-size:20px;font-weight:900;color:${NAVY};letter-spacing:.3px">${c.company}</div>
           ${c.cTagline ? `<div style="font-size:11px;color:${MUTE};margin-top:1px">${c.cTagline}</div>` : ''}
