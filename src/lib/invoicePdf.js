@@ -353,12 +353,43 @@ function wrapPages(inner, title) {
       @media screen { body { padding:16px } .page { box-shadow:0 1px 6px rgba(0,0,0,.15); margin-bottom:16px } }
       @media print { body { background:#fff; padding:0 } .page { box-shadow:none; margin:0 } }
     </style></head><body>${inner}
-    <script>window.onload=function(){setTimeout(function(){window.focus();window.print();},250);};</script>
     </body></html>`;
 }
 function printDoc(inner, title) {
-  const w = window.open('', '_blank'); if (!w) return false;
-  w.document.open(); w.document.write(wrapPages(inner, title)); w.document.close(); return true;
+  // Print inside a hidden iframe on the SAME page. No new tab/window, so the user
+  // never has to close anything to get back to the app. The frame prints then removes
+  // itself (on afterprint, focus return, or a safety timeout).
+  try {
+    const old = document.getElementById('__print_frame__');
+    if (old) old.remove();
+    const frame = document.createElement('iframe');
+    frame.id = '__print_frame__';
+    frame.setAttribute('aria-hidden', 'true');
+    frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;pointer-events:none;';
+    document.body.appendChild(frame);
+    const cleanup = () => { const f = document.getElementById('__print_frame__'); if (f) f.remove(); };
+    const doc = frame.contentWindow.document;
+    doc.open();
+    doc.write(wrapPages(inner, title));
+    doc.close();
+    const win = frame.contentWindow;
+    let done = false;
+    const fire = () => {
+      if (done) return; done = true;
+      try { win.focus(); win.print(); } catch { /* ignore */ }
+      // Return to the app and clean up shortly after the print dialog resolves.
+      win.onafterprint = cleanup;
+      window.addEventListener('focus', function onBack() { window.removeEventListener('focus', onBack); setTimeout(cleanup, 300); });
+      setTimeout(cleanup, 60000); // hard safety net
+    };
+    // Wait for the frame's own load, with a fallback timer.
+    frame.onload = () => setTimeout(fire, 200);
+    setTimeout(fire, 700);
+    return true;
+  } catch (e) {
+    console.warn('[print]', e?.message || e);
+    return false; // caller falls back to PDF download
+  }
 }
 // PDF: render each .page node to its own A4 page (crisp, correct breaks).
 async function docToPdf(inner, filename) {
