@@ -35,8 +35,8 @@ export function SendInvoiceModal({ invoice, onClose }) {
       showToast(t('pdfFailed'), 'error');
     }
     const message = invoiceMessage({
-      lang, companyName: settings?.companyName, invoiceNumber: invoice.invoiceNumber,
-      customerName: customer?.name, total: b.total, remaining: b.remaining, currency: b.currency,
+      lang: 'en', companyName: settings?.companyName, invoiceNumber: invoice.invoiceNumber,
+      customerName: customer?.nameEn || customer?.name, total: b.total, remaining: b.remaining, currency: b.currency,
     });
     try {
       const res = await sendInvoiceWhatsApp({ phone, message, pdfBlob: blob, pdfName: filename });

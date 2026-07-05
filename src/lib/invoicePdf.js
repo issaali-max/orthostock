@@ -107,32 +107,31 @@ function companyBits(settings) {
 
 // The header that repeats on every page: logo + company (left), big DOC TITLE + TRN
 // (right), then a two-column meta band (customer block | doc-number block).
-function docHeader({ settings, title, meta, party }) {
+function docHeader({ settings, title, meta, party, billingAddress = '' }) {
   const c = companyBits(settings);
-  const contact = [c.cAddr, c.cEmirate ? `Emirate: ${c.cEmirate}` : '', c.cEmail ? `E-Mail: ${c.cEmail}` : ''].filter(Boolean);
+  const logo = settings?.companyLogo
+    ? `<img src="${settings.companyLogo}" alt="${esc(c.company)}" style="height:56px;object-fit:contain;display:block" />`
+    : logoSvg(c.company, 56);
+  // party = [[label, value], ...]  meta = [[label, value], ...]  — rendered as two
+  // label:value columns exactly like the reference (Customer / Quotation No. etc.).
+  const cell = (rows) => rows.map(([k, v]) => `
+    <div style="display:flex;gap:8px;padding:1px 0;font-size:10.5px">
+      <div style="color:${NAVY};font-weight:800;min-width:96px">${k}</div>
+      <div style="color:${INK};flex:1">${v || ''}</div>
+    </div>`).join('');
   return `
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:10px;border-bottom:2px solid ${NAVY}">
-      <div style="display:flex;gap:12px;align-items:flex-start">
-        <div style="margin-top:2px">${settings?.companyLogo ? `<img src="${settings.companyLogo}" alt="${esc(c.company)}" style="width:74px;height:74px;object-fit:contain;display:block" />` : logoSvg(c.company, 62)}</div>
-        <div>
-          <div style="font-size:20px;font-weight:900;color:${NAVY};letter-spacing:.3px">${c.company}</div>
-          ${c.cTagline ? `<div style="font-size:11px;color:${MUTE};margin-top:1px">${c.cTagline}</div>` : ''}
-          ${contact.map((l) => `<div style="font-size:10.5px;color:${MUTE};margin-top:2px">${l}</div>`).join('')}
-        </div>
-      </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div>${logo}</div>
       <div style="text-align:right">
         <div style="font-size:26px;font-weight:900;color:${NAVY};letter-spacing:1px">${title}</div>
-        ${c.cTrn ? `<div style="font-size:10.5px;color:${MUTE};margin-top:3px">TRN : ${c.cTrn}</div>` : ''}
-        ${c.cLic ? `<div style="font-size:10.5px;color:${MUTE}">License : ${c.cLic}</div>` : ''}
+        ${c.cTrn ? `<div style="font-size:10px;color:${NAVY};font-weight:700;margin-top:2px">TRN : ${c.cTrn}</div>` : ''}
       </div>
     </div>
-    <div style="display:flex;gap:0;margin-top:10px;font-size:11px">
-      <div style="flex:1.4;display:grid;grid-template-columns:auto 1fr;gap:2px 10px;align-content:start">
-        ${party.map(([k, v]) => `<div style="color:${NAVY};font-weight:800">${k}</div><div style="color:${INK}">${v}</div>`).join('')}
+    <div style="display:flex;gap:20px">
+      <div style="flex:1.25">${cell(party)}${billingAddress !== '' ? `
+        <div style="display:flex;gap:8px;padding:1px 0;font-size:10.5px"><div style="color:${NAVY};font-weight:800;min-width:96px">Billing Address</div><div style="color:${INK};flex:1">${esc(billingAddress)}</div></div>` : ''}
       </div>
-      <div style="flex:1;display:grid;grid-template-columns:auto 1fr;gap:2px 10px;align-content:start">
-        ${meta.map(([k, v]) => `<div style="color:${NAVY};font-weight:800">${k}</div><div style="color:${INK}">${v}</div>`).join('')}
-      </div>
+      <div style="flex:1">${cell(meta)}</div>
     </div>`;
 }
 
@@ -225,7 +224,7 @@ function totalsBlock({ subtotal, discount, vat, grand, taxOn, m, words }) {
 // and header+footer repeat on every page with correct Page X of Y.
 const ROWS_FIRST = 34;   // matches the reference density (≈37 on page 1)
 const ROWS_NEXT = 42;    // continuation pages have no meta band
-function paginate(rowsHtml, { settings, title, meta, party, taxOn, totalsHtml }) {
+function paginate(rowsHtml, { settings, title, meta, party, taxOn, totalsHtml, billingAddress = "" }) {
   const pages = [];
   let idx = 0;
   while (idx < rowsHtml.length || pages.length === 0) {
@@ -239,7 +238,7 @@ function paginate(rowsHtml, { settings, title, meta, party, taxOn, totalsHtml })
     const metaWithPage = meta.map(([k, v]) => (k === 'Page #' ? [k, `${i + 1} of ${count}`] : [k, v]));
     return `
     <div class="page" style="width:794px;min-height:1123px;box-sizing:border-box;background:#fff;color:${INK};font-family:Arial,Helvetica,sans-serif;padding:24px 26px;display:flex;flex-direction:column;${last ? '' : 'page-break-after:always;'}">
-      ${docHeader({ settings, title, meta: metaWithPage, party })}
+      ${docHeader({ settings, title, meta: metaWithPage, party, billingAddress })}
       <table style="width:100%;border-collapse:collapse;margin-top:10px">
         <thead>${itemsHead(taxOn)}</thead>
         <tbody>${rows.join('')}</tbody>
@@ -277,7 +276,8 @@ function buildHtml({ invoice, items, settings, customer, variantById }) {
       </div>`;
   return paginate(rows, {
     settings, title: taxOn ? 'TAX INVOICE' : 'INVOICE', taxOn, totalsHtml,
-    party: [['Customer', custName], ['Customer TRN#', esc(customer?.trn || 'n/a')], ['Notes', esc(invoice.notes || customer?.name || '')]],
+    billingAddress: esc(customer?.name || ''),
+    party: [['Customer', custName], ['Customer TRN#', esc(customer?.trn || 'n/a')], ['Notes', esc(invoice.notes || '')]],
     meta: [['Invoice No.', esc(invoice.invoiceNumber)], ['Invoice Date', esc(invoice.date || '')], ['Page #', '']],
   });
 }
@@ -299,7 +299,8 @@ function buildQuotationHtml({ quotation, items, settings, customer, variantById 
   const totalsHtml = totalsBlock({ subtotal: b.subtotal, discount: b.discountTotal, vat: b.vat, grand: b.total, taxOn, m, words: esc(amountToWords(b.total, cur)) });
   return paginate(rows, {
     settings, title: 'QUOTATION', taxOn, totalsHtml,
-    party: [['Customer', custName], ['Customer TRN#', esc(customer?.trn || 'n/a')], ['Notes', esc(quotation.notes || customer?.name || '')]],
+    billingAddress: esc(customer?.name || ''),
+    party: [['Customer', custName], ['Customer TRN#', esc(customer?.trn || 'n/a')], ['Notes', esc(quotation.notes || '')]],
     meta: [['Quotation No.', esc(quotation.quotationNumber || '—')], ['Quotation Date', esc(quotation.date || '')], ['Quote Validity', `${validity} Days`], ['Page #', '']],
   });
 }
