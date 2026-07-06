@@ -117,13 +117,15 @@ function docHeader({ settings, title, meta, party, billingAddress = '' }) {
     ? `<div dir="ltr" style="display:flex;justify-content:flex-end;gap:10px;padding:1px 0;font-size:10.5px"><div style="color:${NAVY};font-weight:800;text-align:left">${k}</div><div style="color:${INK};min-width:96px;text-align:right">${v || ''}</div></div>`
     : `<div dir="ltr" style="display:flex;gap:8px;padding:1px 0;font-size:10.5px;text-align:left"><div style="color:${NAVY};font-weight:800;min-width:96px">${k}</div><div style="color:${INK};flex:1">${v || ''}</div></div>`;
   return `
-    <div dir="ltr" style="text-align:left">
+    <div dir="ltr" style="text-align:left;direction:ltr">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
         <div style="display:flex;flex-direction:column;gap:0">
           <div>${logo}</div>
-          <div style="font-size:22px;font-weight:900;color:${NAVY};letter-spacing:1px;margin-top:-8px">${title}</div>
+          <div style="font-size:13px;font-weight:800;color:#000;margin-top:2px">${c.company}</div>
+          ${c.cPhone ? `<div style="font-size:11px;color:#000;margin-top:1px">${c.cPhone}</div>` : ''}
+          <div style="font-size:22px;font-weight:900;color:${NAVY};letter-spacing:1px;margin-top:6px">${title}</div>
+          ${c.cTrn ? `<div style="font-size:10px;color:${NAVY};font-weight:700;margin-top:1px">TRN : ${c.cTrn}</div>` : ''}
         </div>
-        ${c.cTrn ? `<div dir="ltr" style="font-size:10px;color:${NAVY};font-weight:700;text-align:right">TRN : ${c.cTrn}</div>` : ''}
       </div>
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:24px;border-top:1px solid ${LINE};padding-top:8px">
         <div style="flex:1.2">
@@ -150,15 +152,15 @@ function docFooter(settings, pageNo, pageCount) {
   ].filter(Boolean).join(' | ');
   const webLine = [c.cEmail, c.cWeb].filter(Boolean).join(' | ');
   return `
-    <div style="margin-top:auto;padding-top:10px">
+    <div dir="ltr" style="margin-top:auto;padding-top:10px;direction:ltr;text-align:left">
       <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:20px">
+        <div style="width:220px;text-align:center;position:relative;height:76px">
+          ${c.showStamp ? `<div style="position:absolute;left:6px;top:-14px;opacity:.9">${stampSvg({ name: c.company, place: c.stampPlace, license: c.cLic }, 92)}</div>` : ''}
+          <div style="position:absolute;bottom:0;left:0;width:200px;border-top:1px solid ${MUTE};padding-top:4px;font-size:10px;color:${MUTE}">Customer Stamp and Signature</div>
+        </div>
         <div style="flex:1;text-align:center;font-size:9.5px;color:${MUTE};font-style:italic;line-height:1.6">
           <div style="font-weight:800;color:${NAVY};font-style:normal;margin-bottom:2px">Terms and Conditions</div>
           ${c.cNotes.split('.').map((s) => s.trim()).filter(Boolean).map((s) => `<div>${s}.</div>`).join('')}
-        </div>
-        <div style="width:220px;text-align:center;position:relative;height:76px">
-          ${c.showStamp ? `<div style="position:absolute;left:6px;top:-14px;opacity:.9">${stampSvg({ name: c.company, place: c.stampPlace, license: c.cLic }, 92)}</div>` : ''}
-          <div style="position:absolute;bottom:0;right:0;width:200px;border-top:1px solid ${MUTE};padding-top:4px;font-size:10px;color:${MUTE}">Customer Stamp and Signature</div>
         </div>
       </div>
       <div style="border-top:1px solid ${LINE};margin-top:8px;padding-top:5px;text-align:center;font-size:8.5px;color:${MUTE};line-height:1.5">
@@ -189,7 +191,7 @@ function itemsHead(taxOn) {
 function itemRow(n, { name, qty, uom, unit, net, vat, vatPct, total }, taxOn) {
   // Fixed row height keeps every invoice/quotation visually identical. Prices are
   // rendered larger and the final Total is emphasised.
-  const td = (txt, align, opts = {}) => `<td style="height:26px;padding:3px 6px;font-size:${opts.size || 10.5}px;text-align:${align};border:1px solid ${LINE};${opts.bold ? 'font-weight:800;' : ''}${opts.color ? `color:${opts.color};` : ''}white-space:nowrap;overflow:hidden">${txt}</td>`;
+  const td = (txt, align, opts = {}) => `<td dir="ltr" style="height:26px;padding:3px 6px;font-size:${opts.size || 10.5}px;text-align:${align};border:1px solid ${LINE};direction:ltr;${opts.bold ? 'font-weight:800;' : ''}${opts.color ? `color:${opts.color};` : ''}white-space:nowrap;overflow:hidden">${txt}</td>`;
   return `<tr>
     ${td(n, 'center', { color: MUTE })}
     ${td(name, 'left', { size: 10.5 }).replace('white-space:nowrap;overflow:hidden', 'white-space:normal')}
@@ -210,11 +212,11 @@ function totalsBlock({ subtotal, discount, vat, grand, taxOn, m, words }) {
     <td style="border:1px solid ${LINE};padding:5px 10px;text-align:right;font-weight:${strong ? 900 : 700};font-size:${strong ? '12px' : '11px'};width:110px">${m(val)}</td>
   </tr>`;
   return `
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-top:8px;gap:16px">
-      <div style="flex:1;align-self:flex-end;font-size:10.5px;color:${INK}">
+    <div dir="ltr" style="display:flex;justify-content:space-between;align-items:flex-start;margin-top:8px;gap:16px;direction:ltr;text-align:left">
+      <div style="flex:1;align-self:flex-end;font-size:10.5px;color:${INK};text-align:left">
         <b style="color:${NAVY}">Total Amount in words:</b><br><i>${words}</i>
       </div>
-      <table style="border-collapse:collapse">
+      <table dir="ltr" style="border-collapse:collapse;direction:ltr">
         ${row('Total', subtotal)}
         ${discount > 0 ? row('Discounts', discount) : ''}
         ${row('VAT', taxOn ? vat : 0)}
@@ -241,9 +243,9 @@ function paginate(rowsHtml, { settings, title, meta, party, taxOn, totalsHtml, b
     const last = i === count - 1;
     const metaWithPage = meta.map(([k, v]) => (k === 'Page #' ? [k, `${i + 1} of ${count}`] : [k, v]));
     return `
-    <div class="page" style="width:794px;min-height:1123px;box-sizing:border-box;background:#fff;color:${INK};font-family:Arial,Helvetica,sans-serif;padding:24px 26px;display:flex;flex-direction:column;${last ? '' : 'page-break-after:always;'}">
+    <div class="page" dir="ltr" style="width:794px;min-height:1123px;box-sizing:border-box;background:#fff;color:${INK};font-family:Arial,Helvetica,sans-serif;padding:24px 26px;display:flex;flex-direction:column;text-align:left;direction:ltr;${last ? '' : 'page-break-after:always;'}">
       ${docHeader({ settings, title, meta: metaWithPage, party, billingAddress })}
-      <table style="width:100%;border-collapse:collapse;margin-top:10px">
+      <table dir="ltr" style="width:100%;border-collapse:collapse;margin-top:10px;direction:ltr">
         <thead>${itemsHead(taxOn)}</thead>
         <tbody>${rows.join('')}</tbody>
       </table>
@@ -267,7 +269,7 @@ function buildHtml({ invoice, items, settings, customer, variantById }) {
     return itemRow(i + 1, { name, qty: l.qty.toFixed(2), uom: esc(v?.uom || 'EACH'), unit: m(unit), net: m(l.lineTotal), vat: m(taxOn ? net - l.lineTotal : 0), vatPct: `${taxOn ? b.vatRate : 0}%`, total: m(net) }, taxOn);
   });
   const totalsHtml = totalsBlock({ subtotal: b.subtotal, discount: b.discountTotal, vat: b.vat, grand: b.total, taxOn, m, words: esc(amountToWords(b.total, cur)) })
-    + `<div style="display:flex;gap:14px;margin-top:8px">
+    + `<div dir="ltr" style="display:flex;gap:14px;margin-top:8px;direction:ltr;text-align:left">
         <div style="flex:1;border:1px solid ${LINE};border-radius:6px;padding:8px 11px;font-size:11px">
           <div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:${MUTE}">Payment method</span><b>${esc(payMethodLabel(invoice.paymentMethod, false))}</b></div>
           <div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:${MUTE}">Paid</span><b style="color:#1E7A46">${m(b.paid)}</b></div>
@@ -316,7 +318,7 @@ function buildReceiptHtml({ receipt, settings, customer }) {
   const custName = esc(customer?.nameEn || customer?.name || receipt.accountName || '—');
   const words = esc(amountToWords(receipt.amount, cur));
   return `
-  <div class="page" style="width:794px;min-height:1123px;box-sizing:border-box;background:#fff;color:${INK};font-family:Arial,Helvetica,sans-serif;padding:24px 26px;display:flex;flex-direction:column">
+  <div class="page" dir="ltr" style="width:794px;min-height:1123px;box-sizing:border-box;background:#fff;color:${INK};font-family:Arial,Helvetica,sans-serif;padding:24px 26px;display:flex;flex-direction:column;text-align:left;direction:ltr">
     ${docHeader({
       settings, title: 'RECEIPT VOUCHER',
       party: [['Received From', custName], ['Customer TRN#', esc(customer?.trn || 'n/a')]],
