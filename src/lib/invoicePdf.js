@@ -169,33 +169,35 @@ function docFooter(settings, pageNo, pageCount) {
 
 // The repeating column header for the items table.
 function itemsHead(taxOn) {
-  const th = (w, txt, align = 'center') => `<th style="background:${NAVY};color:#fff;padding:7px 5px;font-size:10px;font-weight:700;text-align:${align};${w ? `width:${w};` : ''}border:1px solid ${NAVY}">${txt}</th>`;
+  const th = (w, txt, align = 'center') => `<th style="background:${NAVY};color:#fff;padding:8px 5px;font-size:10px;font-weight:700;text-align:${align};${w ? `width:${w};` : ''}border:1px solid ${NAVY}">${txt}</th>`;
   return `<tr>
     ${th('26px', 'No')}
     ${th('', 'Item Description', 'left')}
-    ${th('42px', 'Qty')}
+    ${th('40px', 'Qty')}
     ${th('46px', 'UOM')}
-    ${th('60px', 'Unit<br>Price')}
-    ${th('60px', 'Net<br>Price')}
-    ${th('40px', 'VAT')}
+    ${th('66px', 'Unit<br>Price')}
+    ${th('66px', 'Net<br>Price')}
+    ${taxOn ? th('42px', 'VAT') : ''}
     ${taxOn ? th('34px', 'VAT<br>%') : ''}
-    ${th('66px', 'Total w/<br>VAT')}
+    ${th('74px', 'Total w/<br>VAT')}
   </tr>`;
 }
 
 // One item row.
 function itemRow(n, { name, qty, uom, unit, net, vat, vatPct, total }, taxOn) {
-  const td = (txt, align = 'center', bold = false) => `<td style="padding:5px;font-size:10px;text-align:${align};border:1px solid ${LINE};${bold ? 'font-weight:700;' : ''}">${txt}</td>`;
+  // Fixed row height keeps every invoice/quotation visually identical. Prices are
+  // rendered larger and the final Total is emphasised.
+  const td = (txt, align, opts = {}) => `<td style="height:26px;padding:3px 6px;font-size:${opts.size || 10.5}px;text-align:${align};border:1px solid ${LINE};${opts.bold ? 'font-weight:800;' : ''}${opts.color ? `color:${opts.color};` : ''}white-space:nowrap;overflow:hidden">${txt}</td>`;
   return `<tr>
-    ${td(n)}
-    ${td(name, 'left')}
-    ${td(qty)}
-    ${td(uom)}
-    ${td(unit)}
-    ${td(net)}
-    ${td(vat)}
-    ${taxOn ? td(vatPct) : ''}
-    ${td(total, 'center', true)}
+    ${td(n, 'center', { color: MUTE })}
+    ${td(name, 'left', { size: 10.5 }).replace('white-space:nowrap;overflow:hidden', 'white-space:normal')}
+    ${td(qty, 'center')}
+    ${td(uom, 'center', { color: MUTE })}
+    ${td(unit, 'right', { size: 11 })}
+    ${td(net, 'right', { size: 11 })}
+    ${taxOn ? td(vat, 'right', { size: 10 }) : ''}
+    ${taxOn ? td(vatPct, 'center', { color: MUTE }) : ''}
+    ${td(total, 'right', { size: 12, bold: true, color: NAVY })}
   </tr>`;
 }
 
