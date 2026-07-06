@@ -231,7 +231,7 @@ function CustomerProfile({ customer, onBack, onEdit, t, lang, displayCurrency, u
       {debtModal === 'pay' && (
         <PayOldDebtModal outstanding={st.openingOutstanding} t={t} displayCurrency={displayCurrency} usdRate={usdRate}
           onClose={() => setDebtModal(null)}
-          onRecord={async (amount) => { await recordOpeningDebtPayment(app, customer.id, amount); setDebtModal(null); }} />
+          onRecord={async (amount, method) => { await recordOpeningDebtPayment(app, customer.id, amount, undefined, method); setDebtModal(null); }} />
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 14 }}>
@@ -401,17 +401,25 @@ function SetOldDebtModal({ customer, t, displayCurrency, usdRate, onClose, onSav
 function PayOldDebtModal({ outstanding, t, displayCurrency, usdRate, onClose, onRecord }) {
   const rate = displayCurrency === 'USD' ? (usdRate || 1) : 1;
   const [amount, setAmount] = useState('');
+  const [method, setMethod] = useState('cash');
   const aed = (Number(amount) || 0) * rate;
   const outDisp = outstanding / rate;
+  const methods = [['cash', `💵 ${t('cash')}`], ['transfer', `🏦 ${t('bankTransfer') || 'حوالة بنكية'}`], ['cheque', `📝 ${t('cheque') || 'شيك'}`]];
   return (
     <Modal open onClose={onClose} title={`💵 ${t('settleOldDebt')}`} dismissable
       footer={<>
         <Btn variant="ghost" onClick={onClose}>{t('cancel')}</Btn>
-        <Btn onClick={() => onRecord(Math.round(aed * 100) / 100)} disabled={!(Number(amount) > 0)}>{t('record')}</Btn>
+        <Btn onClick={() => onRecord(Math.round(aed * 100) / 100, method)} disabled={!(Number(amount) > 0)}>{t('record')}</Btn>
       </>}>
       <div style={{ fontSize: 12, color: C.textMid, marginBottom: 10 }}>{t('outstanding')}: {fmtCur(outstanding, displayCurrency, usdRate)}</div>
       <Field label={`${t('amount')} (${displayCurrency})`}><Input type="number" value={amount} onChange={setAmount} /></Field>
-      <Btn size="sm" variant="ghost" onClick={() => setAmount(String(Math.round(outDisp * 100) / 100))}>{t('payFull')}</Btn>
+      <Field label={t('paymentMethod') || 'طريقة الدفع'}>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {methods.map(([val, label]) => (
+            <button key={val} onClick={() => setMethod(val)} style={{ flex: 1, minWidth: 90, padding: '9px 6px', borderRadius: 10, border: `1.5px solid ${method === val ? C.primary : C.border}`, background: method === val ? C.primary + '12' : '#fff', color: method === val ? C.primary : C.textMid, fontWeight: 700, fontSize: 12.5, cursor: 'pointer' }}>{label}</button>
+          ))}
+        </div>
+      </Field>
     </Modal>
   );
 }

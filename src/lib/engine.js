@@ -647,7 +647,7 @@ export function customerStats(invoices, items, customerId, customer = null) {
 
 // Record a repayment against a customer's OLD/opening debt (not tied to any invoice).
 // Increments openingPaid, capped at openingDebt; keeps a payments log for history.
-export async function recordOpeningDebtPayment(app, customerId, amount, date) {
+export async function recordOpeningDebtPayment(app, customerId, amount, date, method = 'cash') {
   const c = (app.data[TABLES.customers] || []).find((x) => x.id === customerId);
   if (!c) return null;
   const amt = num(amount);
@@ -655,7 +655,7 @@ export async function recordOpeningDebtPayment(app, customerId, amount, date) {
   const debt = num(c.openingDebt);
   const newPaid = Math.min(debt, num(c.openingPaid) + amt);
   const payments = Array.isArray(c.openingPayments) ? c.openingPayments.slice() : [];
-  payments.push({ amount: round2(amt), date: date || new Date().toISOString().slice(0, 10) });
+  payments.push({ amount: round2(amt), date: date || new Date().toISOString().slice(0, 10), method });
   const saved = await db.update(TABLES.customers, customerId, { openingPaid: round2(newPaid), openingPayments: payments });
   await app.refresh(TABLES.customers); nudgeSync();
   return saved;

@@ -62,7 +62,6 @@ function stampSvg({ name, place, license }, size = 130) {
       <path d="M20 34 C20 25 30 22 36 27 C41 22 51 25 51 34 C51 52 46 66 42 82 C41 87 35 87 34 82 L32 66 L30 66 L28 82 C27 87 21 87 20 82 C16 66 20 52 20 34 Z"/>
       <path d="M69 34 C69 25 79 22 85 27 C90 22 100 25 100 34 C100 52 95 66 91 82 C90 87 84 87 83 82 L81 66 L79 66 L77 82 C76 87 70 87 69 82 C65 66 69 52 69 34 Z"/>
     </g>
-    <text x="100" y="150" text-anchor="middle" fill="${G}" fill-opacity="0.9" font-family="Georgia,Arial,sans-serif" font-weight="900" font-size="11" letter-spacing="2">F.Z.E</text>
   </svg>`;
 }
 
@@ -110,28 +109,29 @@ function companyBits(settings) {
 function docHeader({ settings, title, meta, party, billingAddress = '' }) {
   const c = companyBits(settings);
   const logo = settings?.companyLogo
-    ? `<img src="${settings.companyLogo}" alt="${esc(c.company)}" style="height:56px;object-fit:contain;display:block" />`
-    : logoSvg(c.company, 56);
-  // party = [[label, value], ...]  meta = [[label, value], ...]  — rendered as two
-  // label:value columns exactly like the reference (Customer / Quotation No. etc.).
-  const cell = (rows) => rows.map(([k, v]) => `
-    <div style="display:flex;gap:8px;padding:1px 0;font-size:10.5px">
-      <div style="color:${NAVY};font-weight:800;min-width:96px">${k}</div>
-      <div style="color:${INK};flex:1">${v || ''}</div>
-    </div>`).join('');
+    ? `<img src="${settings.companyLogo}" alt="${esc(c.company)}" style="height:52px;object-fit:contain;display:block" />`
+    : logoSvg(c.company, 52);
+  // Label:value pairs. `align` = 'right' puts value then label (reference meta column:
+  // "INV-00026    Invoice No"); 'left' puts label then value (Customer column).
+  const pair = (k, v, align) => align === 'right'
+    ? `<div dir="ltr" style="display:flex;justify-content:flex-end;gap:8px;padding:1px 0;font-size:10.5px;text-align:right"><div style="color:${INK}">${v || ''}</div><div style="color:${NAVY};font-weight:800;min-width:88px;text-align:right">${k}</div></div>`
+    : `<div dir="ltr" style="display:flex;gap:8px;padding:1px 0;font-size:10.5px;text-align:left"><div style="color:${NAVY};font-weight:800;min-width:96px">${k}</div><div style="color:${INK};flex:1">${v || ''}</div></div>`;
   return `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <div>${logo}</div>
-      <div style="text-align:right">
-        <div style="font-size:26px;font-weight:900;color:${NAVY};letter-spacing:1px">${title}</div>
-        ${c.cTrn ? `<div style="font-size:10px;color:${NAVY};font-weight:700;margin-top:2px">TRN : ${c.cTrn}</div>` : ''}
+    <div dir="ltr" style="text-align:left">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div>${logo}</div>
+          <div style="font-size:22px;font-weight:900;color:${NAVY};letter-spacing:1px">${title}</div>
+        </div>
+        <div style="text-align:right;min-width:230px">
+          ${c.cTrn ? `<div dir="ltr" style="font-size:10px;color:${NAVY};font-weight:700;margin-bottom:6px;text-align:right">TRN : ${c.cTrn}</div>` : ''}
+          ${meta.map(([k, v]) => pair(k, v, 'right')).join('')}
+        </div>
       </div>
-    </div>
-    <div style="display:flex;gap:20px">
-      <div style="flex:1.25">${cell(party)}${billingAddress !== '' ? `
-        <div style="display:flex;gap:8px;padding:1px 0;font-size:10.5px"><div style="color:${NAVY};font-weight:800;min-width:96px">Billing Address</div><div style="color:${INK};flex:1">${esc(billingAddress)}</div></div>` : ''}
+      <div style="border-top:1px solid ${LINE};padding-top:8px">
+        ${party.map(([k, v]) => pair(k, v, 'left')).join('')}
+        ${billingAddress !== '' ? pair('Billing Address', esc(billingAddress), 'left') : ''}
       </div>
-      <div style="flex:1">${cell(meta)}</div>
     </div>`;
 }
 
