@@ -404,7 +404,7 @@ function PayOldDebtModal({ outstanding, t, displayCurrency, usdRate, onClose, on
   const [method, setMethod] = useState('cash');
   const aed = (Number(amount) || 0) * rate;
   const outDisp = outstanding / rate;
-  const methods = [['cash', `💵 ${t('cash')}`], ['transfer', `🏦 ${t('bankTransfer') || 'حوالة بنكية'}`], ['cheque', `📝 ${t('cheque') || 'شيك'}`]];
+  const methods = [['cash', `🗄️ ${t('toDrawer') || 'الدرج (كاش)'}`], ['transfer', `🏦 ${t('toBank') || 'الحساب البنكي'}`]];
   return (
     <Modal open onClose={onClose} title={`💵 ${t('settleOldDebt')}`} dismissable
       footer={<>

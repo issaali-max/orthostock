@@ -320,13 +320,12 @@ export function PaymentModal({ open, onClose, invoice, t, cur, onRecord }) {
             <Input type="number" value={amount} placeholder={String(remaining)} onChange={(v) => setAmount(v === '' ? '' : Math.min(Math.max(0, Number(v) || 0), remaining))} />
           </Field>
           <Field label={t('paymentMethod')}>
-            <div style={{ display: 'flex', gap: 6 }}>
-              {['cash', 'transfer', 'cheque'].map((m) => (
-                <button key={m} onClick={() => setMethod(m)} style={{ flex: 1, border: `1.5px solid ${method === m ? C.primary : C.border}`, background: method === m ? C.primary : '#fff', color: method === m ? '#fff' : C.textMid, borderRadius: 10, padding: '8px 4px', fontSize: 12, fontWeight: 800, cursor: 'pointer' }}>{mIcon[m]} {mLabel[m]}</button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {[['cash', `🗄️ ${t('toDrawer') || 'الدرج (كاش)'}`], ['transfer', `🏦 ${t('toBank') || 'الحساب البنكي'}`]].map(([m, label]) => (
+                <button key={m} onClick={() => setMethod(m)} style={{ flex: 1, border: `1.5px solid ${method === m ? C.primary : C.border}`, background: method === m ? C.primary : '#fff', color: method === m ? '#fff' : C.textMid, borderRadius: 10, padding: '11px 6px', fontSize: 13, fontWeight: 800, cursor: 'pointer' }}>{label}</button>
               ))}
             </div>
           </Field>
-          {method === 'cheque' && <div style={{ fontSize: 11.5, color: C.warning, fontWeight: 700, marginTop: -4, marginBottom: 6 }}>🧾 الشيك لا يُحسب نقداً إلا بعد تحصيله (تُتابع حالته في قسم الأموال).</div>}
         </>
       ) : <div style={{ color: C.success, fontWeight: 700, textAlign: 'center', padding: 8 }}>✓ {t('paid')}</div>}
       {history.length > 0 && (
