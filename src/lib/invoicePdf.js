@@ -111,10 +111,10 @@ function docHeader({ settings, title, meta, party, billingAddress = '' }) {
   const logo = settings?.companyLogo
     ? `<img src="${settings.companyLogo}" alt="${esc(c.company)}" style="height:96px;object-fit:contain;display:block" />`
     : logoSvg(c.company, 88);
-  // Label:value pairs. `align` = 'right' puts value then label (reference meta column:
-  // "INV-00026    Invoice No"); 'left' puts label then value (Customer column).
+  // Label:value pairs. `align`='right' → label left, value right, both toward the
+  // right edge (meta column: "Invoice No.    INV-00030"). 'left' → label then value.
   const pair = (k, v, align) => align === 'right'
-    ? `<div dir="ltr" style="display:flex;justify-content:flex-end;gap:8px;padding:1px 0;font-size:10.5px;text-align:right"><div style="color:${INK}">${v || ''}</div><div style="color:${NAVY};font-weight:800;min-width:88px;text-align:right">${k}</div></div>`
+    ? `<div dir="ltr" style="display:flex;justify-content:flex-end;gap:10px;padding:1px 0;font-size:10.5px"><div style="color:${NAVY};font-weight:800;text-align:left">${k}</div><div style="color:${INK};min-width:96px;text-align:right">${v || ''}</div></div>`
     : `<div dir="ltr" style="display:flex;gap:8px;padding:1px 0;font-size:10.5px;text-align:left"><div style="color:${NAVY};font-weight:800;min-width:96px">${k}</div><div style="color:${INK};flex:1">${v || ''}</div></div>`;
   return `
     <div dir="ltr" style="text-align:left">
