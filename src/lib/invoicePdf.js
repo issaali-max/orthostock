@@ -109,8 +109,8 @@ function companyBits(settings) {
 function docHeader({ settings, title, meta, party, billingAddress = '' }) {
   const c = companyBits(settings);
   const logo = settings?.companyLogo
-    ? `<img src="${settings.companyLogo}" alt="${esc(c.company)}" style="height:146px;object-fit:contain;display:block" />`
-    : logoSvg(c.company, 130);
+    ? `<img src="${settings.companyLogo}" alt="${esc(c.company)}" style="height:170px;object-fit:contain;display:block" />`
+    : logoSvg(c.company, 150);
   // Label:value pairs. `align`='right' → label left, value right, both toward the
   // right edge (meta column: "Invoice No.    INV-00030"). 'left' → label then value.
   const pair = (k, v, align) => align === 'right'
@@ -121,9 +121,9 @@ function docHeader({ settings, title, meta, party, billingAddress = '' }) {
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
         <div style="display:flex;flex-direction:column;gap:0">
           <div>${logo}</div>
-          <div style="font-size:13px;font-weight:800;color:#000;margin-top:2px">${c.company}</div>
-          ${c.cPhone ? `<div style="font-size:11px;color:#000;margin-top:1px">${c.cPhone}</div>` : ''}
-          <div style="font-size:22px;font-weight:900;color:${NAVY};letter-spacing:1px;margin-top:6px">${title}</div>
+          <div style="font-size:14px;font-weight:800;color:#000;margin-top:-22px">${c.company}</div>
+          ${c.cPhone ? `<div style="font-size:11px;color:#000;margin-top:1px">Tel: ${c.cPhone}</div>` : ''}
+          <div style="font-size:22px;font-weight:900;color:${NAVY};letter-spacing:1px;margin-top:8px">${title}</div>
           ${c.cTrn ? `<div style="font-size:10px;color:${NAVY};font-weight:700;margin-top:1px">TRN : ${c.cTrn}</div>` : ''}
         </div>
       </div>
