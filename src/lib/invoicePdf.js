@@ -118,13 +118,13 @@ function docHeader({ settings, title, meta, party, billingAddress = '' }) {
     : `<div dir="ltr" style="display:flex;gap:8px;padding:1px 0;font-size:10.5px;text-align:left"><div style="color:${NAVY};font-weight:800;min-width:96px">${k}</div><div style="color:${INK};flex:1">${v || ''}</div></div>`;
   return `
     <div dir="ltr" style="text-align:left;direction:ltr">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+      <div style="margin-bottom:8px">
         <div style="display:flex;flex-direction:column;gap:0">
           <div>${logo}</div>
           <div style="font-size:15px;font-weight:800;color:#000;margin-top:-22px">${c.company}</div>
           ${c.cTagline ? `<div style="font-size:11px;color:#000;margin-top:1px">${c.cTagline}</div>` : ''}
+          ${c.cPhone ? `<div style="font-size:11px;color:#000;margin-top:1px">Tel: ${c.cPhone}</div>` : ''}
         </div>
-        ${c.cPhone ? `<div style="font-size:11px;color:#000;font-weight:600">Tel: ${c.cPhone}</div>` : ''}
       </div>
       <div style="margin-bottom:10px">
         <div style="font-size:24px;font-weight:900;color:${NAVY};letter-spacing:1px">${title}</div>
@@ -175,25 +175,25 @@ function docFooter(settings, pageNo, pageCount) {
 }
 
 // The repeating column header for the items table.
-function itemsHead(taxOn) {
+function itemsHead() {
   const th = (w, txt, align = 'center') => `<th style="background:${NAVY};color:#fff;padding:8px 5px;font-size:10px;font-weight:700;text-align:${align};${w ? `width:${w};` : ''}border:1px solid ${NAVY}">${txt}</th>`;
   return `<tr>
     ${th('26px', 'No')}
     ${th('', 'Item Description', 'left')}
     ${th('40px', 'Qty')}
     ${th('46px', 'UOM')}
-    ${th('66px', 'Unit<br>Price')}
-    ${th('66px', 'Net<br>Price')}
-    ${taxOn ? th('42px', 'VAT') : ''}
-    ${taxOn ? th('34px', 'VAT<br>%') : ''}
-    ${th('74px', 'Total w/<br>VAT')}
+    ${th('62px', 'Unit<br>Price')}
+    ${th('62px', 'Net<br>Price')}
+    ${th('54px', 'VAT')}
+    ${th('40px', 'VAT<br>%')}
+    ${th('70px', 'Total w/<br>VAT')}
   </tr>`;
 }
 
 // One item row.
-function itemRow(n, { name, qty, uom, unit, net, vat, vatPct, total }, taxOn) {
+function itemRow(n, { name, qty, uom, unit, net, vat, vatPct, total }) {
   // Fixed row height keeps every invoice/quotation visually identical. Prices are
-  // rendered larger and the final Total is emphasised.
+  // rendered larger and the final Total is emphasised. VAT columns always show.
   const td = (txt, align, opts = {}) => `<td dir="ltr" style="height:26px;padding:3px 6px;font-size:${opts.size || 10.5}px;text-align:${align};border:1px solid ${LINE};direction:ltr;${opts.bold ? 'font-weight:800;' : ''}${opts.color ? `color:${opts.color};` : ''}white-space:nowrap;overflow:hidden">${txt}</td>`;
   return `<tr>
     ${td(n, 'center', { color: MUTE })}
@@ -202,8 +202,8 @@ function itemRow(n, { name, qty, uom, unit, net, vat, vatPct, total }, taxOn) {
     ${td(uom, 'center', { color: MUTE })}
     ${td(unit, 'right', { size: 11 })}
     ${td(net, 'right', { size: 11 })}
-    ${taxOn ? td(vat, 'right', { size: 10 }) : ''}
-    ${taxOn ? td(vatPct, 'center', { color: MUTE }) : ''}
+    ${td(vat, 'right', { size: 10 })}
+    ${td(vatPct, 'center', { color: MUTE })}
     ${td(total, 'right', { size: 12, bold: true, color: NAVY })}
   </tr>`;
 }
@@ -249,7 +249,7 @@ function paginate(rowsHtml, { settings, title, meta, party, taxOn, totalsHtml, b
     <div class="page" dir="ltr" style="width:794px;min-height:1123px;box-sizing:border-box;background:#fff;color:${INK};font-family:Arial,Helvetica,sans-serif;padding:24px 26px;display:flex;flex-direction:column;text-align:left;direction:ltr;${last ? '' : 'page-break-after:always;'}">
       ${docHeader({ settings, title, meta: metaWithPage, party, billingAddress })}
       <table dir="ltr" style="width:100%;border-collapse:collapse;margin-top:10px;direction:ltr">
-        <thead>${itemsHead(taxOn)}</thead>
+        <thead>${itemsHead()}</thead>
         <tbody>${rows.join('')}</tbody>
       </table>
       ${last ? totalsHtml : ''}
@@ -269,7 +269,7 @@ function buildHtml({ invoice, items, settings, customer, variantById }) {
     const name = esc(v?.nameEn || v?.sku || '—') + (l.gift ? ' <b style="color:#1E8E5A">(Gift)</b>' : '');
     const unit = l.qty > 0 ? l.lineTotal / l.qty : l.unitPrice;
     const net = taxOn ? Math.round(l.lineTotal * (1 + b.vatRate / 100) * 100) / 100 : l.lineTotal;
-    return itemRow(i + 1, { name, qty: l.qty.toFixed(2), uom: esc(v?.uom || 'EACH'), unit: m(unit), net: m(l.lineTotal), vat: m(taxOn ? net - l.lineTotal : 0), vatPct: `${taxOn ? b.vatRate : 0}%`, total: m(net) }, taxOn);
+    return itemRow(i + 1, { name, qty: l.qty.toFixed(2), uom: esc(v?.uom || 'EACH'), unit: m(unit), net: m(l.lineTotal), vat: m(taxOn ? net - l.lineTotal : 0), vatPct: `${taxOn ? b.vatRate : 0}%`, total: m(net) });
   });
   const totalsHtml = totalsBlock({ subtotal: b.subtotal, discount: b.discountTotal, vat: b.vat, grand: b.total, taxOn, m, words: esc(amountToWords(b.total, cur)) })
     + `<div dir="ltr" style="display:flex;gap:14px;margin-top:8px;direction:ltr;text-align:left">
@@ -303,7 +303,7 @@ function buildQuotationHtml({ quotation, items, settings, customer, variantById 
     const name = esc(v?.nameEn || v?.sku || '—');
     const unit = l.qty > 0 ? l.lineTotal / l.qty : l.unitPrice;
     const net = taxOn ? Math.round(l.lineTotal * (1 + b.vatRate / 100) * 100) / 100 : l.lineTotal;
-    return itemRow(i + 1, { name, qty: l.qty.toFixed(2), uom: esc(v?.uom || 'EACH'), unit: m(unit), net: m(l.lineTotal), vat: m(taxOn ? net - l.lineTotal : 0), vatPct: `${taxOn ? b.vatRate : 0}%`, total: m(net) }, taxOn);
+    return itemRow(i + 1, { name, qty: l.qty.toFixed(2), uom: esc(v?.uom || 'EACH'), unit: m(unit), net: m(l.lineTotal), vat: m(taxOn ? net - l.lineTotal : 0), vatPct: `${taxOn ? b.vatRate : 0}%`, total: m(net) });
   });
   const totalsHtml = totalsBlock({ subtotal: b.subtotal, discount: b.discountTotal, vat: b.vat, grand: b.total, taxOn, m, words: esc(amountToWords(b.total, cur)) });
   return paginate(rows, {
