@@ -109,8 +109,8 @@ function companyBits(settings) {
 function docHeader({ settings, title, meta, party, billingAddress = '' }) {
   const c = companyBits(settings);
   const logo = settings?.companyLogo
-    ? `<img src="${settings.companyLogo}" alt="${esc(c.company)}" style="height:96px;object-fit:contain;display:block" />`
-    : logoSvg(c.company, 88);
+    ? `<img src="${settings.companyLogo}" alt="${esc(c.company)}" style="height:130px;object-fit:contain;display:block" />`
+    : logoSvg(c.company, 118);
   // Label:value pairs. `align`='right' → label left, value right, both toward the
   // right edge (meta column: "Invoice No.    INV-00030"). 'left' → label then value.
   const pair = (k, v, align) => align === 'right'
@@ -119,7 +119,7 @@ function docHeader({ settings, title, meta, party, billingAddress = '' }) {
   return `
     <div dir="ltr" style="text-align:left">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
-        <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;flex-direction:column;gap:2px">
           <div>${logo}</div>
           <div style="font-size:22px;font-weight:900;color:${NAVY};letter-spacing:1px">${title}</div>
         </div>
