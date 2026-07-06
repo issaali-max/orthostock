@@ -123,14 +123,16 @@ function docHeader({ settings, title, meta, party, billingAddress = '' }) {
           <div>${logo}</div>
           <div style="font-size:22px;font-weight:900;color:${NAVY};letter-spacing:1px">${title}</div>
         </div>
-        <div style="text-align:right;min-width:230px">
-          ${c.cTrn ? `<div dir="ltr" style="font-size:10px;color:${NAVY};font-weight:700;margin-bottom:6px;text-align:right">TRN : ${c.cTrn}</div>` : ''}
+        ${c.cTrn ? `<div dir="ltr" style="font-size:10px;color:${NAVY};font-weight:700;text-align:right">TRN : ${c.cTrn}</div>` : ''}
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:24px;border-top:1px solid ${LINE};padding-top:8px">
+        <div style="flex:1.2">
+          ${party.map(([k, v]) => pair(k, v, 'left')).join('')}
+          ${billingAddress !== '' ? pair('Billing Address', esc(billingAddress), 'left') : ''}
+        </div>
+        <div style="min-width:230px">
           ${meta.map(([k, v]) => pair(k, v, 'right')).join('')}
         </div>
-      </div>
-      <div style="border-top:1px solid ${LINE};padding-top:8px">
-        ${party.map(([k, v]) => pair(k, v, 'left')).join('')}
-        ${billingAddress !== '' ? pair('Billing Address', esc(billingAddress), 'left') : ''}
       </div>
     </div>`;
 }
