@@ -122,8 +122,8 @@ function docHeader({ settings, title, meta, party, billingAddress = '' }) {
         <div style="display:flex;flex-direction:column;gap:0">
           <div>${logo}</div>
           <div style="font-size:20px;font-weight:800;color:#000;margin-top:-22px">${c.company}</div>
-          ${c.cTagline ? `<div style="font-size:11px;color:#000;margin-top:1px">${c.cTagline}</div>` : ''}
-          ${c.cPhone ? `<div style="font-size:11px;color:#000;margin-top:1px">Tel: ${c.cPhone}</div>` : ''}
+          ${c.cTagline ? `<div style="font-size:10.5px;color:#000;margin-top:1px">${c.cTagline}</div>` : ''}
+          ${c.cPhone ? `<div style="font-size:10.5px;color:#000;margin-top:1px">Tel: ${c.cPhone}</div>` : ''}
         </div>
       </div>
       <div style="margin-bottom:10px">
