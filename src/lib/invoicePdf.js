@@ -128,7 +128,7 @@ function docHeader({ settings, title, meta, party, billingAddress = '' }) {
       </div>
       <div style="margin-bottom:10px">
         <div style="font-size:24px;font-weight:900;color:${NAVY};letter-spacing:1px">${title}</div>
-        ${c.cTrn ? `<div style="font-size:10.5px;color:${NAVY};font-weight:700;margin-top:2px">TRN : ${c.cTrn}</div>` : ''}
+        <div style="font-size:10.5px;color:${NAVY};font-weight:700;margin-top:2px">TRN : ${c.cTrn || '—'}</div>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:24px;border-top:1px solid ${LINE};padding-top:8px">
         <div style="flex:1.2">
