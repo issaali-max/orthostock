@@ -122,6 +122,7 @@ export default function Customers() {
           <div>
             <Field label={t('name')} required><Input value={editing.name} onChange={(v) => setEditing((r) => ({ ...r, name: v }))} /></Field>
             <Field label={t('customerNameEn')}><Input value={editing.nameEn || ''} onChange={(v) => setEditing((r) => ({ ...r, nameEn: v }))} placeholder="English name" /></Field>
+            <Field label={t('customerTrn') || 'الرقم الضريبي للعميل (TRN)'}><Input value={editing.trn || ''} onChange={(v) => setEditing((r) => ({ ...r, trn: v }))} placeholder="TRN" /></Field>
             <Field label={t('type')}>
               <Select value={editing.type} onChange={(v) => setEditing((r) => ({ ...r, type: v }))}
                 options={[{ value: 'doctor', label: t('doctor') }, { value: 'center', label: t('center') }]} />

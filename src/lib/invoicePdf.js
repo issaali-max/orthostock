@@ -118,14 +118,17 @@ function docHeader({ settings, title, meta, party, billingAddress = '' }) {
     : `<div dir="ltr" style="display:flex;gap:8px;padding:1px 0;font-size:10.5px;text-align:left"><div style="color:${NAVY};font-weight:800;min-width:96px">${k}</div><div style="color:${INK};flex:1">${v || ''}</div></div>`;
   return `
     <div dir="ltr" style="text-align:left;direction:ltr">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
         <div style="display:flex;flex-direction:column;gap:0">
           <div>${logo}</div>
-          <div style="font-size:14px;font-weight:800;color:#000;margin-top:-22px">${c.company}</div>
-          ${c.cPhone ? `<div style="font-size:11px;color:#000;margin-top:1px">Tel: ${c.cPhone}</div>` : ''}
-          <div style="font-size:22px;font-weight:900;color:${NAVY};letter-spacing:1px;margin-top:8px">${title}</div>
-          ${c.cTrn ? `<div style="font-size:10px;color:${NAVY};font-weight:700;margin-top:1px">TRN : ${c.cTrn}</div>` : ''}
+          <div style="font-size:15px;font-weight:800;color:#000;margin-top:-22px">${c.company}</div>
+          ${c.cTagline ? `<div style="font-size:11px;color:#000;margin-top:1px">${c.cTagline}</div>` : ''}
         </div>
+        ${c.cPhone ? `<div style="font-size:11px;color:#000;font-weight:600">Tel: ${c.cPhone}</div>` : ''}
+      </div>
+      <div style="margin-bottom:10px">
+        <div style="font-size:24px;font-weight:900;color:${NAVY};letter-spacing:1px">${title}</div>
+        ${c.cTrn ? `<div style="font-size:10.5px;color:${NAVY};font-weight:700;margin-top:2px">TRN : ${c.cTrn}</div>` : ''}
       </div>
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:24px;border-top:1px solid ${LINE};padding-top:8px">
         <div style="flex:1.2">
@@ -281,7 +284,7 @@ function buildHtml({ invoice, items, settings, customer, variantById }) {
         <div style="width:150px;display:flex;align-items:center;justify-content:center;background:${st.bg};color:${st.fg};border-radius:6px;font-weight:900;font-size:14px;letter-spacing:1px">${st.label}</div>
       </div>`;
   return paginate(rows, {
-    settings, title: taxOn ? 'TAX INVOICE' : 'INVOICE', taxOn, totalsHtml,
+    settings, title: 'TAX INVOICE', taxOn, totalsHtml,
     billingAddress: esc(customer?.name || ''),
     party: [['Customer', custName], ['Customer TRN#', esc(customer?.trn || 'n/a')], ['Notes', esc(invoice.notes || '')]],
     meta: [['Invoice No.', esc(invoice.invoiceNumber)], ['Invoice Date', esc(invoice.date || '')], ['Page #', '']],
