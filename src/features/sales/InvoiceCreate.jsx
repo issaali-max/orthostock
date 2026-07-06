@@ -30,6 +30,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
   const [vq, setVq] = useState(''); // quick material search across ALL categories
   const [prodId, setProdId] = useState('');
   const [customerId, setCustomerId] = useState('');
+  const [custSearch, setCustSearch] = useState('');
   const [showQuickOrder, setShowQuickOrder] = useState(false);
   const [taxApplied, setTaxApplied] = useState(editing?.taxApplied != null ? !!editing.taxApplied : !!settings?.taxEnabled);
   const [custEmirate, setCustEmirate] = useState('');
@@ -184,7 +185,30 @@ export default function InvoiceCreate({ open, onClose, editing }) {
           </div>
         </div>
         <Field label={t('customer')} required>
-          <Select value={customerId} onChange={setCustomerId} placeholder={t('selectCustomer')} options={clinicOptions} />
+          <Input value={custSearch} onChange={setCustSearch} placeholder={t('searchCenterByName') || 'ابحث بالاسم (اكتب أول حروف اسم المركز)'} />
+          {custSearch.trim() && (() => {
+            const q = custSearch.trim().toLowerCase();
+            // Search within the emirate/city-filtered set: match name OR English name,
+            // preferring names that START with the query, then any that contain it.
+            const pool = clinicOptions.map((o) => { const c = customers.find((x) => x.id === o.value); return { id: o.value, name: o.label, nameEn: c?.nameEn || '' }; });
+            const starts = pool.filter((c) => c.name.toLowerCase().startsWith(q) || c.nameEn.toLowerCase().startsWith(q));
+            const contains = pool.filter((c) => !starts.includes(c) && (c.name.toLowerCase().includes(q) || c.nameEn.toLowerCase().includes(q)));
+            const hits = [...starts, ...contains].slice(0, 8);
+            if (!hits.length) return <div style={{ fontSize: 12, color: C.textMuted, padding: '6px 4px' }}>{t('noMatch') || 'لا نتائج'}</div>;
+            return (
+              <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, marginTop: 4, overflow: 'hidden' }}>
+                {hits.map((c) => (
+                  <button key={c.id} type="button" onClick={() => { setCustomerId(c.id); setCustSearch(''); }}
+                    style={{ display: 'block', width: '100%', textAlign: 'start', border: 'none', borderBottom: `1px solid ${C.surfaceAlt}`, background: customerId === c.id ? C.primary + '12' : '#fff', color: C.text, padding: '9px 11px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+                    {c.name}{c.nameEn ? <span style={{ color: C.textMuted, fontWeight: 500 }}> · {c.nameEn}</span> : ''}
+                  </button>
+                ))}
+              </div>
+            );
+          })()}
+          <div style={{ marginTop: 6 }}>
+            <Select value={customerId} onChange={setCustomerId} placeholder={t('selectCustomer')} options={clinicOptions} />
+          </div>
         </Field>
         <button type="button" onClick={() => customerId && setShowQuickOrder(true)} disabled={!customerId}
           style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, width: '100%', boxSizing: 'border-box',
