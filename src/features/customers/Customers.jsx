@@ -7,6 +7,8 @@ import { fmtCur, num, round2, fmtNum } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
 import { customerStats, clinicRating, recordInvoicePayment, recordOpeningDebtPayment, orderList, giftsToCenters, outstandingLoans, lendMaterial, returnLoan } from '../../lib/engine.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, PaymentModal, SearchBar, Select, Textarea } from '../../ui/components.jsx';
+import { BandGrid } from '../../ui/BandGrid.jsx';
+import { isGridWorthy } from '../../lib/bandGrid.js';
 
 const blank = () => ({ name: '', nameEn: '', address: '', type: 'doctor', phone: '', emirate: '', city: '', specialty: '', trn: '', workingDays: WEEKDAYS.map((d) => d.key), notes: '', isActive: true });
 
@@ -264,9 +266,9 @@ function CustomerProfile({ customer, onBack, onEdit, t, lang, displayCurrency, u
 
       {loanModal && (
         <AddLoanModal t={t} data={app.data} onClose={() => setLoanModal(false)}
-          onSave={async (loan) => {
-            // atomic: loan appended + stock decremented + movement logged (type 'loan')
-            await lendMaterial(app, customer.id, loan);
+          onSave={async (loans) => {
+            // each line lends atomically: loan appended + stock decremented + movement logged
+            for (const loan of loans) await lendMaterial(app, customer.id, loan); // eslint-disable-line no-await-in-loop
             setLoanModal(false);
           }} />
       )}
@@ -428,21 +430,83 @@ function MiniStat({ label, value, color = C.text }) {
 
 // Set/edit a customer's old (opening) debt — a balance owed before using the app, no items.
 function AddLoanModal({ t, data, onClose, onSave }) {
-  const [variantId, setVariantId] = useState('');
-  const [qty, setQty] = useState('1');
+  // Material picking mirrors the invoice: category chips → product chips → variant
+  // grid/buttons, multi-select into a small cart (variantId + qty per line).
+  const categories = (data[TABLES.categories] || []).filter((c) => c.isActive !== false);
+  const products = (data[TABLES.products] || []).filter((p) => p.isActive !== false);
+  const variants = (data[TABLES.variants] || []).filter((v) => v.isActive !== false);
+  const [catId, setCatId] = useState(() => categories.find((c) => products.some((p) => p.categoryId === c.id))?.id || categories[0]?.id || '');
+  const [prodId, setProdId] = useState('');
+  const [cart, setCart] = useState([]);          // [{ variantId, qty }]
   const [date, setDate] = useState(todayISO());
   const [note, setNote] = useState('');
-  const options = (data[TABLES.variants] || []).filter((v) => v.isActive !== false)
-    .map((v) => ({ value: v.id, label: v.nameEn || v.sku }))
-    .sort((a, b) => a.label.localeCompare(b.label));
+  const catProducts = products.filter((p) => p.categoryId === catId);
+  const variantsOfProduct = (pid) => variants.filter((v) => v.productId === pid);
+  const vById = (id) => variants.find((v) => v.id === id);
+  const inCart = (id) => cart.some((l) => l.variantId === id);
+  const toggle = (v) => setCart((c) => inCart(v.id) ? c.filter((l) => l.variantId !== v.id) : [...c, { variantId: v.id, qty: 1 }]);
+  const setQtyOf = (id, q) => setCart((c) => c.map((l) => l.variantId === id ? { ...l, qty: q } : l));
+  const valid = cart.length > 0 && cart.every((l) => num(l.qty) > 0);
+  const chip = (on, color) => ({ whiteSpace: 'nowrap', border: `1.5px solid ${on ? color : C.border}`, background: on ? color : '#fff', color: on ? '#fff' : C.textMid, borderRadius: 999, padding: '6px 12px', fontSize: 13, fontWeight: 700, cursor: 'pointer' });
   return (
     <Modal open onClose={onClose} title={`📦 ${t('addLoan') || 'إضافة أمانة'}`} dismissable
       footer={<>
         <Btn variant="ghost" onClick={onClose}>{t('cancel')}</Btn>
-        <Btn disabled={!variantId || !(num(qty) > 0)} onClick={() => onSave({ variantId, qty: num(qty), date, note: note.trim() })}>{t('save')}</Btn>
+        <Btn disabled={!valid} onClick={() => onSave(cart.map((l) => ({ variantId: l.variantId, qty: num(l.qty), date, note: note.trim() })))}>{t('save')} {cart.length > 0 ? `(${cart.length})` : ''}</Btn>
       </>}>
-      <Field label={t('material') || 'المادة'} required><Select value={variantId} onChange={setVariantId} placeholder={t('select') || 'اختر'} options={options} /></Field>
-      <Field label={t('qty')} required><Input type="number" value={qty} onChange={setQty} /></Field>
+      <div style={{ fontSize: 12, fontWeight: 700, color: C.textMid, margin: '0 0 6px' }}>{t('categories')}</div>
+      <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4, marginBottom: 8 }}>
+        {categories.map((c) => (
+          <button key={c.id} onClick={() => { setCatId(c.id); setProdId(''); }} style={chip(catId === c.id, C.primary)}>{c.icon} {c.nameEn}</button>
+        ))}
+      </div>
+      {catProducts.length > 0 && (
+        <>
+          <div style={{ fontSize: 12, fontWeight: 700, color: C.textMid, margin: '0 0 6px' }}>{t('products')}</div>
+          <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4, marginBottom: 8 }}>
+            {catProducts.map((p) => (
+              <button key={p.id} onClick={() => setProdId(p.id)} style={chip(prodId === p.id, C.primaryMid)}>{p.icon} {p.nameEn}</button>
+            ))}
+          </div>
+        </>
+      )}
+      {prodId && (
+        isGridWorthy(variantsOfProduct(prodId)) ? (
+          <div style={{ marginBottom: 10 }}>
+            <BandGrid variants={variantsOfProduct(prodId)} maxHeight={230}
+              renderCell={({ variant: v }) => {
+                if (!v) return <span style={{ color: C.textMuted, fontSize: 13 }}>·</span>;
+                const on = inCart(v.id); const stock = num(v.stockQty);
+                return (
+                  <button onClick={() => toggle(v)} title={v.nameEn || v.sku} style={{ width: '100%', minWidth: 40, border: `1.5px solid ${on ? C.success : stock <= 0 ? C.danger : C.border}`, background: on ? C.success : stock <= 0 ? '#FBECEC' : '#fff', color: on ? '#fff' : stock <= 0 ? C.danger : C.text, borderRadius: 8, padding: '7px 2px', fontSize: 12, fontWeight: 800, cursor: 'pointer' }}>{on ? '✓' : fmtNum(stock)}</button>
+                );
+              }}
+              renderOther={(v) => {
+                const on = inCart(v.id);
+                return <button key={v.id} onClick={() => toggle(v)} style={{ border: `1.5px solid ${on ? C.success : C.border}`, background: on ? C.success : '#fff', color: on ? '#fff' : C.text, borderRadius: 8, padding: '6px 10px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}>{on ? '✓ ' : ''}{v.nameEn || v.sku}</button>;
+              }} />
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+            {variantsOfProduct(prodId).map((v) => {
+              const on = inCart(v.id);
+              return <button key={v.id} onClick={() => toggle(v)} style={{ border: `1.5px solid ${on ? C.success : C.border}`, background: on ? C.success : '#fff', color: on ? '#fff' : C.text, borderRadius: 8, padding: '6px 10px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}>{on ? '✓ ' : ''}{v.nameEn || v.sku} <span style={{ opacity: .7 }}>({fmtNum(num(v.stockQty))})</span></button>;
+            })}
+          </div>
+        )
+      )}
+      {cart.length > 0 && (
+        <div style={{ display: 'grid', gap: 6, marginBottom: 10 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: C.textMid }}>{t('materialLoans') || 'الأمانات'} ({cart.length})</div>
+          {cart.map((l) => (
+            <div key={l.variantId} style={{ display: 'flex', alignItems: 'center', gap: 8, background: C.surfaceAlt, borderRadius: 10, padding: '6px 10px' }}>
+              <div style={{ flex: 1, fontSize: 12.5, fontWeight: 700, color: C.text, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{vById(l.variantId)?.nameEn || vById(l.variantId)?.sku}</div>
+              <Input type="number" value={String(l.qty)} onChange={(v) => setQtyOf(l.variantId, v)} style={{ width: 74, textAlign: 'center' }} />
+              <button onClick={() => setCart((c) => c.filter((x) => x.variantId !== l.variantId))} style={{ border: 'none', background: 'none', color: C.danger, fontSize: 16, cursor: 'pointer' }}>🗑</button>
+            </div>
+          ))}
+        </div>
+      )}
       <Field label={t('date')}><Input type="date" value={date} onChange={setDate} /></Field>
       <Field label={t('notes')}><Input value={note} onChange={setNote} placeholder={t('optional') || 'اختياري'} /></Field>
     </Modal>
