@@ -114,9 +114,9 @@ function docHeader({ settings, title, meta, party, billingAddress = '', showTrn 
   // Label:value pairs. `align`='right' → label left, value right, both toward the
   // right edge (meta column: "Invoice No.    INV-00030"). 'left' → label then value.
   const pair = (k, v, align) => align === 'right'
-    ? `<div dir="ltr" style="display:flex;justify-content:flex-end;gap:10px;padding:1px 0;font-size:10.5px"><div style="color:${NAVY};font-weight:800;text-align:left">${k}</div><div style="color:${INK};min-width:96px;text-align:right">${v || ''}</div></div>`
-    : `<div dir="ltr" style="display:flex;gap:8px;padding:1px 0;font-size:10.5px;text-align:left"><div style="color:${NAVY};font-weight:800;min-width:96px">${k}</div><div style="color:${INK};flex:1">${v || ''}</div></div>`;
-  const hRow = (k, v) => `<div dir="ltr" style="display:flex;gap:8px;font-size:10.5px;line-height:1.55"><div style="color:${NAVY};font-weight:800;min-width:70px">${k}</div><div style="color:#000">${v || ''}</div></div>`;
+    ? `<div dir="ltr" style="display:flex;justify-content:flex-end;gap:10px;padding:1px 0;font-size:10.5px"><div style="color:${NAVY};font-weight:800;text-align:left">${k}</div><div style="color:${INK};min-width:96px;text-align:right"><bdi>${v || ''}</bdi></div></div>`
+    : `<div dir="ltr" style="display:flex;gap:8px;padding:1px 0;font-size:10.5px;text-align:left"><div style="color:${NAVY};font-weight:800;min-width:96px">${k}</div><div style="color:${INK};flex:1"><bdi>${v || ''}</bdi></div></div>`;
+  const hRow = (k, v) => `<div dir="ltr" style="display:flex;gap:8px;font-size:10.5px;line-height:1.55"><div style="color:${NAVY};font-weight:800;min-width:70px">${k}</div><div style="color:#000"><bdi>${v || ''}</bdi></div></div>`;
   return `
     <div dir="ltr" style="text-align:left;direction:ltr">
       <div style="margin-bottom:8px">
@@ -124,7 +124,7 @@ function docHeader({ settings, title, meta, party, billingAddress = '', showTrn 
         <div style="font-size:15px;font-weight:800;color:#000;margin-top:-22px;margin-bottom:2px">${c.company}</div>
         ${c.cTagline ? hRow('Supplies', c.cTagline) : ''}
         ${c.cPhone ? hRow('Tel', c.cPhone) : ''}
-        ${showTrn ? hRow('TRN', c.cTrn || '—') : ''}
+        ${hRow('TRN', showTrn ? (c.cTrn || '') : '')}
       </div>
       <div style="margin-bottom:10px">
         <div style="font-size:34px;font-weight:900;color:${NAVY};letter-spacing:1.5px;line-height:1.05">${title}</div>
@@ -286,7 +286,7 @@ function buildHtml({ invoice, items, settings, customer, variantById }) {
     settings, title: 'TAX INVOICE', taxOn, totalsHtml,
     billingAddress: esc(customer?.address || ''),
     showTrn: invoice.showTrn !== false,
-    party: [['Customer', custName], ...(invoice.showTrn !== false ? [['Customer TRN#', esc(customer?.trn || 'n/a')]] : []), ['Notes', esc(invoice.notes || '')]],
+    party: [['Customer', custName], ['Customer TRN#', invoice.showTrn !== false ? esc(customer?.trn || '') : ''], ['Notes', esc(invoice.notes || '')]],
     meta: [['Invoice No.', esc(invoice.invoiceNumber)], ['Invoice Date', esc(invoice.date || '')], ['Page #', '']],
   });
 }
