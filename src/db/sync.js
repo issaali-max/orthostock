@@ -19,7 +19,7 @@ import { idbGetAll, idbBulkPut, idbClear, idbDelete, outboxAll, outboxDelete, ou
 const MAX_OP_TRIES = 6; // after this many failed attempts, drop a stuck outbox op
 const SYNC_INTERVAL_MS = 25000; // periodic flush+pull cadence (your edits still push instantly via nudgeSync ~1.2s; this only governs how often the app pulls others' changes while idle)
 const SKEW_BUFFER_MS = 5 * 60 * 1000; // re-fetch last 5 min each pull to survive device clock skew
-const FULL_SYNC_INTERVAL_MS = 150000; // every 2.5 min do a FULL reconcile (catches rows the incremental window skipped under large clock skew)
+const FULL_SYNC_INTERVAL_MS = 600000; // every 10 min do a FULL reconcile (safety net for rows the incremental window skipped under large clock skew). Was 2.5 min; lengthened to cut idle egress. Focus/open/manual still force an immediate full reconcile, so returning to the app is always up to date.
 
 // Supabase connection. Reads Vercel env vars first; falls back to the project's
 // own values so sync works out-of-the-box without any Vercel configuration.
@@ -399,7 +399,12 @@ function startRealtime() {
       .channel('orthostock-sync')
       .on('postgres_changes', { event: '*', schema: 'public' }, () => {
         clearTimeout(_rtTimer);
-        _rtTimer = setTimeout(() => cycle({ full: true, force: true }), 400); // a cloud change happened → full reconcile so skew can't hide it (debounced+coalesced)
+        // A cloud change happened → pull it down cheaply with an INCREMENTAL pull
+        // (only rows changed since the watermark, minus the skew buffer). This catches
+        // the change within a moment at a fraction of the egress of a full snapshot.
+        // The periodic FULL reconcile (and every focus/open) still guarantees nothing
+        // is permanently missed under large clock skew. Debounced + coalesced.
+        _rtTimer = setTimeout(() => cycle({ full: false, force: true }), 500);
       })
       .subscribe();
   } catch (e) { console.warn('[realtime] unavailable, relying on polling', e); }
@@ -443,14 +448,27 @@ export function startSync(onPulled) {
   // catches a collaborator's changes even if clock skew slipped them past the incremental
   // window. The frequent 25s background poll stays incremental (cheap); a slower 2.5-min
   // timer does a full reconcile as a safety net for an app left open in the foreground.
-  const kickFull = () => cycle({ full: true, force: true });   // always attempt — pull self-marks online from real reachability
+  // focus + visibilitychange both fire on a single app switch, and a user flicking
+  // between apps can trigger many in a row. A full reconcile re-scans every table, so
+  // firing it on each of those is the main avoidable egress cost. Coalesce: the first
+  // full kick runs a full reconcile; any further full kick within the cooldown does a
+  // cheap incremental pull instead (still catches changes). A genuine reopen after the
+  // cooldown gets a fresh full reconcile, so cross-device/skew safety is unchanged.
+  const FULL_KICK_COOLDOWN_MS = 60000;
+  let _lastFullKick = 0;
+  const kickFull = () => {
+    const now = Date.now();
+    if (now - _lastFullKick < FULL_KICK_COOLDOWN_MS) { if (state.online) cycle({ full: false, force: true }); return; }
+    _lastFullKick = now;
+    cycle({ full: true, force: true });   // always attempt — pull self-marks online from real reachability
+  };
   const kickInc = () => { if (state.online) cycle({ full: false }); };
   window.addEventListener('online', () => { markOnline(true); kickFull(); });
   window.addEventListener('offline', () => markOnline(false));  // hint only; the next forced kick re-verifies
   window.addEventListener('focus', kickFull);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) kickFull(); });
   setInterval(kickInc, SYNC_INTERVAL_MS);          // frequent incremental poll
-  setInterval(kickFull, FULL_SYNC_INTERVAL_MS);    // periodic full reconcile (safety net)
+  setInterval(() => { _lastFullKick = Date.now(); cycle({ full: true, force: true }); }, FULL_SYNC_INTERVAL_MS); // periodic TRUE full reconcile (safety net, bypasses the focus cooldown)
   startRealtime();                                 // instant cross-device propagation
   refreshPending();
   kickFull();
