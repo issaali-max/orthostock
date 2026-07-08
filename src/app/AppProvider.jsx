@@ -19,6 +19,7 @@ const CORE_TABLES = [
   TABLES.externalDebts,
   TABLES.auditLog, TABLES.supplierPayments,
   TABLES.orders, TABLES.orderItems, TABLES.visits, TABLES.customerPrices,
+  TABLES.projects, TABLES.otherDebts,
 ];
 
 export function AppProvider({ children }) {

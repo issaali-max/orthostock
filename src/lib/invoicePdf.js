@@ -106,7 +106,7 @@ function companyBits(settings) {
 
 // The header that repeats on every page: logo + company (left), big DOC TITLE + TRN
 // (right), then a two-column meta band (customer block | doc-number block).
-function docHeader({ settings, title, meta, party, billingAddress = '' }) {
+function docHeader({ settings, title, meta, party, billingAddress = '', showTrn = true }) {
   const c = companyBits(settings);
   const logo = settings?.companyLogo
     ? `<img src="${settings.companyLogo}" alt="${esc(c.company)}" style="height:170px;object-fit:contain;display:block" />`
@@ -124,7 +124,7 @@ function docHeader({ settings, title, meta, party, billingAddress = '' }) {
         <div style="font-size:15px;font-weight:800;color:#000;margin-top:-22px;margin-bottom:2px">${c.company}</div>
         ${c.cTagline ? hRow('Supplies', c.cTagline) : ''}
         ${c.cPhone ? hRow('Tel', c.cPhone) : ''}
-        ${hRow('TRN', c.cTrn || '—')}
+        ${showTrn ? hRow('TRN', c.cTrn || '—') : ''}
       </div>
       <div style="margin-bottom:10px">
         <div style="font-size:34px;font-weight:900;color:${NAVY};letter-spacing:1.5px;line-height:1.05">${title}</div>
@@ -132,7 +132,7 @@ function docHeader({ settings, title, meta, party, billingAddress = '' }) {
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:24px;border-top:1px solid ${LINE};padding-top:8px">
         <div style="flex:1.2">
           ${party.map(([k, v]) => pair(k, v, 'left')).join('')}
-          ${billingAddress !== '' ? pair('Billing Address', esc(billingAddress), 'left') : ''}
+          ${pair('Billing Address', esc(billingAddress), 'left')}
         </div>
         <div style="min-width:230px">
           ${meta.map(([k, v]) => pair(k, v, 'right')).join('')}
@@ -232,7 +232,7 @@ function totalsBlock({ subtotal, discount, vat, grand, taxOn, m, words }) {
 // and header+footer repeat on every page with correct Page X of Y.
 const ROWS_FIRST = 34;   // matches the reference density (≈37 on page 1)
 const ROWS_NEXT = 42;    // continuation pages have no meta band
-function paginate(rowsHtml, { settings, title, meta, party, taxOn, totalsHtml, billingAddress = "" }) {
+function paginate(rowsHtml, { settings, title, meta, party, taxOn, totalsHtml, billingAddress = "", showTrn = true }) {
   const pages = [];
   let idx = 0;
   while (idx < rowsHtml.length || pages.length === 0) {
@@ -246,7 +246,7 @@ function paginate(rowsHtml, { settings, title, meta, party, taxOn, totalsHtml, b
     const metaWithPage = meta.map(([k, v]) => (k === 'Page #' ? [k, `${i + 1} of ${count}`] : [k, v]));
     return `
     <div class="page" dir="ltr" style="width:794px;min-height:1123px;box-sizing:border-box;background:#fff;color:${INK};font-family:Arial,Helvetica,sans-serif;padding:24px 26px;display:flex;flex-direction:column;text-align:left;direction:ltr;${last ? '' : 'page-break-after:always;'}">
-      ${docHeader({ settings, title, meta: metaWithPage, party, billingAddress })}
+      ${docHeader({ settings, title, meta: metaWithPage, party, billingAddress, showTrn })}
       <table dir="ltr" style="width:100%;border-collapse:collapse;margin-top:10px;direction:ltr">
         <thead>${itemsHead()}</thead>
         <tbody>${rows.join('')}</tbody>
@@ -284,8 +284,9 @@ function buildHtml({ invoice, items, settings, customer, variantById }) {
       </div>`;
   return paginate(rows, {
     settings, title: 'TAX INVOICE', taxOn, totalsHtml,
-    billingAddress: esc(customer?.name || ''),
-    party: [['Customer', custName], ['Customer TRN#', esc(customer?.trn || 'n/a')], ['Notes', esc(invoice.notes || '')]],
+    billingAddress: esc(customer?.address || ''),
+    showTrn: invoice.showTrn !== false,
+    party: [['Customer', custName], ...(invoice.showTrn !== false ? [['Customer TRN#', esc(customer?.trn || 'n/a')]] : []), ['Notes', esc(invoice.notes || '')]],
     meta: [['Invoice No.', esc(invoice.invoiceNumber)], ['Invoice Date', esc(invoice.date || '')], ['Page #', '']],
   });
 }
@@ -307,7 +308,7 @@ function buildQuotationHtml({ quotation, items, settings, customer, variantById 
   const totalsHtml = totalsBlock({ subtotal: b.subtotal, discount: b.discountTotal, vat: b.vat, grand: b.total, taxOn, m, words: esc(amountToWords(b.total, cur)) });
   return paginate(rows, {
     settings, title: 'QUOTATION', taxOn, totalsHtml,
-    billingAddress: esc(customer?.name || ''),
+    billingAddress: esc(customer?.address || ''),
     party: [['Customer', custName], ['Customer TRN#', esc(customer?.trn || 'n/a')], ['Notes', esc(quotation.notes || '')]],
     meta: [['Quotation No.', esc(quotation.quotationNumber || '—')], ['Quotation Date', esc(quotation.date || '')], ['Quote Validity', `${validity} Days`], ['Page #', '']],
   });

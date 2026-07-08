@@ -33,6 +33,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
   const [custSearch, setCustSearch] = useState('');
   const [showQuickOrder, setShowQuickOrder] = useState(false);
   const [taxApplied, setTaxApplied] = useState(editing?.taxApplied != null ? !!editing.taxApplied : !!settings?.taxEnabled);
+  const [showTrn, setShowTrn] = useState(editing?.showTrn != null ? !!editing.showTrn : true);
   const [custEmirate, setCustEmirate] = useState('');
   const [custCity, setCustCity] = useState('');
   // city list follows the chosen emirate (fixed Arabic cities), else every city
@@ -120,7 +121,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
         invoiceData: {
           invoiceNumber: number, customerId: customerId || null, date,
           subtotal: netSubtotal, discountTotal: round2(invDisc), total: totals.total,
-          paidAmount: paid, paymentStatus, paymentMethod, status: 'active', currency: 'AED', notes: '', payments, taxApplied,
+          paidAmount: paid, paymentStatus, paymentMethod, status: 'active', currency: 'AED', notes: '', payments, taxApplied, showTrn,
         },
         // One cart line can carry BOTH a paid qty and a gift qty for the same material —
         // split here into a normal item (priced) and a gift item (price 0, cost still charged).
@@ -385,6 +386,12 @@ export default function InvoiceCreate({ open, onClose, editing }) {
             {t('applyVat')} {num(settings?.taxRate) || 5}%
           </label>
           {taxApplied && <span style={{ fontWeight: 700 }}>{fmtCur(totals.vat, displayCurrency, usdRate)}</span>}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', padding: '4px 0' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: C.textMid, cursor: 'pointer' }}>
+            <input type="checkbox" checked={showTrn} onChange={(e) => setShowTrn(e.target.checked)} />
+            {t('showTrnOnInvoice') || 'إظهار TRN على الفاتورة (الشركة والعميل)'}
+          </label>
         </div>
         <Row label={t('finalTotal')} value={fmtCur(totals.total, displayCurrency, usdRate)} bold />
         <div style={{ borderTop: `1px dashed ${C.border}`, margin: '6px 0' }} />
