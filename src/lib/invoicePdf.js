@@ -116,16 +116,15 @@ function docHeader({ settings, title, meta, party, billingAddress = '' }) {
   const pair = (k, v, align) => align === 'right'
     ? `<div dir="ltr" style="display:flex;justify-content:flex-end;gap:10px;padding:1px 0;font-size:10.5px"><div style="color:${NAVY};font-weight:800;text-align:left">${k}</div><div style="color:${INK};min-width:96px;text-align:right">${v || ''}</div></div>`
     : `<div dir="ltr" style="display:flex;gap:8px;padding:1px 0;font-size:10.5px;text-align:left"><div style="color:${NAVY};font-weight:800;min-width:96px">${k}</div><div style="color:${INK};flex:1">${v || ''}</div></div>`;
+  const hRow = (k, v) => `<div dir="ltr" style="display:flex;gap:8px;font-size:10.5px;line-height:1.55"><div style="color:${NAVY};font-weight:800;min-width:70px">${k}</div><div style="color:#000">${v || ''}</div></div>`;
   return `
     <div dir="ltr" style="text-align:left;direction:ltr">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+      <div style="margin-bottom:8px">
         <div>${logo}</div>
-        <div style="text-align:right">
-          <div style="font-size:14px;font-weight:800;color:#000">${c.company}</div>
-          ${c.cTagline ? `<div style="font-size:10px;color:#000;margin-top:1px">${c.cTagline}</div>` : ''}
-          ${c.cPhone ? `<div style="font-size:10px;color:#000;margin-top:1px">Tel: ${c.cPhone}</div>` : ''}
-          <div style="font-size:10px;color:${NAVY};font-weight:700;margin-top:1px">TRN : ${c.cTrn || '—'}</div>
-        </div>
+        <div style="font-size:15px;font-weight:800;color:#000;margin-top:-22px;margin-bottom:2px">${c.company}</div>
+        ${c.cTagline ? hRow('Supplies', c.cTagline) : ''}
+        ${c.cPhone ? hRow('Tel', c.cPhone) : ''}
+        ${hRow('TRN', c.cTrn || '—')}
       </div>
       <div style="margin-bottom:10px">
         <div style="font-size:34px;font-weight:900;color:${NAVY};letter-spacing:1.5px;line-height:1.05">${title}</div>
