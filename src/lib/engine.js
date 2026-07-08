@@ -1082,6 +1082,49 @@ export function outstandingLoans(customer) {
   return (customer?.materialLoans || []).filter((l) => num(l.qty) - num(l.returnedQty) > 0.0001)
     .map((l) => ({ ...l, remaining: round2(num(l.qty) - num(l.returnedQty)) }));
 }
+// Lend material to a doctor ATOMICALLY: append the loan to the customer row,
+// decrement variant stock, and write a stockMovements row (type 'loan') — the same
+// single-transaction pattern commitInvoice uses, so stock stays the source of truth.
+export async function lendMaterial(app, customerId, { variantId, qty, date, note }) {
+  const data = app.data;
+  const cust = (data[TABLES.customers] || []).find((c) => c.id === customerId);
+  const v = (data[TABLES.variants] || []).find((x) => x.id === variantId);
+  if (!cust || !v) throw new Error('customer/variant not found');
+  const q = round2(num(qty));
+  const loan = { id: `ln_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, variantId, qty: q, returnedQty: 0, date: date || new Date().toISOString().slice(0, 10), note: (note || '').trim() };
+  const after = round2(num(v.stockQty) - q);   // may go negative (late-purchase resilience, like sales)
+  await db.atomicMutations([
+    { op: 'update', table: TABLES.customers, id: customerId, patch: { materialLoans: [...(cust.materialLoans || []), loan] } },
+    { op: 'insert', table: TABLES.stockMovements, row: { variantId, type: 'loan', qtyChange: -q, qtyAfter: after, refType: 'loan', refId: loan.id } },
+    { op: 'update', table: TABLES.variants, id: variantId, patch: { stockQty: after } },
+  ]);
+  await Promise.all([app.refresh(TABLES.customers), app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements)]);
+  nudgeSync();
+  return loan;
+}
+
+// Return a loan ATOMICALLY: mark returnedQty=qty on the customer row, increment the
+// variant stock back, and write a compensating stockMovements row (type 'loanReturn').
+export async function returnLoan(app, customerId, loanId) {
+  const data = app.data;
+  const cust = (data[TABLES.customers] || []).find((c) => c.id === customerId);
+  const loan = (cust?.materialLoans || []).find((l) => l.id === loanId);
+  if (!cust || !loan) throw new Error('loan not found');
+  const remaining = round2(num(loan.qty) - num(loan.returnedQty));
+  if (remaining <= 0) return;
+  const v = (data[TABLES.variants] || []).find((x) => x.id === loan.variantId);
+  const nextLoans = (cust.materialLoans || []).map((l) => l.id === loanId ? { ...l, returnedQty: num(l.qty) } : l);
+  const specs = [{ op: 'update', table: TABLES.customers, id: customerId, patch: { materialLoans: nextLoans } }];
+  if (v) {
+    const after = round2(num(v.stockQty) + remaining);
+    specs.push({ op: 'insert', table: TABLES.stockMovements, row: { variantId: v.id, type: 'loanReturn', qtyChange: remaining, qtyAfter: after, refType: 'loan', refId: loanId } });
+    specs.push({ op: 'update', table: TABLES.variants, id: v.id, patch: { stockQty: after } });
+  }
+  await db.atomicMutations(specs);
+  await Promise.all([app.refresh(TABLES.customers), app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements)]);
+  nudgeSync();
+}
+
 export function customersWithLoans(data) {
   return (data[TABLES.customers] || []).filter((c) => c.isActive !== false && outstandingLoans(c).length > 0);
 }

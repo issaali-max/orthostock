@@ -5,7 +5,7 @@ import { C, WEEKDAYS, emirateOptions, emirateLabel, citiesOfEmirate, allCities, 
 import { byInvoiceNewest } from '../../lib/sort.js';
 import { fmtCur, num, round2, fmtNum } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
-import { customerStats, clinicRating, recordInvoicePayment, recordOpeningDebtPayment, orderList, giftsToCenters, outstandingLoans } from '../../lib/engine.js';
+import { customerStats, clinicRating, recordInvoicePayment, recordOpeningDebtPayment, orderList, giftsToCenters, outstandingLoans, lendMaterial, returnLoan } from '../../lib/engine.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, PaymentModal, SearchBar, Select, Textarea } from '../../ui/components.jsx';
 
 const blank = () => ({ name: '', nameEn: '', address: '', type: 'doctor', phone: '', emirate: '', city: '', specialty: '', trn: '', workingDays: WEEKDAYS.map((d) => d.key), notes: '', isActive: true });
@@ -251,9 +251,8 @@ function CustomerProfile({ customer, onBack, onEdit, t, lang, displayCurrency, u
                         <div style={{ fontSize: 10.5, color: C.textMuted }}>{fmtDate(l.date, lang)}{l.note ? ` · ${l.note}` : ''}</div>
                       </div>
                       <button onClick={async () => {
-                        if (!window.confirm(t('confirmLoanReturned') || 'تأكيد إرجاع/تسوية هذه الأمانة؟')) return;
-                        const next = (live.materialLoans || []).map((x) => x.id === l.id ? { ...x, returnedQty: num(x.qty) } : x);
-                        await app.updateRow(TABLES.customers, customer.id, { materialLoans: next });
+                        if (!window.confirm(t('confirmLoanReturned') || 'تأكيد إرجاع هذه الأمانة؟ ستعود الكمية إلى المخزون.')) return;
+                        await returnLoan(app, customer.id, l.id);   // atomic: loan settled + stock restored + movement logged
                       }} style={{ border: `1px solid ${C.border}`, background: '#fff', color: C.success, borderRadius: 8, padding: '5px 10px', fontSize: 11.5, fontWeight: 800, cursor: 'pointer', flexShrink: 0 }}>✓ {t('returned') || 'أُرجعت'}</button>
                     </div>
                   ))}
@@ -266,8 +265,8 @@ function CustomerProfile({ customer, onBack, onEdit, t, lang, displayCurrency, u
       {loanModal && (
         <AddLoanModal t={t} data={app.data} onClose={() => setLoanModal(false)}
           onSave={async (loan) => {
-            const next = [...(live.materialLoans || []), loan];
-            await app.updateRow(TABLES.customers, customer.id, { materialLoans: next });
+            // atomic: loan appended + stock decremented + movement logged (type 'loan')
+            await lendMaterial(app, customer.id, loan);
             setLoanModal(false);
           }} />
       )}
@@ -440,10 +439,7 @@ function AddLoanModal({ t, data, onClose, onSave }) {
     <Modal open onClose={onClose} title={`📦 ${t('addLoan') || 'إضافة أمانة'}`} dismissable
       footer={<>
         <Btn variant="ghost" onClick={onClose}>{t('cancel')}</Btn>
-        <Btn disabled={!variantId || !(num(qty) > 0)} onClick={() => onSave({
-          id: `ln_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
-          variantId, qty: num(qty), returnedQty: 0, date, note: note.trim(),
-        })}>{t('save')}</Btn>
+        <Btn disabled={!variantId || !(num(qty) > 0)} onClick={() => onSave({ variantId, qty: num(qty), date, note: note.trim() })}>{t('save')}</Btn>
       </>}>
       <Field label={t('material') || 'المادة'} required><Select value={variantId} onChange={setVariantId} placeholder={t('select') || 'اختر'} options={options} /></Field>
       <Field label={t('qty')} required><Input type="number" value={qty} onChange={setQty} /></Field>
