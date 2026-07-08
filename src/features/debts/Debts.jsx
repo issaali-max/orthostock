@@ -4,7 +4,7 @@ import { C, TABLES } from '../../lib/constants.js';
 import { fmtCur, fmtNum, num, round2 } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
 import { PageHeader, Card, Btn, Field, Input, Select, Modal, Badge } from '../../ui/components.jsx';
-import { customerStats, supplierDebt } from '../../lib/engine.js';
+import { customerStats, supplierDebt, customersWithLoans, outstandingLoans } from '../../lib/engine.js';
 
 // Net of a personal debt: +lend (they owe me) − collect (I owe / they repaid). > 0 they owe
 // me, < 0 I owe them. Recording "I owe X" with no prior loan = a single collect entry.
@@ -35,6 +35,10 @@ export default function Debts() {
       .filter((x) => x.s.debt > 0.005)
       .sort((a, b) => b.s.debt - a.s.debt);
   }, [data, invoices, items]);
+
+  // ── Material loans (أمانات): customers holding products on trust ──
+  const loanCustomers = useMemo(() => customersWithLoans(data), [data]);
+  const variantName = (id) => { const v = (data[TABLES.variants] || []).find((x) => x.id === id); return v ? (v.nameEn || v.sku) : '—'; };
 
   // ── Personal debts ──
   const people = (data[TABLES.externalDebts] || []).filter((p) => p.isActive !== false);
@@ -118,7 +122,25 @@ export default function Debts() {
                 </Card>
               ))}
             </Section>
-          ) : (
+          ) : null}
+          {meTab === 'doctors' && loanCustomers.length > 0 && (
+            <Section title={`📦 ${t('materialLoans') || 'أمانات / عينات'}`} count={loanCustomers.length} total={`${loanCustomers.reduce((s2, c) => s2 + outstandingLoans(c).length, 0)} ${t('items') || 'مواد'}`} color={C.warning}>
+              {loanCustomers.map((c) => (
+                <Card key={c.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                  <span style={{ fontSize: 18 }}>📦</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 800, color: C.text, fontSize: 13.5 }}>{c.name}</div>
+                    <div style={{ display: 'grid', gap: 2, marginTop: 4 }}>
+                      {outstandingLoans(c).map((l) => (
+                        <div key={l.id} style={{ fontSize: 11.5, color: C.textMid }}>• {variantName(l.variantId)} <b style={{ color: C.warning }}>× {fmtNum(l.remaining)}</b>{l.note ? ` · ${l.note}` : ''}</div>
+                      ))}
+                    </div>
+                  </div>
+                </Card>
+              ))}
+            </Section>
+          )}
+          {meTab !== 'doctors' && (
             <Section title={`🤝 ${t('personalDebts')}`} count={peopleOwe.length} total={fmtCur(peopleOweTotal, displayCurrency, usdRate)} color={C.success}>
               {peopleOwe.length === 0 ? <EmptyHint text={t('noData')} /> : peopleOwe.map((x) => (
                 <PersonRow key={x.p.id} p={x.p} color={C.success} amount={fmtCur(aed(x.net, x.p.currency), displayCurrency, usdRate)} onTap={() => setPerson(x.p)} />

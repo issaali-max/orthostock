@@ -94,3 +94,17 @@ console.log('SIMPLE-PNL / MERGE / PROJECTS TESTS PASSED');
   console.log('✓ UNH مرة واحدة، والصفقة المكررة لا تستنزف النقد');
 }
 console.log('ORPHAN-LOT CASH TEST PASSED');
+
+// ── Material loans (أمانات) ──
+const { outstandingLoans } = await import('../src/lib/engine.js');
+const loanCust = { materialLoans: [
+  { id: 'a', variantId: 'v1', qty: 5, returnedQty: 0, date: '2026-07-01' },
+  { id: 'b', variantId: 'v2', qty: 3, returnedQty: 3, date: '2026-07-02' },  // fully returned
+  { id: 'c', variantId: 'v3', qty: 2, returnedQty: 0.5, date: '2026-07-03' },
+] };
+const outL = outstandingLoans(loanCust);
+if (outL.length !== 2) { console.error(`✗ loans: expected 2 outstanding, got ${outL.length}`); process.exit(1); }
+nq(outL[0].remaining, 5, 'أمانة كاملة متبقية 5');
+nq(outL[1].remaining, 1.5, 'أمانة جزئية متبقية 1.5');
+if (outstandingLoans({}).length !== 0) { console.error('✗ loans: empty customer should have none'); process.exit(1); }
+console.log('✓ outstandingLoans: يحسب المتبقي ويستبعد المُرجَع');

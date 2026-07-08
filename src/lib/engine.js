@@ -1072,6 +1072,20 @@ export async function mergeDuplicateSecurities(app) {
   return plan.length;
 }
 
+// ── Material loans (أمانات/عينات): products left with a doctor on trust ──
+// Stored on the customer row (customer.materialLoans = [{id, variantId, qty,
+// returnedQty, date, note}]) exactly like the opening-debt pattern — no new table,
+// syncs with the customer. A loan is outstanding while returnedQty < qty.
+// NOTE: loans are a trust-tracking list only; they do NOT move stock (use a normal
+// invoice/gift when the doctor keeps or buys the items).
+export function outstandingLoans(customer) {
+  return (customer?.materialLoans || []).filter((l) => num(l.qty) - num(l.returnedQty) > 0.0001)
+    .map((l) => ({ ...l, remaining: round2(num(l.qty) - num(l.returnedQty)) }));
+}
+export function customersWithLoans(data) {
+  return (data[TABLES.customers] || []).filter((c) => c.isActive !== false && outstandingLoans(c).length > 0);
+}
+
 // Projects (off-market investments) valued in AED, USD ones converted at the rate.
 export function projectsTotalAED(data, rate) {
   return round2((data[TABLES.projects] || []).filter((p) => p.isActive !== false)

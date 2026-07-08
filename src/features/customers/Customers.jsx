@@ -3,9 +3,9 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGri
 import { useApp } from '../../app/AppProvider.jsx';
 import { C, WEEKDAYS, emirateOptions, emirateLabel, citiesOfEmirate, allCities, TABLES } from '../../lib/constants.js';
 import { byInvoiceNewest } from '../../lib/sort.js';
-import { fmtCur, num, round2 } from '../../lib/money.js';
+import { fmtCur, num, round2, fmtNum } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
-import { customerStats, clinicRating, recordInvoicePayment, recordOpeningDebtPayment, orderList, giftsToCenters } from '../../lib/engine.js';
+import { customerStats, clinicRating, recordInvoicePayment, recordOpeningDebtPayment, orderList, giftsToCenters, outstandingLoans } from '../../lib/engine.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, PaymentModal, SearchBar, Select, Textarea } from '../../ui/components.jsx';
 
 const blank = () => ({ name: '', nameEn: '', address: '', type: 'doctor', phone: '', emirate: '', city: '', specialty: '', trn: '', workingDays: WEEKDAYS.map((d) => d.key), notes: '', isActive: true });
@@ -20,6 +20,7 @@ export default function Customers() {
   const [emirateFilter, setEmirateFilter] = useState('');
   const [cityFilter, setCityFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('');  // '' | doctor | center
+  const [loanFilter, setLoanFilter] = useState(false); // only customers holding material loans
 
   const invoices = data[TABLES.invoices] || [];
   const items = data[TABLES.invoiceItems] || [];
@@ -31,6 +32,7 @@ export default function Customers() {
     if (emirateFilter) rows = rows.filter((r) => r.emirate === emirateFilter);
     if (cityFilter) rows = rows.filter((r) => (r.city || '').trim() === cityFilter);
     if (typeFilter) rows = rows.filter((r) => r.type === typeFilter);
+    if (loanFilter) rows = rows.filter((r) => outstandingLoans(r).length > 0);
     const withStats = rows.map((c) => {
       const st = customerStats(invoices, items, c.id, c);
       const margin = st.revenue > 0 ? (st.profit / st.revenue) * 100 : 0;
@@ -48,7 +50,7 @@ export default function Customers() {
       city: (a, b) => (a.emirate || '').localeCompare(b.emirate || '') || (a.name || '').localeCompare(b.name || ''),
     }[sortBy] || (() => 0);
     return withStats.sort(cmp);
-  }, [data[TABLES.customers], q, emirateFilter, cityFilter, typeFilter, sortBy, invoices, items]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [data[TABLES.customers], q, emirateFilter, cityFilter, typeFilter, loanFilter, sortBy, invoices, items]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = async () => {
     const r = editing;
@@ -91,6 +93,10 @@ export default function Customers() {
               { value: 'inactive', label: t('sortInactive') },
             ]} />
         </div>
+        <button onClick={() => setLoanFilter((v) => !v)}
+          style={{ flex: '1 1 45%', border: `1.5px solid ${loanFilter ? C.warning : C.border}`, background: loanFilter ? C.warning + '15' : '#fff', color: loanFilter ? C.warning : C.textMid, borderRadius: 10, padding: '9px 10px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer' }}>
+          📦 {t('loansFilter') || 'عليه أمانات مواد'}
+        </button>
       </div>
 
       {list.length === 0 ? <EmptyState icon="🧑‍⚕️" text={q ? t('searchEmpty') : t('noData')} /> : (
@@ -101,7 +107,7 @@ export default function Customers() {
               <Card key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }} onClick={() => setViewing(c)}>
                 <div style={{ width: 44, height: 44, borderRadius: 999, background: C.primary + '18', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>{c.type === 'center' ? '🏥' : '🧑‍⚕️'}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 700, color: C.text }}>{c.name}</div>
+                  <div style={{ fontWeight: 700, color: C.text }}>{c.name}{outstandingLoans(c).length > 0 && <span title="أمانات مواد" style={{ marginInlineStart: 6 }}>📦</span>}</div>
                   <div style={{ fontSize: 11, color: C.textMuted }}>{[c.specialty, emirateLabel(c.emirate, lang)].filter(Boolean).join(' · ') || '—'}</div>
                 </div>
                 <div style={{ textAlign: 'end', flexShrink: 0 }}>
@@ -173,6 +179,7 @@ function CustomerProfile({ customer, onBack, onEdit, t, lang, displayCurrency, u
   const variants = app.data[TABLES.variants] || [];
   const [payFor, setPayFor] = useState(null);
   const [debtModal, setDebtModal] = useState(null);   // 'set' | 'pay' | null
+  const [loanModal, setLoanModal] = useState(false);   // material-loan add modal
 
   // Month-over-month sales & profit (last 6 months) + most-bought materials
   const insight = useMemo(() => {
@@ -223,6 +230,47 @@ function CustomerProfile({ customer, onBack, onEdit, t, lang, displayCurrency, u
           {st.openingOutstanding > 0 && <Btn size="sm" onClick={() => setDebtModal('pay')}>💵 {t('settleOldDebt')}</Btn>}
         </div>
       </Card>
+
+      {(() => {
+        const loans = outstandingLoans(live);
+        const varName2 = (id) => { const v = (app.data[TABLES.variants] || []).find((x) => x.id === id); return v ? (v.nameEn || v.sku) : '—'; };
+        return (
+          <Card>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ fontSize: 13.5, fontWeight: 900, color: C.text }}>📦 {t('materialLoans') || 'أمانات / عينات'} {loans.length > 0 && <span style={{ color: C.warning }}>({loans.length})</span>}</div>
+              <Btn size="sm" variant="ghost" onClick={() => setLoanModal(true)}>＋ {t('addLoan') || 'إضافة أمانة'}</Btn>
+            </div>
+            {loans.length === 0
+              ? <div style={{ fontSize: 11.5, color: C.textMuted, marginTop: 6 }}>{t('noLoans') || 'لا توجد مواد أمانة لدى هذا العميل'}</div>
+              : (
+                <div style={{ display: 'grid', gap: 6, marginTop: 8 }}>
+                  {loans.map((l) => (
+                    <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: C.surfaceAlt, borderRadius: 10, padding: '8px 10px' }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 800, color: C.text }}>{varName2(l.variantId)} <span style={{ color: C.warning }}>× {fmtNum(l.remaining)}</span></div>
+                        <div style={{ fontSize: 10.5, color: C.textMuted }}>{fmtDate(l.date, lang)}{l.note ? ` · ${l.note}` : ''}</div>
+                      </div>
+                      <button onClick={async () => {
+                        if (!window.confirm(t('confirmLoanReturned') || 'تأكيد إرجاع/تسوية هذه الأمانة؟')) return;
+                        const next = (live.materialLoans || []).map((x) => x.id === l.id ? { ...x, returnedQty: num(x.qty) } : x);
+                        await app.updateRow(TABLES.customers, customer.id, { materialLoans: next });
+                      }} style={{ border: `1px solid ${C.border}`, background: '#fff', color: C.success, borderRadius: 8, padding: '5px 10px', fontSize: 11.5, fontWeight: 800, cursor: 'pointer', flexShrink: 0 }}>✓ {t('returned') || 'أُرجعت'}</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+          </Card>
+        );
+      })()}
+
+      {loanModal && (
+        <AddLoanModal t={t} data={app.data} onClose={() => setLoanModal(false)}
+          onSave={async (loan) => {
+            const next = [...(live.materialLoans || []), loan];
+            await app.updateRow(TABLES.customers, customer.id, { materialLoans: next });
+            setLoanModal(false);
+          }} />
+      )}
 
       {debtModal === 'set' && (
         <SetOldDebtModal customer={live} t={t} displayCurrency={displayCurrency} usdRate={usdRate}
@@ -380,6 +428,31 @@ function MiniStat({ label, value, color = C.text }) {
 }
 
 // Set/edit a customer's old (opening) debt — a balance owed before using the app, no items.
+function AddLoanModal({ t, data, onClose, onSave }) {
+  const [variantId, setVariantId] = useState('');
+  const [qty, setQty] = useState('1');
+  const [date, setDate] = useState(todayISO());
+  const [note, setNote] = useState('');
+  const options = (data[TABLES.variants] || []).filter((v) => v.isActive !== false)
+    .map((v) => ({ value: v.id, label: v.nameEn || v.sku }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+  return (
+    <Modal open onClose={onClose} title={`📦 ${t('addLoan') || 'إضافة أمانة'}`} dismissable
+      footer={<>
+        <Btn variant="ghost" onClick={onClose}>{t('cancel')}</Btn>
+        <Btn disabled={!variantId || !(num(qty) > 0)} onClick={() => onSave({
+          id: `ln_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+          variantId, qty: num(qty), returnedQty: 0, date, note: note.trim(),
+        })}>{t('save')}</Btn>
+      </>}>
+      <Field label={t('material') || 'المادة'} required><Select value={variantId} onChange={setVariantId} placeholder={t('select') || 'اختر'} options={options} /></Field>
+      <Field label={t('qty')} required><Input type="number" value={qty} onChange={setQty} /></Field>
+      <Field label={t('date')}><Input type="date" value={date} onChange={setDate} /></Field>
+      <Field label={t('notes')}><Input value={note} onChange={setNote} placeholder={t('optional') || 'اختياري'} /></Field>
+    </Modal>
+  );
+}
+
 function SetOldDebtModal({ customer, t, displayCurrency, usdRate, onClose, onSave, onDelete }) {
   const [amount, setAmount] = useState(customer.openingDebt != null ? String(customer.openingDebt) : '');
   const [note, setNote] = useState(customer.openingDebtNote || '');
