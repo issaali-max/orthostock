@@ -345,3 +345,36 @@ export function PaymentModal({ open, onClose, invoice, t, cur, onRecord }) {
     </Modal>
   );
 }
+
+// ── ProductChips: the product-group picker used everywhere materials are chosen ──
+// Replaces the old one-line horizontal strip (groups off-screen were invisible).
+// All groups WRAP into visible rows; when there are many (e.g. wires), a quick
+// filter box appears and narrows the chips as you type. Selected chip stays first-class.
+export function ProductChips({ items, value, onChange, color = C.primaryMid, filterThreshold = 9 }) {
+  const [q, setQ] = useState('');
+  const needle = q.trim().toLowerCase();
+  const shown = needle ? items.filter((p) => `${p.nameEn || ''} ${p.name || ''}`.toLowerCase().includes(needle)) : items;
+  return (
+    <div style={{ marginBottom: 8 }}>
+      {items.length > filterThreshold && (
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔍 تصفية المجموعات…"
+          style={{ width: '100%', boxSizing: 'border-box', border: `1px solid ${C.border}`, borderRadius: 10, padding: '7px 10px', fontSize: 12.5, marginBottom: 6, outline: 'none', background: '#fff', color: C.text }} />
+      )}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 132, overflowY: 'auto', paddingBottom: 2 }}>
+        {shown.length === 0
+          ? <div style={{ fontSize: 11.5, color: C.textMuted, padding: '4px 2px' }}>لا مجموعات مطابقة</div>
+          : shown.map((p) => {
+            const on = value === p.id;
+            return (
+              <button key={p.id} onClick={() => onChange(p.id)} style={{
+                border: `1.5px solid ${on ? color : C.border}`, background: on ? color : '#fff',
+                color: on ? '#fff' : C.textMid, borderRadius: 999, padding: '6px 12px',
+                fontSize: 12.5, fontWeight: 700, cursor: 'pointer', maxWidth: '100%',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>{p.icon} {p.nameEn}</button>
+            );
+          })}
+      </div>
+    </div>
+  );
+}

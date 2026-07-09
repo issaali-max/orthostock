@@ -6,7 +6,7 @@ import { byInvoiceNewest } from '../../lib/sort.js';
 import { fmtCur, num, round2, fmtNum } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
 import { customerStats, clinicRating, recordInvoicePayment, recordOpeningDebtPayment, orderList, giftsToCenters, outstandingLoans, lendMaterial, returnLoan } from '../../lib/engine.js';
-import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, PaymentModal, SearchBar, Select, Textarea } from '../../ui/components.jsx';
+import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, PaymentModal, ProductChips, SearchBar, Select, Textarea } from '../../ui/components.jsx';
 import { BandGrid } from '../../ui/BandGrid.jsx';
 import { isGridWorthy } from '../../lib/bandGrid.js';
 
@@ -463,11 +463,7 @@ function AddLoanModal({ t, data, onClose, onSave }) {
       {catProducts.length > 0 && (
         <>
           <div style={{ fontSize: 12, fontWeight: 700, color: C.textMid, margin: '0 0 6px' }}>{t('products')}</div>
-          <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4, marginBottom: 8 }}>
-            {catProducts.map((p) => (
-              <button key={p.id} onClick={() => setProdId(p.id)} style={chip(prodId === p.id, C.primaryMid)}>{p.icon} {p.nameEn}</button>
-            ))}
-          </div>
+          <ProductChips items={catProducts} value={prodId} onChange={setProdId} />
         </>
       )}
       {prodId && (

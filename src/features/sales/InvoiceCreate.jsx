@@ -5,7 +5,7 @@ import { C, TABLES, emirateOptions, citiesOfEmirate, allCities } from '../../lib
 import { fmtCur, fmtNum, num, round2, safeDiv } from '../../lib/money.js';
 import { todayISO } from '../../lib/dates.js';
 import { saveInvoiceAtomic, invoiceTotals, deleteInvoiceAtomic, nextNumber } from '../../lib/engine.js';
-import { Btn, Field, Input, Modal, Select } from '../../ui/components.jsx';
+import { Btn, Field, Input, Modal, ProductChips, Select } from '../../ui/components.jsx';
 import { BandGrid } from '../../ui/BandGrid.jsx';
 import { isGridWorthy } from '../../lib/bandGrid.js';
 
@@ -259,15 +259,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
       ) : (
         <>
           <div style={{ fontSize: 12, fontWeight: 700, color: C.textMid, margin: '4px 0 6px' }}>{t('products')}</div>
-          <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4, marginBottom: 8 }}>
-            {catProducts.map((p) => (
-              <button key={p.id} onClick={() => setProdId(p.id)} style={{
-                whiteSpace: 'nowrap', border: `1.5px solid ${prodId === p.id ? C.primaryMid : C.border}`,
-                background: prodId === p.id ? C.primaryMid : '#fff', color: prodId === p.id ? '#fff' : C.textMid,
-                borderRadius: 999, padding: '6px 12px', fontSize: 13, fontWeight: 700, cursor: 'pointer',
-              }}>{p.icon} {p.nameEn}</button>
-            ))}
-          </div>
+          <ProductChips items={catProducts} value={prodId} onChange={setProdId} />
 
           {/* Step 3: variants of the chosen product — a size×position grid for sized bands, else green buttons */}
           {prodId ? (

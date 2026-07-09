@@ -4,7 +4,7 @@ import { C, TABLES, emirateOptions, emirateLabel, citiesOfEmirate, allCities } f
 import { num } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
 import { orderList, visitPlan, ORDER_STATUSES } from '../../lib/engine.js';
-import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, Select, Textarea } from '../../ui/components.jsx';
+import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, Select, Textarea, ProductChips } from '../../ui/components.jsx';
 
 const STATUS_TONE = { new: 'info', planning: 'warning', ready: 'primary', delivered: 'success', cancelled: 'danger' };
 const blankOrder = () => ({ customerId: '', date: todayISO(), plannedDate: '', status: 'new', priority: 'normal', notes: '', isActive: true });
@@ -265,11 +265,7 @@ function OrderEditor({ editing, setEditing, customers, categories, products, var
       </div>
       {catId && (catProducts.length === 0
         ? <div style={{ fontSize: 12, color: C.textMuted, textAlign: 'center', padding: 10, border: `1px solid ${C.border}`, borderRadius: 10, marginBottom: 8 }}>{t('noProducts')}</div>
-        : <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4, marginBottom: 6 }}>
-            {catProducts.map((p) => (
-              <button key={p.id} type="button" onClick={() => setProdId(p.id)} style={{ whiteSpace: 'nowrap', border: `1.5px solid ${prodId === p.id ? C.primaryMid : C.border}`, background: prodId === p.id ? C.primaryMid : '#fff', color: prodId === p.id ? '#fff' : C.textMid, borderRadius: 999, padding: '6px 12px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>{p.icon} {p.nameEn}</button>
-            ))}
-          </div>)}
+        : <ProductChips items={catProducts} value={prodId} onChange={setProdId} />)}
       {prodId && (
         <div style={{ maxHeight: 200, overflowY: 'auto', border: `1px solid ${C.border}`, borderRadius: 10, padding: 8, marginBottom: 8 }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>

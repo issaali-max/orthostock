@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { C, TABLES } from '../../lib/constants.js';
 import { num } from '../../lib/money.js';
 import { todayISO } from '../../lib/dates.js';
-import { Btn, Field, Input, Modal, Select } from '../../ui/components.jsx';
+import { Btn, Field, Input, Modal, Select, ProductChips } from '../../ui/components.jsx';
 
 // Quick order/توصية creator with the customer pre-filled. Used from the invoice screen so a
 // recommendation can be recorded for the doctor you're billing, without leaving the invoice.
@@ -55,11 +55,7 @@ export default function QuickOrder({ app, customerId, onClose, onSaved }) {
       </div>
       {catId && (catProducts.length === 0
         ? <div style={{ fontSize: 12, color: C.textMuted, textAlign: 'center', padding: 10, border: `1px solid ${C.border}`, borderRadius: 10, marginBottom: 8 }}>{t('noProducts')}</div>
-        : <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4, marginBottom: 6 }}>
-            {catProducts.map((p) => (
-              <button key={p.id} type="button" onClick={() => setProdId(p.id)} style={{ whiteSpace: 'nowrap', border: `1.5px solid ${prodId === p.id ? C.primaryMid : C.border}`, background: prodId === p.id ? C.primaryMid : '#fff', color: prodId === p.id ? '#fff' : C.textMid, borderRadius: 999, padding: '6px 12px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>{p.icon} {p.nameEn}</button>
-            ))}
-          </div>)}
+        : <ProductChips items={catProducts} value={prodId} onChange={setProdId} />)}
       {prodId && (
         <div style={{ maxHeight: 180, overflowY: 'auto', border: `1px solid ${C.border}`, borderRadius: 10, padding: 8, marginBottom: 8 }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
