@@ -4,6 +4,7 @@ import { C, TABLES, emirateOptions, emirateLabel, citiesOfEmirate, allCities } f
 import { num } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
 import { orderList, visitPlan, ORDER_STATUSES } from '../../lib/engine.js';
+import { sortVariants, sortByName } from '../../lib/materialSort.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, Select, Textarea, ProductChips } from '../../ui/components.jsx';
 
 const STATUS_TONE = { new: 'info', planning: 'warning', ready: 'primary', delivered: 'success', cancelled: 'danger' };
@@ -41,7 +42,7 @@ function OrdersTab({ app, t, lang, data, createRow, updateRow, deleteRow }) {
   const [busy, setBusy] = useState(false);
 
   const customers = (data[TABLES.customers] || []).filter((c) => c.isActive !== false);
-  const categories = (data[TABLES.categories] || []).filter((c) => c.isActive !== false);
+  const categories = sortByName((data[TABLES.categories] || []).filter((c) => c.isActive !== false));
   const products = (data[TABLES.products] || []).filter((p) => p.isActive !== false);
   const variants = (data[TABLES.variants] || []).filter((v) => v.isActive !== false);
   const orders = useMemo(() => orderList(app), [data]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -214,7 +215,7 @@ function OrderEditor({ editing, setEditing, customers, categories, products, var
 
   // Product picker, same flow as the invoice: category → product → variant.
   const catProducts = products.filter((p) => p.categoryId === catId);
-  const variantsOfProduct = (pid) => variants.filter((v) => v.productId === pid);
+  const variantsOfProduct = (pid) => sortVariants(variants.filter((v) => v.productId === pid));
   const inLine = (id) => lines.some((l) => l.variantId === id);
   const toggle = (v) => set({ lines: inLine(v.id) ? lines.filter((l) => l.variantId !== v.id) : [...lines, { variantId: v.id, qty: '', note: '' }] });
   const setLine = (id, patch) => set({ lines: lines.map((l) => (l.variantId === id ? { ...l, ...patch } : l)) });

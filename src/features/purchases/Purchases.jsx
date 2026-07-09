@@ -7,6 +7,7 @@ import { C, TABLES } from '../../lib/constants.js';
 import { fmtCur, fmtNum, num, round2 } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
 import { commitPurchase, voidPurchase, nextNumber } from '../../lib/engine.js';
+import { sortVariants, sortByName } from '../../lib/materialSort.js';
 import { Btn, Card, EmptyState, Field, Input, Modal, PageHeader, SearchBar, Select, ProductChips } from '../../ui/components.jsx';
 
 const variantLabel = (v) => {
@@ -35,7 +36,7 @@ export default function Purchases() {
   const [pq, setPq] = useState('');            // product search within the picker
 
   const suppliers = (data[TABLES.suppliers] || []).filter((s) => s.isActive !== false);
-  const categories = (data[TABLES.categories] || []).filter((c) => c.isActive !== false);
+  const categories = sortByName((data[TABLES.categories] || []).filter((c) => c.isActive !== false));
   const products = (data[TABLES.products] || []).filter((p) => p.isActive !== false);
   const variants = (data[TABLES.variants] || []).filter((v) => v.isActive !== false);
   const supName = (id) => suppliers.find((s) => s.id === id)?.name || '—';
@@ -91,7 +92,7 @@ export default function Purchases() {
   const catProducts = products
     .filter((p) => p.categoryId === catId)
     .filter((p) => !pq || (p.nameEn || '').toLowerCase().includes(pq.toLowerCase()) || (p.nameAr || '').includes(pq) || (p.brand || '').toLowerCase().includes(pq.toLowerCase()));
-  const variantsOfProduct = (pid) => variants.filter((v) => v.productId === pid);
+  const variantsOfProduct = (pid) => sortVariants(variants.filter((v) => v.productId === pid));
   const inCart = (id) => lines.some((l) => l.variantId === id);
   const toggle = (v) => setLines((ls) => inCart(v.id) ? ls.filter((l) => l.variantId !== v.id) : [...ls, { variantId: v.id, qty: '', unitCost: num(v.purchasePriceLatest) || '' }]);
   const setLine = (id, patch) => setLines((ls) => ls.map((l) => (l.variantId === id ? { ...l, ...patch } : l)));

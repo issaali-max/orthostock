@@ -8,6 +8,7 @@ import { saveInvoiceAtomic, invoiceTotals, deleteInvoiceAtomic, nextNumber } fro
 import { Btn, Field, Input, Modal, ProductChips, Select } from '../../ui/components.jsx';
 import { BandGrid } from '../../ui/BandGrid.jsx';
 import { isGridWorthy } from '../../lib/bandGrid.js';
+import { sortVariants, sortByName } from '../../lib/materialSort.js';
 
 const variantLabel = (v) => {
   const vals = Object.values(v.attributes || {}).filter(Boolean);
@@ -19,7 +20,7 @@ const variantLabel = (v) => {
 export default function InvoiceCreate({ open, onClose, editing }) {
   const app = useApp();
   const { t, lang, data, settings, displayCurrency, usdRate, showToast } = app;
-  const categories = (data[TABLES.categories] || []).filter((c) => c.isActive !== false);
+  const categories = sortByName((data[TABLES.categories] || []).filter((c) => c.isActive !== false));
   const products = (data[TABLES.products] || []).filter((p) => p.isActive !== false);
   const variants = (data[TABLES.variants] || []).filter((v) => v.isActive !== false);
   const customers = (data[TABLES.customers] || []).filter((c) => c.isActive !== false);
@@ -105,7 +106,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
   const expectedMargin = netSubtotal > 0 ? round2((expectedProfit / netSubtotal) * 100) : 0;
 
   const catProducts = products.filter((p) => p.categoryId === catId);
-  const variantsOfProduct = (pid) => variants.filter((v) => v.productId === pid);
+  const variantsOfProduct = (pid) => sortVariants(variants.filter((v) => v.productId === pid));
 
   const save = async () => {
     if (lines.length === 0) return;

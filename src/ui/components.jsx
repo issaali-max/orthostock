@@ -353,12 +353,14 @@ export function PaymentModal({ open, onClose, invoice, t, cur, onRecord }) {
 export function ProductChips({ items, value, onChange, color = C.primaryMid, filterThreshold = 9 }) {
   const [q, setQ] = useState('');
   const needle = q.trim().toLowerCase();
-  const shown = needle ? items.filter((p) => `${p.nameEn || ''} ${p.name || ''}`.toLowerCase().includes(needle)) : items;
+  // Same alphabetical order the Catalogue uses, so groups appear where expected.
+  const ordered = items.slice().sort((a, b) => (a.nameEn || a.name || '').localeCompare(b.nameEn || b.name || '', 'en'));
+  const shown = needle ? ordered.filter((p) => `${p.nameEn || ''} ${p.name || ''}`.toLowerCase().includes(needle)) : ordered;
   return (
     <div style={{ marginBottom: 8 }}>
       {items.length > filterThreshold && (
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔍 تصفية المجموعات…"
-          style={{ width: '100%', boxSizing: 'border-box', border: `1px solid ${C.border}`, borderRadius: 10, padding: '7px 10px', fontSize: 12.5, marginBottom: 6, outline: 'none', background: '#fff', color: C.text }} />
+          style={{ width: '100%', boxSizing: 'border-box', border: `1px solid ${C.border}`, borderRadius: 10, padding: '7px 10px', fontSize: 16, marginBottom: 6, outline: 'none', background: '#fff', color: C.text }} />
       )}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 132, overflowY: 'auto', paddingBottom: 2 }}>
         {shown.length === 0

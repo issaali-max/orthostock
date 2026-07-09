@@ -9,6 +9,7 @@ import { customerStats, clinicRating, recordInvoicePayment, recordOpeningDebtPay
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, PaymentModal, ProductChips, SearchBar, Select, Textarea } from '../../ui/components.jsx';
 import { BandGrid } from '../../ui/BandGrid.jsx';
 import { isGridWorthy } from '../../lib/bandGrid.js';
+import { sortVariants, sortByName } from '../../lib/materialSort.js';
 
 const blank = () => ({ name: '', nameEn: '', address: '', type: 'doctor', phone: '', emirate: '', city: '', specialty: '', trn: '', workingDays: WEEKDAYS.map((d) => d.key), notes: '', isActive: true });
 
@@ -432,7 +433,7 @@ function MiniStat({ label, value, color = C.text }) {
 function AddLoanModal({ t, data, onClose, onSave }) {
   // Material picking mirrors the invoice: category chips → product chips → variant
   // grid/buttons, multi-select into a small cart (variantId + qty per line).
-  const categories = (data[TABLES.categories] || []).filter((c) => c.isActive !== false);
+  const categories = sortByName((data[TABLES.categories] || []).filter((c) => c.isActive !== false));
   const products = (data[TABLES.products] || []).filter((p) => p.isActive !== false);
   const variants = (data[TABLES.variants] || []).filter((v) => v.isActive !== false);
   const [catId, setCatId] = useState(() => categories.find((c) => products.some((p) => p.categoryId === c.id))?.id || categories[0]?.id || '');
@@ -441,7 +442,7 @@ function AddLoanModal({ t, data, onClose, onSave }) {
   const [date, setDate] = useState(todayISO());
   const [note, setNote] = useState('');
   const catProducts = products.filter((p) => p.categoryId === catId);
-  const variantsOfProduct = (pid) => variants.filter((v) => v.productId === pid);
+  const variantsOfProduct = (pid) => sortVariants(variants.filter((v) => v.productId === pid));
   const vById = (id) => variants.find((v) => v.id === id);
   const inCart = (id) => cart.some((l) => l.variantId === id);
   const toggle = (v) => setCart((c) => inCart(v.id) ? c.filter((l) => l.variantId !== v.id) : [...c, { variantId: v.id, qty: 1 }]);

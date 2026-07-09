@@ -2,13 +2,14 @@ import { useState } from 'react';
 import { C, TABLES } from '../../lib/constants.js';
 import { num } from '../../lib/money.js';
 import { todayISO } from '../../lib/dates.js';
+import { sortVariants, sortByName } from '../../lib/materialSort.js';
 import { Btn, Field, Input, Modal, Select, ProductChips } from '../../ui/components.jsx';
 
 // Quick order/توصية creator with the customer pre-filled. Used from the invoice screen so a
 // recommendation can be recorded for the doctor you're billing, without leaving the invoice.
 export default function QuickOrder({ app, customerId, onClose, onSaved }) {
   const { t, data, createRow } = app;
-  const categories = (data[TABLES.categories] || []).filter((c) => c.isActive !== false);
+  const categories = sortByName((data[TABLES.categories] || []).filter((c) => c.isActive !== false));
   const products = (data[TABLES.products] || []).filter((p) => p.isActive !== false);
   const variants = (data[TABLES.variants] || []).filter((v) => v.isActive !== false);
   const customer = (data[TABLES.customers] || []).find((c) => c.id === customerId);
@@ -21,7 +22,7 @@ export default function QuickOrder({ app, customerId, onClose, onSaved }) {
   const [busy, setBusy] = useState(false);
 
   const catProducts = products.filter((p) => p.categoryId === catId);
-  const variantsOfProduct = (pid) => variants.filter((v) => v.productId === pid);
+  const variantsOfProduct = (pid) => sortVariants(variants.filter((v) => v.productId === pid));
   const inLine = (id) => lines.some((l) => l.variantId === id);
   const toggle = (v) => setLines((ls) => inLine(v.id) ? ls.filter((l) => l.variantId !== v.id) : [...ls, { variantId: v.id, qty: '', note: '' }]);
   const setLine = (id, patch) => setLines((ls) => ls.map((l) => (l.variantId === id ? { ...l, ...patch } : l)));
