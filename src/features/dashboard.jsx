@@ -149,8 +149,8 @@ export default function Dashboard() {
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: range === 'day' ? '1fr 1fr' : '1fr 1fr 1fr', gap: 10, position: 'relative' }}>
           <HeroFig label={t('salesProfit')} value={cur(pl.salesProfit)} sub={`${t('profitMargin')} ${fmtNum(pl.margin)}%`} onClick={() => setShowSold(true)} />
-          {range !== 'day' && <HeroFig label={t('operatingProfit')} value={cur(pl.operatingProfit)} />}
-          <HeroFig label={t('netAfterAll')} value={cur(pl.netAfterAll)} strong neg={pl.netAfterAll < 0} />
+          {range !== 'day' && <HeroFig label={t('operatingProfit')} value={cur(pl.operatingProfit)} sub={t('operatingProfitHint')} />}
+          <HeroFig label={t('netAfterAll')} value={cur(pl.netAfterAll)} sub={t('netAfterAllHint')} strong neg={pl.netAfterAll < 0} />
         </div>
       </div>
 

@@ -358,7 +358,7 @@ export default function Investments() {
             </div>
             <Btn size="sm" onClick={async () => {
               if (!window.confirm((t('confirmAddDeposit') || 'إضافة إيداع ${x} لحساب الاستثمار؟').replace('${x}', `$${fmtNum(gap)}`))) return;
-              await createRow(TABLES.cashFlows, { account: 'investment', type: 'deposit', amount: gap, currency: 'USD', date: todayISO(), reason: t('depositGapReason') || 'تسوية إيداعات سابقة' });
+              await createRow(TABLES.cashFlows, { account: 'investment', type: 'pastProfit', amount: gap, currency: 'USD', date: todayISO(), reason: t('pastProfitReason') || 'أرباح محققة من صفقات سابقة (تسوية افتتاحية)' });
               showToast('✓', 'success');
             }}>＋ {t('addMissingDeposit') || 'أضف الإيداع الناقص'} (${fmtNum(gap)})</Btn>
           </div>

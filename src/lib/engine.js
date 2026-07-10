@@ -1010,6 +1010,10 @@ export function portfolioStats(data, priceOf) {
   const totalRealized = round2(sells.reduce((a, x) => a + num(x.realizedPnL), 0));
   const deposits = sum(flows, 'deposit'), withdrawals = sum(flows, 'withdraw');
   const dividends = sum(flows, 'dividend'), fees = sum(flows, 'fee'), interest = sum(flows, 'interest');
+  // 'pastProfit' = realized gains from OLD, unrecorded trades (opening adjustment).
+  // It repairs CASH (the money exists and was reinvested) but is NOT a deposit —
+  // "deposited since start" must stay the owner's true capital.
+  const pastProfit = sum(flows, 'pastProfit');
   // Cash must be consistent with holdings: only count trades of ACTIVE securities.
   // A deleted or merged-away duplicate leaves orphan lots pointing at an inactive
   // security; those must NOT keep draining cash while being absent from holdings.
@@ -1019,11 +1023,11 @@ export function portfolioStats(data, priceOf) {
   const buysCost = liveLots.reduce((a, l) => a + num(l.costBasis), 0);
   const sellsProceeds = liveSells.reduce((a, x) => a + num(x.proceeds), 0);
   const netCapital = round2(deposits - withdrawals);
-  const cash = round2(netCapital - buysCost + sellsProceeds + dividends + interest - fees);
+  const cash = round2(netCapital + pastProfit - buysCost + sellsProceeds + dividends + interest - fees);
   const accountValue = round2(cash + holdingsValue);
   return {
     positions, holdingsValue, totalUnrealized, totalRealized,
-    netCapital, cash, dividends: round2(dividends),
+    netCapital, cash, dividends: round2(dividends), pastProfit: round2(pastProfit),
     deposits: round2(deposits), withdrawals: round2(withdrawals),
     accountValue,
     totalPnL: round2(totalRealized + totalUnrealized + dividends),
