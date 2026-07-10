@@ -327,11 +327,47 @@ export async function pull(onData, { full = false } = {}) {
   for (const table of Object.values(TABLES)) {
     if (LOCAL_ONLY.has(table)) continue; // local-only tables are never pulled
     try {
-      let q = supabase.from(table).select('*');
-      if (since > 0) q = q.gt('updatedAt', since);
-      const { data, error } = await q;
-      reached = true;                                        // the cloud answered (even a missing-table error still means we're online)
-      if (error || !Array.isArray(data)) continue;
+      // ── Fetch strategy ──
+      // INCREMENTAL (since>0): fetch full bodies of rows changed after the watermark
+      //   (already few rows — cheap as is).
+      // FULL (since=0): fetch ONLY (id, updatedAt) for every row — a few bytes each —
+      //   compare against local, then download full bodies JUST for new/changed ids
+      //   (chunked). The heavy jsonb payloads (e.g. the settings row with the logo)
+      //   are no longer re-downloaded every full reconcile. Merge/deletion semantics
+      //   below are byte-for-byte identical to before.
+      let data;               // rows with full bodies to merge
+      let cloudKeys = null;   // full pull: [{id, updatedAt}] of EVERY cloud row (for deletion reconcile + watermark)
+      if (full) {
+        const { data: keys, error: kErr } = await supabase.from(table).select('id,"updatedAt"');
+        reached = true;
+        if (kErr || !Array.isArray(keys)) continue;
+        cloudKeys = keys;
+        const localKeyRows = await idbGetAll(table);
+        const localByIdK = new Map(localKeyRows.map((r) => [r.id, r]));
+        const need = [];
+        for (const k of keys) {
+          const cu = Number(k.updatedAt || 0);
+          if (cu > maxSeen) maxSeen = cu;
+          const local = localByIdK.get(k.id);
+          if (!local || cu > Number(local.updatedAt || 0)) need.push(k.id);
+        }
+        data = [];
+        let fetchFailed = false;
+        for (let i = 0; i < need.length; i += 100) {
+          const chunk = need.slice(i, i + 100);
+          const { data: bodies, error: bErr } = await supabase.from(table).select('*').in('id', chunk);
+          if (bErr || !Array.isArray(bodies)) { fetchFailed = true; break; }
+          data.push(...bodies);
+        }
+        if (fetchFailed) continue;                             // try again next cycle; nothing partial was merged
+      } else {
+        let q = supabase.from(table).select('*');
+        if (since > 0) q = q.gt('updatedAt', since);
+        const res = await q;
+        reached = true;                                        // the cloud answered (even a missing-table error still means we're online)
+        if (res.error || !Array.isArray(res.data)) continue;
+        data = res.data;
+      }
       const localRows = await idbGetAll(table);
       const localById = new Map(localRows.map((r) => [r.id, r]));
       const remSet = pendingRemovals.get(table);
@@ -358,12 +394,12 @@ export async function pull(onData, { full = false } = {}) {
       // delete it here too. Guards: (1) full snapshot only, (2) outbox empty, (3) cloud
       // table non-empty (a just-recreated empty table must not wipe local data before
       // it re-uploads), (4) mass-deletion brake, (5) outbox re-checked at delete time.
-      if (full && outboxEmpty && data.length > 0) {
-        const cloudIds = new Set(data.map((c) => c.id));
+      if (full && outboxEmpty && cloudKeys && cloudKeys.length > 0) {
+        const cloudIds = new Set(cloudKeys.map((c) => c.id));
         const gone = localRows.filter((r) => !cloudIds.has(r.id));
-        const suspicious = gone.length > 25 && gone.length > data.length;
+        const suspicious = gone.length > 25 && gone.length > cloudKeys.length;
         if (gone.length && suspicious) {
-          console.warn('[sync] skipping suspicious mass local deletion:', table, gone.length, 'missing vs', data.length, 'in cloud');
+          console.warn('[sync] skipping suspicious mass local deletion:', table, gone.length, 'missing vs', cloudKeys.length, 'in cloud');
         } else if (gone.length) {
           const stillEmpty = (await outboxAll()).length === 0;           // a row created mid-pull must survive
           if (stillEmpty) {
