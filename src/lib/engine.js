@@ -1507,7 +1507,11 @@ export function cashEvents(app) {
     const account = f.account || 'investment';
     if (account !== 'bank' && account !== 'drawer') continue;
     const dirIn = f.type === 'deposit' || f.type === 'transferIn';
-    push(f.date, f.currency || 'AED', f.amount, dirIn ? 'in' : 'out', 'manual', f.reason || f.notes || '');
+    // A transfer to/from the INVESTMENT account is asset↔asset, not spending/income —
+    // it must still move the bank/drawer balance, but the drill shows it separately
+    // (source 'investTransfer') instead of inflating the in/out spending totals.
+    const isInvest = f.toAccount === 'investment' || f.fromAccount === 'investment';
+    push(f.date, f.currency || 'AED', f.amount, dirIn ? 'in' : 'out', isInvest ? 'investTransfer' : 'manual', f.reason || f.notes || '');
   }
 
   // 4) Personal debts (externalDebts): lending money OUT, collecting it back IN.
@@ -1588,11 +1592,14 @@ export function financialPosition(app, today = todayISO()) {
   const year = today.slice(0, 4);
   const ev = cashEvents(app);
 
-  const cash = { AED: { balance: 0, in: 0, out: 0, today: 0, month: 0, year: 0 }, USD: { balance: 0, in: 0, out: 0, today: 0, month: 0, year: 0 } };
+  const cash = { AED: { balance: 0, in: 0, out: 0, invOut: 0, invIn: 0, today: 0, month: 0, year: 0 }, USD: { balance: 0, in: 0, out: 0, invOut: 0, invIn: 0, today: 0, month: 0, year: 0 } };
   for (const e of ev) {
     const b = cash[e.currency]; const signed = e.direction === 'in' ? e.amount : -e.amount;
     b.balance = round2(b.balance + signed);
-    if (e.direction === 'in') b.in = round2(b.in + e.amount); else b.out = round2(b.out + e.amount);
+    if (e.source === 'investTransfer') {
+      // asset↔asset: moves the balance but is NOT spending/income
+      if (e.direction === 'in') b.invIn = round2(b.invIn + e.amount); else b.invOut = round2(b.invOut + e.amount);
+    } else if (e.direction === 'in') b.in = round2(b.in + e.amount); else b.out = round2(b.out + e.amount);
     if ((e.date || '') === today) b.today = round2(b.today + signed);
     if ((e.date || '').slice(0, 7) === month) b.month = round2(b.month + signed);
     if ((e.date || '').slice(0, 4) === year) b.year = round2(b.year + signed);

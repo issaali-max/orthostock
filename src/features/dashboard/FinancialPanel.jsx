@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import { C, TABLES } from '../../lib/constants.js';
-import { num, fmtCur, fmtNum } from '../../lib/money.js';
+import { num, round2, fmtCur, fmtNum } from '../../lib/money.js';
 import { financialPosition, receivables, portfolioStats, supplierDebt } from '../../lib/engine.js';
 import { Modal, Badge, EmptyState } from '../../ui/components.jsx';
 
@@ -160,6 +160,9 @@ function CashModal({ open, onClose, fin, t }) {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                 <Stat label={`↑ ${t('totalIn')}`} value={ccy(b.in, code)} color={C.success} />
                 <Stat label={`↓ ${t('totalOut')}`} value={ccy(b.out, code)} color={C.danger} />
+                {(b.invOut > 0.005 || b.invIn > 0.005) && (
+                  <Stat label={`↔ ${t('toInvestment') || 'محوَّل للاستثمار (أصل↔أصل)'}`} value={ccy(round2(b.invOut - b.invIn), code)} color={C.primary} />
+                )}
                 <Stat label={t('thisMonth')} value={ccy(b.month, code)} color={C.textMid} />
                 <Stat label={t('thisYear')} value={ccy(b.year, code)} color={C.textMid} />
               </div>
