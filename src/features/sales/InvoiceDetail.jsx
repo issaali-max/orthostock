@@ -57,6 +57,7 @@ export default function InvoiceDetail({ invoice, onClose, onEdit }) {
       date: (last?.date || invoice.date || '').slice(0, 10),
       amount, method, currency: b.currency,
       forInvoice: invoice.invoiceNumber,
+      showTrn: invoice.showTrn !== false,
       throughLine: method === 'cheque' ? (last?.chequeRef ? `Cheque ${last.chequeRef}` : 'Cheque') : method === 'transfer' ? 'Bank transfer' : '',
     };
     try {

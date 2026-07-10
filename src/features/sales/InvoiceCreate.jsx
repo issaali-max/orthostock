@@ -163,7 +163,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
             const list = num(vv?.sellingPriceDefault);
             return { variantId: l.variantId, qty: num(l.qty), unitPrice: unit, listPrice: list, total: round2(unit * num(l.qty)), discountAmount: Math.max(0, round2((list - unit) * num(l.qty))) };
           });
-          const quotation = { quotationNumber: `QT-${Date.now().toString().slice(-6)}`, date, customerId, currency: 'AED', discountTotal: 0 };
+          const quotation = { quotationNumber: `QT-${Date.now().toString().slice(-6)}`, date, customerId, currency: 'AED', discountTotal: 0, showTrn };
           const variantById = (id) => data[TABLES.variants]?.find((v) => v.id === id);
           try {
             const ok = printQuotation({ quotation, items: its, settings, customer: cust, variantById });

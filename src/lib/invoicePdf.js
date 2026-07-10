@@ -124,7 +124,7 @@ function docHeader({ settings, title, meta, party, billingAddress = '', showTrn 
         <div style="font-size:15px;font-weight:800;color:#000;margin-top:-22px;margin-bottom:2px">${c.company}</div>
         ${c.cTagline ? hRow('Supplies', c.cTagline) : ''}
         ${c.cPhone ? hRow('Tel', c.cPhone) : ''}
-        ${hRow('TRN', showTrn ? (c.cTrn || '') : '')}
+        ${showTrn ? hRow('TRN', c.cTrn || '') : ''}
       </div>
       <div style="margin-bottom:10px">
         <div style="font-size:34px;font-weight:900;color:${NAVY};letter-spacing:1.5px;line-height:1.05">${title}</div>
@@ -286,7 +286,7 @@ function buildHtml({ invoice, items, settings, customer, variantById }) {
     settings, title: 'TAX INVOICE', taxOn, totalsHtml,
     billingAddress: esc(customer?.address || ''),
     showTrn: invoice.showTrn !== false,
-    party: [['Customer', custName], ['Customer TRN#', invoice.showTrn !== false ? esc(customer?.trn || '') : ''], ['Notes', esc(invoice.notes || '')]],
+    party: [['Customer', custName], ...(invoice.showTrn !== false ? [['Customer TRN#', esc(customer?.trn || '')]] : []), ['Notes', esc(invoice.notes || '')]],
     meta: [['Invoice No.', esc(invoice.invoiceNumber)], ['Invoice Date', esc(invoice.date || '')], ['Page #', '']],
   });
 }
@@ -309,7 +309,8 @@ function buildQuotationHtml({ quotation, items, settings, customer, variantById 
   return paginate(rows, {
     settings, title: 'QUOTATION', taxOn, totalsHtml,
     billingAddress: esc(customer?.address || ''),
-    party: [['Customer', custName], ['Customer TRN#', esc(customer?.trn || 'n/a')], ['Notes', esc(quotation.notes || '')]],
+    showTrn: quotation.showTrn !== false,
+    party: [['Customer', custName], ...(quotation.showTrn !== false ? [['Customer TRN#', esc(customer?.trn || '')]] : []), ['Notes', esc(quotation.notes || '')]],
     meta: [['Quotation No.', esc(quotation.quotationNumber || '—')], ['Quotation Date', esc(quotation.date || '')], ['Quote Validity', `${validity} Days`], ['Page #', '']],
   });
 }
@@ -324,7 +325,8 @@ function buildReceiptHtml({ receipt, settings, customer }) {
   <div class="page" dir="ltr" style="width:794px;min-height:1123px;box-sizing:border-box;background:#fff;color:${INK};font-family:Arial,Helvetica,sans-serif;padding:24px 26px;display:flex;flex-direction:column;text-align:left;direction:ltr">
     ${docHeader({
       settings, title: 'RECEIPT VOUCHER',
-      party: [['Received From', custName], ['Customer TRN#', esc(customer?.trn || 'n/a')]],
+      showTrn: receipt.showTrn !== false,
+      party: [['Received From', custName], ...(receipt.showTrn !== false ? [['Customer TRN#', esc(customer?.trn || '')]] : [])],
       meta: [['Voucher No.', esc(receipt.voucherNo)], ['Date', esc(receipt.date || '')], ['Method', esc(payMethodLabel(receipt.method, false))]],
     })}
     <div style="margin-top:16px;border:1px solid ${LINE};border-radius:8px;overflow:hidden">
