@@ -96,8 +96,13 @@ export default function Dashboard() {
   // for an at-a-glance figure (the cash-flow screen shows each currency separately).
 
   const kpi = useMemo(() => {
-    const invoices = data[TABLES.invoices] || [];
-    const items = data[TABLES.invoiceItems] || [];
+    // Only LIVE invoices count. Deleted invoices are filtered out of data[invoices]
+    // at load, but their ITEMS remain rows in invoiceItems (void keeps them for the
+    // undo/restore path) — so every item aggregate MUST join back to a live invoice,
+    // or deleted invoices' items inflate the profit (bug: profit exceeded revenue).
+    const invoices = (data[TABLES.invoices] || []).filter((i) => i.status !== 'returned');
+    const liveIds = new Set(invoices.map((i) => i.id));
+    const items = (data[TABLES.invoiceItems] || []).filter((it) => liveIds.has(it.invoiceId));
     const variants = (data[TABLES.variants] || []).filter((v) => v.isActive !== false);
     const revenue = invoices.reduce((s, i) => s + num(i.total), 0);
     const profit = items.reduce((s, it) => s + num(it.lineProfit), 0);

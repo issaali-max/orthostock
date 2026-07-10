@@ -75,6 +75,7 @@ export default function FinancialPanel({ app }) {
           </div>
           <div style={{ textAlign: 'end', fontSize: 11.5, lineHeight: 1.7 }}>
             <div style={{ color: C.textMid }}>{t('assets')}: <b style={{ color: C.success }}>＋{cur(assets)}</b></div>
+            {cash < 0 && <div style={{ color: C.textMid }}>{t('cashBalance')}: <b style={{ color: C.danger }}>−{cur(Math.abs(cash))}</b></div>}
             <div style={{ color: C.textMid }}>{t('debtsIOwe')}: <b style={{ color: liabilities > 0 ? C.danger : C.textMid }}>{liabilities > 0 ? '−' : ''}{cur(liabilities)}</b></div>
           </div>
         </div>
