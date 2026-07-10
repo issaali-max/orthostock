@@ -384,7 +384,7 @@ export default function Settings() {
               <div key={b.backup_id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: C.surfaceAlt, borderRadius: 10, padding: '7px 10px' }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text }}>
-                    {b.stockholm} <span style={{ fontSize: 10, fontWeight: 800, color: b.type === 'daily' ? C.primary : b.type === 'pre-restore' ? C.warning : C.textMid }}>· {b.type}</span>
+                    {b.stockholm} <span style={{ fontSize: 10, fontWeight: 800, color: b.type === 'daily' ? C.primary : b.type === 'weekly' ? C.success : b.type === 'pre-restore' ? C.warning : C.textMid }}>· {b.type}</span>
                   </div>
                   <div style={{ fontSize: 10.5, color: C.textMuted }}>{b.table_count} جداول · {b.record_count} سجل · {humanSizeLocal(b.size)} · {b.status === 'valid' ? '✓' : b.status}</div>
                 </div>

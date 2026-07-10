@@ -14,8 +14,7 @@ import { DB_VERSION } from '../db/local.js';
 
 export const BACKUP_BUCKET = 'backups';
 const INDEX_PATH = 'index.json';
-const KEEP_DAILY = 30;
-const KEEP_MANUAL = 10;
+const KEEP_MANUAL = 10;   // daily kept 7 days, weekly (Friday) kept 30 days — see applyRetention
 const BACKUP_HOUR_STOCKHOLM = 8; // 08:00 Sweden
 const APP_VERSION = (typeof __BUILD_ID__ !== 'undefined') ? __BUILD_ID__ : 'dev';
 const APP_SHA = (typeof __BUILD_SHA__ !== 'undefined') ? __BUILD_SHA__ : 'dev';
@@ -61,16 +60,25 @@ async function writeIndex(sb, list) {
   if (error) throw error;
 }
 
-// Keep last 30 daily + last 10 manual; never auto-drop pre-restore. Returns the trimmed
-// index plus the storage paths to delete.
+// ── Retention (GFS-style, per user request) ──
+//   daily   → kept 7 DAYS (each day's backup replaces itself after a week)
+//   weekly  → the FRIDAY backup is tagged 'weekly' and kept 30 DAYS
+//   manual  → last 10 kept
+//   pre-restore → never auto-dropped (safety)
+// Age-based (not count-based) so gaps in usage can't silently stretch history.
 function applyRetention(index) {
+  const now = Date.now();
+  const DAY = 24 * 60 * 60 * 1000;
   const keep = []; const drop = [];
-  const counts = { daily: 0, manual: 0 };
+  let manualCount = 0;
   for (const b of index) {
     if (b.type === 'pre-restore') { keep.push(b); continue; }
-    const lim = b.type === 'daily' ? KEEP_DAILY : KEEP_MANUAL;
-    counts[b.type === 'daily' ? 'daily' : 'manual'] += 1;
-    if (counts[b.type === 'daily' ? 'daily' : 'manual'] <= lim) keep.push(b); else drop.push(b);
+    const age = now - new Date(b.created_at).getTime();
+    if (b.type === 'weekly') { (age <= 30 * DAY ? keep : drop).push(b); continue; }
+    if (b.type === 'daily') { (age <= 7 * DAY ? keep : drop).push(b); continue; }
+    // manual (and any unknown legacy type): last 10 by recency
+    manualCount += 1;
+    (manualCount <= KEEP_MANUAL ? keep : drop).push(b);
   }
   return { keep, dropPaths: drop.map((b) => b.path) };
 }
@@ -95,7 +103,7 @@ export async function createCloudBackup(type = 'manual') {
     backup_id: id,
     created_at: new Date().toISOString(),
     stockholm: `${date} ${time}`,
-    type, // daily | manual | pre-restore
+    type, // daily | weekly (Friday) | manual | pre-restore
     app_version: APP_VERSION,
     app_commit: APP_SHA,
     schema_version: DB_VERSION,
@@ -185,7 +193,10 @@ export async function autoDailyCloudBackup() {
             || (Date.now() - (last.at || 0) > 28 * 60 * 60 * 1000);
   if (!due) return null;
   try {
-    const meta = await createCloudBackup('daily');
+    // Friday's automatic backup is the WEEKLY snapshot (kept 30 days); other days are
+    // daily (kept 7 days). Weekday computed in the same Stockholm timezone as the schedule.
+    const weekday = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Stockholm', weekday: 'short' }).format(new Date());
+    const meta = await createCloudBackup(weekday === 'Fri' ? 'weekly' : 'daily');
     try { localStorage.setItem(LS_KEY, JSON.stringify({ date, at: Date.now() })); } catch { /* ignore */ }
     return meta;
   } catch (e) { console.warn('[cloud-backup] daily skipped:', e?.message); return null; }
