@@ -129,8 +129,13 @@ export function accountLedger(appOrData) {
   for (const person of (data[TABLES.externalDebts] || [])) {
     if (person.isActive === false || (person.currency || 'AED') !== 'AED') continue;
     for (const tx of (person.txns || [])) {
-      const account = PAYMENT_ACCOUNT[tx.method || 'cash'] || 'drawer';
-      moves.push({ account, date: tx.date, direction: tx.type === 'collect' ? 'in' : 'out', amount: num(tx.amount), currency: 'AED', type: 'personalDebt', method: tx.method || 'cash', label: person.personName || '' });
+      // Only txns where the user EXPLICITLY chose an account touch drawer/bank.
+      // Legacy txns (recorded before the picker existed) have no method — they were
+      // funded by pre-app money and must NOT retroactively drain the drawer.
+      // method 'none' = old money outside the books, by explicit choice.
+      if (!tx.method || tx.method === 'none') continue;
+      const account = PAYMENT_ACCOUNT[tx.method] || 'drawer';
+      moves.push({ account, date: tx.date, direction: tx.type === 'collect' ? 'in' : 'out', amount: num(tx.amount), currency: 'AED', type: 'personalDebt', method: tx.method, label: person.personName || '' });
     }
   }
 

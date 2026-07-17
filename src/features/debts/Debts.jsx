@@ -200,6 +200,7 @@ export default function Debts() {
               <div style={{ display: 'flex', gap: 8 }}>
                 <button onClick={() => setAddP((r) => ({ ...r, method: 'cash' }))} style={dirBtn((addP.method || 'cash') === 'cash', C.primary)}>🗄️ {t('toDrawer') || 'الدرج (كاش)'}</button>
                 <button onClick={() => setAddP((r) => ({ ...r, method: 'transfer' }))} style={dirBtn(addP.method === 'transfer', C.primary)}>🏦 {t('toBank') || 'الحساب البنكي'}</button>
+                <button onClick={() => setAddP((r) => ({ ...r, method: 'none' }))} style={dirBtn(addP.method === 'none', C.textMid)}>💼 {t('oldMoney') || 'مال قديم (لا يخصم)'}</button>
               </div>
             </Field>
             <Field label={t('notes')}><Input value={addP.note} onChange={(v) => setAddP((r) => ({ ...r, note: v }))} /></Field>
@@ -253,6 +254,7 @@ export default function Debts() {
               <div style={{ display: 'flex', gap: 8 }}>
                 <button onClick={() => setTxn((r) => ({ ...r, method: 'cash' }))} style={dirBtn((txn.method || 'cash') === 'cash', C.primary)}>🗄️ {t('toDrawer') || 'الدرج (كاش)'}</button>
                 <button onClick={() => setTxn((r) => ({ ...r, method: 'transfer' }))} style={dirBtn(txn.method === 'transfer', C.primary)}>🏦 {t('toBank') || 'الحساب البنكي'}</button>
+                <button onClick={() => setTxn((r) => ({ ...r, method: 'none' }))} style={dirBtn(txn.method === 'none', C.textMid)}>💼 {t('oldMoney') || 'مال قديم (لا يخصم)'}</button>
               </div>
             </Field>
             <Field label={t('notes')}><Input value={txn.note} onChange={(v) => setTxn((r) => ({ ...r, note: v }))} /></Field>
