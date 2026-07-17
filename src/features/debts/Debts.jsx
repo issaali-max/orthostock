@@ -64,7 +64,7 @@ export default function Debts() {
     const type = r.dir === 'iOwe' ? 'collect' : 'lend';
     await createRow(TABLES.externalDebts, {
       personName: r.personName.trim(), currency: r.currency === 'USD' ? 'USD' : 'AED',
-      txns: [{ type, amount: num(r.amount), date: todayISO(), note: r.note || '' }], isActive: true,
+      txns: [{ type, amount: num(r.amount), date: todayISO(), note: r.note || '', method: r.method || 'cash' }], isActive: true,
     });
     setAddP(null); showToast(t('saved'), 'success');
   };
@@ -76,7 +76,7 @@ export default function Debts() {
     let type;
     if (kind === 'payment') type = iOwe ? 'lend' : 'collect';
     else type = iOwe ? 'collect' : 'lend';
-    await updateRow(TABLES.externalDebts, p.id, { txns: [...(p.txns || []), { type, amount: amt, date: txn.date || todayISO(), note: txn.note || '' }] });
+    await updateRow(TABLES.externalDebts, p.id, { txns: [...(p.txns || []), { type, amount: amt, date: txn.date || todayISO(), note: txn.note || '', method: txn.method || 'cash' }] });
     setTxn(null); setPerson(null); showToast(t('saved'), 'success');
   };
   const deletePerson = async (p) => {
@@ -196,6 +196,12 @@ export default function Debts() {
               <div style={{ flex: 2 }}><Field label={t('amount')} required><Input type="number" value={addP.amount} onChange={(v) => setAddP((r) => ({ ...r, amount: v }))} /></Field></div>
               <div style={{ flex: 1 }}><Field label={t('currency')}><Select value={addP.currency} onChange={(v) => setAddP((r) => ({ ...r, currency: v }))} options={[{ value: 'AED', label: 'AED' }, { value: 'USD', label: 'USD' }]} /></Field></div>
             </div>
+            <Field label={t('fromAccount') || 'من أي حساب يخرج/يدخل المال؟'}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => setAddP((r) => ({ ...r, method: 'cash' }))} style={dirBtn((addP.method || 'cash') === 'cash', C.primary)}>🗄️ {t('toDrawer') || 'الدرج (كاش)'}</button>
+                <button onClick={() => setAddP((r) => ({ ...r, method: 'transfer' }))} style={dirBtn(addP.method === 'transfer', C.primary)}>🏦 {t('toBank') || 'الحساب البنكي'}</button>
+              </div>
+            </Field>
             <Field label={t('notes')}><Input value={addP.note} onChange={(v) => setAddP((r) => ({ ...r, note: v }))} /></Field>
           </div>
         )}
@@ -243,6 +249,12 @@ export default function Debts() {
           <div style={{ display: 'grid', gap: 10 }}>
             <Field label={t('amount')} required><Input type="number" value={txn.amount} onChange={(v) => setTxn((r) => ({ ...r, amount: v }))} /></Field>
             <Field label={t('date')}><Input type="date" value={txn.date} onChange={(v) => setTxn((r) => ({ ...r, date: v }))} /></Field>
+            <Field label={t('fromAccount') || 'من أي حساب يخرج/يدخل المال؟'}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => setTxn((r) => ({ ...r, method: 'cash' }))} style={dirBtn((txn.method || 'cash') === 'cash', C.primary)}>🗄️ {t('toDrawer') || 'الدرج (كاش)'}</button>
+                <button onClick={() => setTxn((r) => ({ ...r, method: 'transfer' }))} style={dirBtn(txn.method === 'transfer', C.primary)}>🏦 {t('toBank') || 'الحساب البنكي'}</button>
+              </div>
+            </Field>
             <Field label={t('notes')}><Input value={txn.note} onChange={(v) => setTxn((r) => ({ ...r, note: v }))} /></Field>
           </div>
         )}

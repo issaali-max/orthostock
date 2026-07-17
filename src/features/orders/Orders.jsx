@@ -146,8 +146,14 @@ function OrdersTab({ app, t, lang, data, createRow, updateRow, deleteRow }) {
                   <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>
                     📍 {emirateLabel(o.emirate, lang) || '—'}{o.city ? ` · ${o.city}` : ''} · {fmtDate(o.date)}
                   </div>
-                  <div style={{ fontSize: 12, color: C.textMid, marginTop: 5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    📦 {o.items.length ? o.items.map((it) => `${it.material}${it.qty > 1 ? ` ×${it.qty}` : ''}`).join(' · ') : t('noProducts')}
+                  <div style={{ marginTop: 5, display: 'grid', gap: 2 }}>
+                    {o.items.length === 0 && !(o.notes || '').trim() && <div style={{ fontSize: 12, color: C.textMuted }}>📦 {t('noProducts')}</div>}
+                    {o.items.map((it, ix) => (
+                      <div key={ix} style={{ fontSize: 12, color: C.textMid }}>
+                        📦 {it.material}{num(it.qty) > 0 ? ` ×${it.qty}` : ''}{it.note ? <span style={{ color: C.textMuted }}> — {it.note}</span> : ''}
+                      </div>
+                    ))}
+                    {(o.notes || '').trim() && <div style={{ fontSize: 12, color: C.warning, fontWeight: 700 }}>📝 {o.notes}</div>}
                   </div>
                 </div>
                 <Badge tone={STATUS_TONE[o.status] || 'info'}>{t(`status_${o.status || 'new'}`)}</Badge>

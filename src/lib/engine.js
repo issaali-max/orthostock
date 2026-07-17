@@ -123,6 +123,17 @@ export function accountLedger(appOrData) {
     moves.push({ account, date: f.date, direction: dirIn ? 'in' : 'out', amount: num(f.amount), currency: f.currency || 'AED', type: f.type, reason: f.reason || f.notes || '', flowId: f.id, otherAccount: f.toAccount || f.fromAccount });
   }
 
+  // 6) Personal debts (externalDebts): lending money leaves the chosen account (drawer/
+  //    bank), collecting a repayment enters it — per each txn's method. AED only: the
+  //    drawer/bank accounts are AED books; USD personal debts stay out of them.
+  for (const person of (data[TABLES.externalDebts] || [])) {
+    if (person.isActive === false || (person.currency || 'AED') !== 'AED') continue;
+    for (const tx of (person.txns || [])) {
+      const account = PAYMENT_ACCOUNT[tx.method || 'cash'] || 'drawer';
+      moves.push({ account, date: tx.date, direction: tx.type === 'collect' ? 'in' : 'out', amount: num(tx.amount), currency: 'AED', type: 'personalDebt', method: tx.method || 'cash', label: person.personName || '' });
+    }
+  }
+
   // Balances per account per currency; pending cheques excluded from balance.
   const blank = () => ({ AED: 0, USD: 0 });
   const balances = { bank: blank(), drawer: blank() };

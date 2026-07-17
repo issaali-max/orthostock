@@ -43,7 +43,7 @@ export default function QuickOrder({ app, customerId, onClose, onSaved }) {
 
   return (
     <Modal open onClose={onClose} title={`📋 ${t('newOrder')}${customer ? ` · ${customer.name}` : ''}`} dismissable
-      footer={<><Btn variant="ghost" onClick={onClose}>{t('cancel')}</Btn><Btn onClick={save} disabled={busy || lines.length === 0}>{t('save')}</Btn></>}>
+      footer={<><Btn variant="ghost" onClick={onClose}>{t('cancel')}</Btn><Btn onClick={save} disabled={busy || (lines.length === 0 && !notes.trim())}>{t('save')}</Btn></>}>
       <Field label={t('priority')}>
         <Select value={priority} onChange={setPriority} options={[{ value: 'normal', label: t('normal') }, { value: 'high', label: `🔥 ${t('high')}` }]} />
       </Field>
