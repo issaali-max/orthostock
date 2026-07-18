@@ -1608,7 +1608,8 @@ export function financialPosition(app, today = todayISO()) {
   const year = today.slice(0, 4);
   const ev = cashEvents(app);
 
-  const cash = { AED: { balance: 0, in: 0, out: 0, invOut: 0, invIn: 0, today: 0, month: 0, year: 0 }, USD: { balance: 0, in: 0, out: 0, invOut: 0, invIn: 0, today: 0, month: 0, year: 0 } };
+  const mkBucket = () => ({ balance: 0, in: 0, out: 0, invOut: 0, invIn: 0, today: 0, month: 0, year: 0, bySource: {}, top: [] });
+  const cash = { AED: mkBucket(), USD: mkBucket() };
   for (const e of ev) {
     const b = cash[e.currency]; const signed = e.direction === 'in' ? e.amount : -e.amount;
     b.balance = round2(b.balance + signed);
@@ -1616,10 +1617,16 @@ export function financialPosition(app, today = todayISO()) {
       // asset↔asset: moves the balance but is NOT spending/income
       if (e.direction === 'in') b.invIn = round2(b.invIn + e.amount); else b.invOut = round2(b.invOut + e.amount);
     } else if (e.direction === 'in') b.in = round2(b.in + e.amount); else b.out = round2(b.out + e.amount);
+    // Where-from / where-to breakdown: totals per source + the biggest single movements,
+    // so the drill can EXPLAIN the balance instead of just stating it.
+    const bs = (b.bySource[e.source] = b.bySource[e.source] || { in: 0, out: 0 });
+    if (e.direction === 'in') bs.in = round2(bs.in + e.amount); else bs.out = round2(bs.out + e.amount);
+    b.top.push({ date: e.date, label: e.label, source: e.source, amount: e.amount, direction: e.direction });
     if ((e.date || '') === today) b.today = round2(b.today + signed);
     if ((e.date || '').slice(0, 7) === month) b.month = round2(b.month + signed);
     if ((e.date || '').slice(0, 4) === year) b.year = round2(b.year + signed);
   }
+  for (const k of ['AED', 'USD']) cash[k].top = cash[k].top.sort((a, b2) => b2.amount - a.amount).slice(0, 6);
 
   const recv = receivables(app);
   const inv = investmentValue(app);

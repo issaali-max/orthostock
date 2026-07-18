@@ -166,6 +166,53 @@ function CashModal({ open, onClose, fin, t }) {
                 <Stat label={t('thisMonth')} value={ccy(b.month, code)} color={C.textMid} />
                 <Stat label={t('thisYear')} value={ccy(b.year, code)} color={C.textMid} />
               </div>
+
+              {(() => {
+                // ── من أين جاء المال وإلى أين ذهب ──
+                const SRC = {
+                  invoice: { icon: '🧾', ar: 'دفعات فواتير من الأطباء' },
+                  debtCollect: { icon: '🤝', ar: 'تحصيل ديون شخصية' },
+                  manual: { icon: '✋', ar: 'إيداعات/سحوبات يدوية' },
+                  purchase: { icon: '📦', ar: 'مشتريات مواد (عند الشراء)' },
+                  supplierPayment: { icon: '🏭', ar: 'دفعات لاحقة للموردين' },
+                  expense: { icon: '💸', ar: 'مصاريف' },
+                  debtLend: { icon: '🤝', ar: 'إقراض شخصي' },
+                  investTransfer: { icon: '📈', ar: 'محوَّل للاستثمار (أصل↔أصل)' },
+                };
+                const entries = Object.entries(b.bySource || {})
+                  .map(([src, v2]) => ({ src, net: round2(v2.in - v2.out), in: v2.in, out: v2.out }))
+                  .filter((x) => Math.abs(x.in) > 0.005 || Math.abs(x.out) > 0.005)
+                  .sort((a, b2) => Math.abs(b2.net) - Math.abs(a.net));
+                if (!entries.length) return null;
+                return (
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ fontSize: 11, fontWeight: 900, color: C.text, marginBottom: 5 }}>🧭 {t('whereFromTo') || 'من أين جاء وإلى أين ذهب؟'}</div>
+                    <div style={{ display: 'grid', gap: 3 }}>
+                      {entries.map((x) => (
+                        <div key={x.src} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5 }}>
+                          <span style={{ flexShrink: 0 }}>{SRC[x.src]?.icon || '•'}</span>
+                          <span style={{ flex: 1, color: C.textMid, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{SRC[x.src]?.ar || x.src}</span>
+                          <b style={{ color: x.net >= 0 ? C.success : C.danger, flexShrink: 0 }}>{x.net >= 0 ? '+' : '−'}{ccy(Math.abs(x.net), code)}</b>
+                        </div>
+                      ))}
+                    </div>
+                    {(b.top || []).length > 0 && (
+                      <>
+                        <div style={{ fontSize: 11, fontWeight: 900, color: C.text, margin: '9px 0 5px' }}>🔎 {t('biggestMoves') || 'أكبر الحركات'}</div>
+                        <div style={{ display: 'grid', gap: 3 }}>
+                          {b.top.map((m, i) => (
+                            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
+                              <span style={{ flexShrink: 0 }}>{SRC[m.source]?.icon || '•'}</span>
+                              <span style={{ flex: 1, color: C.textMuted, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.label || SRC[m.source]?.ar || m.source} · {m.date || ''}</span>
+                              <b style={{ color: m.direction === 'in' ? C.success : C.danger, flexShrink: 0 }}>{m.direction === 'in' ? '+' : '−'}{ccy(m.amount, code)}</b>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           ))}
         </div>
