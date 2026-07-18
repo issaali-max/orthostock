@@ -349,9 +349,20 @@ export default function Investments() {
       <div style={{ borderRadius: 18, padding: 16, marginBottom: 14, color: '#fff', background: `linear-gradient(135deg, ${C.primary}, ${C.primaryLight})`, boxShadow: '0 10px 26px rgba(13,59,110,.25)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
-            <div style={{ fontSize: 12, opacity: .85, fontWeight: 700 }}>💹 {t('stocksPnL') || 'ربح / خسارة الأسهم'}</div>
-            <div style={{ fontSize: 30, fontWeight: 800, margin: '2px 0 2px', color: stats.totalPnL >= 0 ? '#BFF3D6' : '#FFD0D0' }}>{stats.totalPnL >= 0 ? '+' : ''}{cur(stats.totalPnL)}</div>
-            <div style={{ fontSize: 11.5, opacity: .9 }}>{t('holdings')} {cur(stats.holdingsValue)} − {t('cost') || 'التكلفة'} {cur(round2(stats.holdingsValue - stats.totalUnrealized))}</div>
+            <div style={{ fontSize: 12, opacity: .85, fontWeight: 700 }}>📈 {t('profitSinceStart') || 'الربح منذ البداية'}</div>
+            {(() => {
+              const sinceStart = round2(stats.accountValue - stats.netCapital);
+              return (
+                <>
+                  <div style={{ fontSize: 30, fontWeight: 800, margin: '2px 0 2px', color: sinceStart >= 0 ? '#BFF3D6' : '#FFD0D0' }}>{sinceStart >= 0 ? '+' : ''}{cur(sinceStart)}</div>
+                  <div style={{ fontSize: 11.5, opacity: .9 }}>{t('accountValue') || 'قيمة الحساب'} {cur(stats.accountValue)} − {t('depositedTotal') || 'المودَع'} {cur(stats.netCapital)}</div>
+                  <div style={{ fontSize: 10.5, opacity: .85, marginTop: 2 }}>
+                    {num(stats.pastProfit) !== 0 && <>🕰️ {t('pastProfit') || 'أرباح صفقات قديمة'} {stats.pastProfit >= 0 ? '+' : ''}{cur(stats.pastProfit)} · </>}
+                    💹 {t('unrealizedPnL') || 'غير محقق'} {stats.totalPnL >= 0 ? '+' : ''}{cur(stats.totalPnL)}
+                  </div>
+                </>
+              );
+            })()}
           </div>
           {liveToggle}
         </div>
