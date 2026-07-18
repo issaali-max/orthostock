@@ -26,6 +26,25 @@ export default function Investments() {
   const [detailId, setDetailId] = useState(null);
   const [editSec, setEditSec] = useState(null);
   const [trade, setTrade] = useState(null);
+
+  // ── One-time migration: the old gap button recorded the reinvested-gains adjustment
+  //    as a DEPOSIT ('تسوية إيداعات سابقة'), inflating "deposited since start".
+  //    Convert any such row to type 'pastProfit' (realized gains from pre-app trades):
+  //    cash math is identical, but deposits return to the owner's true capital.
+  //    Idempotent — after conversion nothing matches. ──
+  useEffect(() => {
+    const legacy = (data[TABLES.cashFlows] || []).filter((f) => f.isActive !== false
+      && (f.account || 'investment') === 'investment' && f.type === 'deposit'
+      && (f.reason === 'تسوية إيداعات سابقة' || f.reason === 'Back-fill of earlier deposits'));
+    if (!legacy.length) return;
+    (async () => {
+      for (const f of legacy) {
+        // eslint-disable-next-line no-await-in-loop
+        await updateRow(TABLES.cashFlows, f.id, { type: 'pastProfit', reason: t('pastProfitReason') || 'أرباح محققة من صفقات سابقة (تسوية افتتاحية)' });
+      }
+    })();
+  }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [tEdit, setTEdit] = useState(null); // {entry, qty, price, date}
   const delTrade = async (e) => {
     if (!window.confirm(t('confirmDelete'))) return;
