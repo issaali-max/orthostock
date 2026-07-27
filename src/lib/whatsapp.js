@@ -56,7 +56,7 @@ export function invoiceMessage({ lang = 'ar', companyName, invoiceNumber, custom
 
 // Send: prefer Web Share with the PDF file (mobile, attaches the file); else
 // download the PDF and open wa.me with the message. Never throws to the caller.
-export async function sendInvoiceWhatsApp({ phone, message, pdfBlob, pdfName }) {
+export async function sendDocumentWhatsApp({ phone, message, pdfBlob, pdfName }) {
   const number = normalizePhone(phone);
   const file = pdfBlob ? new File([pdfBlob], pdfName || 'invoice.pdf', { type: 'application/pdf' }) : null;
 
@@ -86,4 +86,18 @@ export function downloadBlob(blob, name) {
   a.href = url; a.download = name;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+// Back-compat alias: the invoice screens import this name.
+export const sendInvoiceWhatsApp = sendDocumentWhatsApp;
+
+// Message that accompanies a purchase order PDF sent to a supplier.
+export function purchaseOrderMessage({ companyName, supplierName, reference, date, totalItems }) {
+  let m = `${companyName || 'OrthoStock'} — Purchase Order\n`;
+  if (supplierName) m += `Supplier: ${supplierName}\n`;
+  m += `Reference: ${reference}\n`;
+  m += `Date: ${date}\n`;
+  m += `Items: ${totalItems}\n\n`;
+  m += `Please find the purchase order attached. Kindly confirm availability and lead time.`;
+  return m;
 }

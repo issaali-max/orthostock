@@ -106,7 +106,7 @@ function companyBits(settings) {
 
 // The header that repeats on every page: logo + company (left), big DOC TITLE + TRN
 // (right), then a two-column meta band (customer block | doc-number block).
-function docHeader({ settings, title, meta, party, billingAddress = '', showTrn = true }) {
+function docHeader({ settings, title, meta, party, billingAddress = '', billingLabel = 'Billing Address', showTrn = true }) {
   const c = companyBits(settings);
   const logo = settings?.companyLogo
     ? `<img src="${settings.companyLogo}" alt="${esc(c.company)}" style="height:170px;object-fit:contain;display:block" />`
@@ -132,7 +132,7 @@ function docHeader({ settings, title, meta, party, billingAddress = '', showTrn 
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:24px;border-top:1px solid ${LINE};padding-top:8px">
         <div style="flex:1.2">
           ${party.map(([k, v]) => pair(k, v, 'left')).join('')}
-          ${pair('Billing Address', esc(billingAddress), 'left')}
+          ${pair(billingLabel, esc(billingAddress), 'left')}
         </div>
         <div style="min-width:230px">
           ${meta.map(([k, v]) => pair(k, v, 'right')).join('')}
@@ -354,6 +354,74 @@ function buildReceiptHtml({ receipt, settings, customer }) {
 }
 
 export function buildInvoiceHtml(args) { return buildHtml(args); }
+
+// ── PURCHASE ORDER (outgoing, to a supplier) ──
+// Deliberately PRICE-FREE. This document leaves the company, and our purchase costs
+// are internal: the supplier receives item names and quantities only. Nothing in this
+// builder reads purchasePriceAvg/purchasePriceLatest — that is the guarantee.
+const PO_ROWS_FIRST = 20, PO_ROWS_NEXT = 30;
+
+function poItemsHead() {
+  const th = (w, txt, align = 'center') => `<th style="background:${NAVY};color:#fff;padding:8px 5px;font-size:10px;font-weight:700;text-align:${align};${w ? `width:${w};` : ''}border:1px solid ${NAVY}">${txt}</th>`;
+  return `<tr>${th('30px', 'No')}${th('', 'Item Description', 'left')}${th('70px', 'Qty')}</tr>`;
+}
+
+// tree: [{ name, icon, groups: [{ title, items: [{ name, qty }] }] }]
+function poRows(tree) {
+  const rows = []; let n = 0;
+  const band = (txt, bg, color, size, weight) =>
+    `<tr><td colspan="3" dir="ltr" style="padding:5px 8px;background:${bg};color:${color};font-size:${size}px;font-weight:${weight};border:1px solid ${LINE};text-align:left">${txt}</td></tr>`;
+  for (const cat of tree) {
+    rows.push(band(`${esc(cat.icon || '')} ${esc(cat.name)}`.trim(), '#eef2f7', NAVY, 11, 800));
+    for (const g of cat.groups) {
+      rows.push(band(esc(g.title), '#f7f9fb', MUTE, 10, 700));
+      for (const it of g.items) {
+        n += 1;
+        const td = (txt, align, opts = {}) => `<td dir="ltr" style="height:24px;padding:3px 7px;font-size:10.5px;text-align:${align};border:1px solid ${LINE};direction:ltr;${opts.bold ? 'font-weight:800;' : ''}${opts.color ? `color:${opts.color};` : ''}">${txt}</td>`;
+        rows.push(`<tr>${td(n, 'center', { color: MUTE })}${td(esc(it.name), 'left')}${td(esc(String(it.qty)), 'center', { bold: true })}</tr>`);
+      }
+    }
+  }
+  return rows;
+}
+
+function buildPurchaseOrderHtml({ settings, supplier, tree, reference, date, totalItems, totalQty }) {
+  const rows = poRows(tree);
+  const pages = []; let idx = 0;
+  while (idx < rows.length || pages.length === 0) {
+    const cap = pages.length === 0 ? PO_ROWS_FIRST : PO_ROWS_NEXT;
+    pages.push(rows.slice(idx, idx + cap));
+    idx += cap;
+  }
+  const count = pages.length;
+  const summary = `
+    <div dir="ltr" style="display:flex;justify-content:flex-end;margin-top:10px;direction:ltr">
+      <div style="min-width:240px;border:1px solid ${LINE};border-radius:6px;padding:9px 12px;font-size:11px">
+        <div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:${MUTE}">Total items</span><b>${esc(totalItems)}</b></div>
+        <div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:${MUTE}">Total quantity</span><b style="color:${NAVY};font-size:13px">${esc(totalQty)}</b></div>
+      </div>
+    </div>`;
+  const party = [['Supplier', esc(supplier?.name || '—')], ...(supplier?.phone ? [['Contact', esc(supplier.phone)]] : [])];
+  const meta = [['Reference', esc(reference)], ['Order Date', esc(date)], ['Page #', '']];
+  return pages.map((pageRows, i) => {
+    const last = i === count - 1;
+    const metaWithPage = meta.map(([k, v]) => (k === 'Page #' ? [k, `${i + 1} of ${count}`] : [k, v]));
+    return `
+    <div class="page" dir="ltr" style="width:794px;min-height:1123px;box-sizing:border-box;background:#fff;color:${INK};font-family:Arial,Helvetica,sans-serif;padding:24px 26px;display:flex;flex-direction:column;text-align:left;direction:ltr;${last ? '' : 'page-break-after:always;'}">
+      ${docHeader({ settings, title: 'PURCHASE ORDER', meta: metaWithPage, party, billingAddress: esc(supplier?.city || ''), billingLabel: 'Supplier Address', showTrn: true })}
+      <table dir="ltr" style="width:100%;border-collapse:collapse;margin-top:10px;direction:ltr">
+        <thead>${poItemsHead()}</thead>
+        <tbody>${pageRows.join('')}</tbody>
+      </table>
+      ${last ? summary : ''}
+      ${docFooter(settings, i + 1, count)}
+    </div>`;
+  }).join('');
+}
+
+const poName = (args) => `PO-${String(args.supplier?.name || 'supplier').replace(/[^\w-]/g, '_')}-${args.date}`;
+export function printPurchaseOrder(args) { return printDoc(buildPurchaseOrderHtml(args), poName(args)); }
+export function generatePurchaseOrderPdf(args) { return docToPdf(buildPurchaseOrderHtml(args), `${poName(args)}.pdf`); }
 
 // ── Render helpers: print window + PDF (real page breaks, no image slicing) ──
 function wrapPages(inner, title) {
