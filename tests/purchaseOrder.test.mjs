@@ -58,5 +58,40 @@ for (const c of tree) for (const g of c.groups) for (const it of g.items) { coun
 ok('total items counts ticked rows only', count === 2);
 ok('total qty sums ticked rows only', qty === 13);
 
+// ── The view filter must never change what gets sent ──
+// Row membership mirrors PurchasePlanning: `inOrder` drives the document, `visible`
+// drives the screen. They are computed independently, and only `inOrder` reaches sendTree.
+const mkRow = (name, { status = 'ok', onListFlag = false, skip = false }) => {
+  const auto = status === 'low' || status === 'out';
+  const manual = onListFlag;
+  const onList = manual || auto;
+  return { name, status, manual, onList, skipped: skip, inOrder: onList && !skip };
+};
+
+const catalogue = [
+  mkRow('A-low', { status: 'low' }),                       // automatic
+  mkRow('B-manual', { onListFlag: true }),                 // added by me
+  mkRow('C-unticked', { status: 'out', skip: true }),      // low but not ordering
+  mkRow('D-plenty', {}),                                   // healthy, off the list
+];
+
+const visibleUnder = (v, r) => v === 'all' ? true
+  : v === 'auto' ? (r.status === 'low' || r.status === 'out') && !r.manual
+    : v === 'manual' ? r.manual
+      : r.onList;
+
+const sent = catalogue.filter((r) => r.inOrder).map((r) => r.name).sort().join(',');
+ok('order is A-low + B-manual only', sent === 'A-low,B-manual');
+for (const v of ['list', 'auto', 'manual', 'all']) {
+  const stillSent = catalogue.filter((r) => r.inOrder).map((r) => r.name).sort().join(',');
+  ok(`view "${v}" does not change what is sent`, stillSent === sent);
+}
+ok('view "all" reveals the healthy material', catalogue.filter((r) => visibleUnder('all', r)).length === 4);
+ok('view "list" hides the healthy material', catalogue.filter((r) => visibleUnder('list', r)).some((r) => r.name === 'D-plenty') === false);
+ok('view "auto" shows only automatic rows', catalogue.filter((r) => visibleUnder('auto', r)).map((r) => r.name).join(',') === 'A-low,C-unticked');
+ok('view "manual" shows only my additions', catalogue.filter((r) => visibleUnder('manual', r)).map((r) => r.name).join(',') === 'B-manual');
+ok('an unticked row is visible but never sent', catalogue.find((r) => r.name === 'C-unticked').inOrder === false && visibleUnder('list', catalogue.find((r) => r.name === 'C-unticked')));
+ok('a healthy off-list material is never sent', catalogue.find((r) => r.name === 'D-plenty').inOrder === false);
+
 console.log(fail === 0 ? '\nALL PURCHASE ORDER TESTS PASSED' : `\n${fail} FAILED`);
 process.exit(fail === 0 ? 0 : 1);

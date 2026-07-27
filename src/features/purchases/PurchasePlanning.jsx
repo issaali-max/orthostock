@@ -50,6 +50,9 @@ export default function PurchasePlanning({ onClose }) {
   const [phone, setPhone] = useState('');
   const [sending, setSending] = useState(false);
   const [showSkipped, setShowSkipped] = useState(true);        // unticked rows stay visible by default
+  const [view, setView] = useState('list');                    // list | auto | manual | all
+  const [supFilter, setSupFilter] = useState('__all');
+  const [search, setSearch] = useState('');
   const toggleMove = (id) => setMoveOpen((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const { data, settings, showToast, updateRow } = app;
   const cur = settings?.baseCurrency || 'AED';
@@ -58,6 +61,9 @@ export default function PurchasePlanning({ onClose }) {
   //    stays visible (dimmed) and is simply left out of the order. Over time the list
   //    becomes the standing order for each supplier, built by accumulation.
   const toggleSkip = async (v, skip) => { await updateRow(TABLES.variants, v.id, { listSkip: !!skip }); };
+  // Ticking a material that was never on the list (visible via the "All materials" view)
+  // adds it as a manual entry — this is how you put something back after removing it.
+  const addToList = async (v) => { await updateRow(TABLES.variants, v.id, { onList: true, listSkip: false }); };
   // The only permanent removal, offered on unticked manual rows as a deliberate second step.
   const dropFromList = async (v) => { await updateRow(TABLES.variants, v.id, { onList: false, listSkip: false, listQty: null, listSupplierId: null }); };
   const setQty = async (v, qty) => { await updateRow(TABLES.variants, v.id, { listQty: Math.max(0, num(qty)) }); };
@@ -71,41 +77,58 @@ export default function PurchasePlanning({ onClose }) {
   const supOptions = [{ value: '__none', label: 'No supplier' },
     ...suppliers.map((s) => ({ value: s.id, label: s.name }))];
 
-  const { buckets, counts, totalEst } = useMemo(() => {
+  const { buckets, counts, totalEst, allCount } = useMemo(() => {
     const cats = (data[TABLES.categories] || []).filter((c) => c.isActive !== false);
     const prods = (data[TABLES.products] || []).filter((p) => p.isActive !== false);
     const variants = (data[TABLES.variants] || []).filter((v) => v.isActive !== false);
     // This screen is English-only (it is what suppliers receive), so never fall to nameAr first.
     const catName = (c) => (c?.nameEn || c?.nameAr) || '—';
+    const needle = search.trim().toLowerCase();
 
-    // 1) Everything the list needs: manual additions + automatic low/out materials.
+    // 1) Build a row for EVERY material. `inOrder` is what actually gets ordered —
+    //    low/out automatically, or added by you — and it is independent of the view
+    //    filter below. Filtering changes what you SEE, never what you send.
     const rows = [];
-    let nLow = 0, nNear = 0, nManual = 0, nSkipped = 0, est = 0;
+    let nLow = 0, nNear = 0, nManual = 0, nSkipped = 0, est = 0, nAll = 0;
     for (const v of variants) {
+      nAll++;
       const s = statusOf(v);
       const auto = s === 'low' || s === 'out';
-      if (!v.onList && !auto) continue;
+      const manual = !!v.onList;
+      const onList = manual || auto;
+      const skipped = !!v.listSkip;
+      const inOrder = onList && !skipped;
       const overridden = num(v.listQty) > 0;
       const qty = overridden ? num(v.listQty) : (autoQty(v) || 1);
-      const skipped = !!v.listSkip;
       const unitCost = num(v.purchasePriceAvg) || num(v.purchasePriceLatest);
-      rows.push({ v, status: s, manual: !!v.onList, qty, overridden, skipped, unitCost, lineCost: round2(qty * unitCost) });
-      if (skipped) { nSkipped++; continue; }            // unticked rows count for nothing
-      if (v.onList) nManual++; else if (s === 'near') nNear++; else nLow++;
-      est += qty * unitCost;
+
+      if (inOrder) {
+        if (manual) nManual++; else if (s === 'near') nNear++; else nLow++;
+        est += qty * unitCost;
+      } else if (onList) { nSkipped++; }
+
+      // 2) View filter — source, then name search. Recorded as `visible`, NOT used to
+      //    drop the row: the order must stay complete whatever the view is showing.
+      let visible = view === 'all' ? true
+        : view === 'auto' ? (auto && !manual)
+          : view === 'manual' ? manual
+            : onList;                                   // 'list' (default)
+      if (visible && needle) visible = `${v.nameEn || ''} ${v.sku || ''}`.toLowerCase().includes(needle);
+
+      rows.push({ v, status: s, manual, onList, inOrder, visible, qty, overridden, skipped, unitCost, lineCost: round2(qty * unitCost) });
     }
 
-    // 2) Bucket by the EFFECTIVE list supplier: the per-list override wins, else the
+    // 3) Bucket by the EFFECTIVE list supplier: the per-list override wins, else the
     //    material's preferred supplier, else the no-supplier bucket.
     const effSup = (v) => (v.listSupplierId !== undefined && v.listSupplierId !== null) ? v.listSupplierId : (v.supplierId || '');
     const bySup = new Map();
     for (const r of rows) {
       const key = effSup(r.v);
+      if (supFilter !== '__all' && key !== supFilter) continue;
       if (!bySup.has(key)) bySup.set(key, []);
       bySup.get(key).push(r);
     }
-
-    // 3) Inside each bucket keep the familiar category → group → material tree.
+    // 4) Inside each bucket keep the familiar category → group → material tree.
     const buildTree = (bucketRows) => {
       const byProd = {};
       for (const r of bucketRows) (byProd[r.v.productId] = byProd[r.v.productId] || []).push(r);
@@ -128,22 +151,28 @@ export default function PurchasePlanning({ onClose }) {
         sid,
         supplier: sid ? suppliers.find((s) => s.id === sid) : null,
         name: sid ? (suppliers.find((s) => s.id === sid)?.name || '—') : 'No preferred supplier',
-        tree: buildTree(rs),
-        count: rs.filter((r) => !r.skipped).length,
-        skipped: rs.filter((r) => r.skipped).length,
-        est: round2(rs.filter((r) => !r.skipped).reduce((s2, r) => s2 + r.lineCost, 0)),
+        tree: buildTree(rs.filter((r) => r.visible)),
+        sendTree: buildTree(rs.filter((r) => r.inOrder)),
+        count: rs.filter((r) => r.inOrder).length,
+        skipped: rs.filter((r) => r.onList && r.skipped).length,
+        visibleCount: rs.filter((r) => r.visible).length,
+        est: round2(rs.filter((r) => r.inOrder).reduce((s2, r) => s2 + r.lineCost, 0)),
       }))
+      .filter((b) => b.visibleCount > 0)
       // named suppliers alphabetically, the no-supplier bucket last
       .sort((a, b) => (a.sid === '' ? 1 : b.sid === '' ? -1 : (supIndex.get(a.sid) ?? 999) - (supIndex.get(b.sid) ?? 999)));
 
-    return { buckets, counts: { low: nLow, near: nNear, manual: nManual, skipped: nSkipped, total: nLow + nNear + nManual }, totalEst: round2(est) };
-  }, [data, suppliers]);
+    return {
+      buckets, allCount: nAll, totalEst: round2(est),
+      counts: { low: nLow, near: nNear, manual: nManual, skipped: nSkipped, total: nLow + nNear + nManual },
+    };
+  }, [data, suppliers, view, supFilter, search]);
 
   // ── Clean order sheet for ONE supplier (or all when bucket is null): name+qty only —
   //    stock levels and prices are internal and never leave the app. ──
   // ── Outgoing documents: ticked rows only, name+qty only. Stock levels and costs are
   //    internal and never leave the app. ──
-  const orderTree = (bucket) => bucket.tree
+  const orderTree = (bucket) => bucket.sendTree
     .map((cat) => ({
       name: cat.name,
       icon: cat.category.icon || '',
@@ -152,7 +181,7 @@ export default function PurchasePlanning({ onClose }) {
           title: g.product.nameEn || g.product.nameAr || '',
           // Projected down to name+qty on purpose: the row objects carry unitCost/lineCost,
           // and nothing downstream of this point is allowed to see them.
-          items: g.needed.filter((it) => !it.skipped).map((it) => ({ name: it.v.nameEn || it.v.sku, qty: fmtNum(it.qty) })),
+          items: g.needed.map((it) => ({ name: it.v.nameEn || it.v.sku, qty: fmtNum(it.qty) })),
         }))
         .filter((g) => g.items.length),
     }))
@@ -231,7 +260,10 @@ export default function PurchasePlanning({ onClose }) {
     try { await navigator.clipboard.writeText(text); showToast('Copied', 'success'); } catch { showToast('—', 'error'); }
   };
 
-  const badgeFor = (it) => it.manual ? <Badge tone="info">🔖</Badge> : it.status === 'near' ? <Badge tone="warning">🟠</Badge> : <Badge tone="danger">🔴</Badge>;
+  const badgeFor = (it) => !it.onList ? <Badge tone="neutral">⚪</Badge>
+    : it.manual ? <Badge tone="info">🔖</Badge>
+      : it.status === 'near' ? <Badge tone="warning">🟠</Badge>
+        : <Badge tone="danger">🔴</Badge>;
 
   // ── Send one supplier's order as a PDF over WhatsApp ──
   const poArgs = (bucket) => {
@@ -286,19 +318,62 @@ export default function PurchasePlanning({ onClose }) {
         {counts.total > 0 && buckets.length > 1 && <Btn variant="light" onClick={() => shareOrder(null)}>📤 Share All</Btn>}
         {counts.total > 0 && buckets.length > 1 && <Btn onClick={() => printList(null)}>🖨️ Print All</Btn>}
       </>}>
-      {counts.total === 0 ? (
+      {buckets.length === 0 ? (
         <div style={{ padding: 24, textAlign: 'center' }}>
-          <div style={{ color: C.success, fontWeight: 700, marginBottom: 8 }}>✓ Nothing to reorder</div>
-          <div style={{ fontSize: 12, color: C.textMuted }}>Low-stock materials land here automatically under their preferred supplier. Add anything else manually from the catalogue 🛒.</div>
+          {counts.total === 0 && view === 'list' && !search ? (
+            <>
+              <div style={{ color: C.success, fontWeight: 700, marginBottom: 8 }}>✓ Nothing to reorder</div>
+              <div style={{ fontSize: 12, color: C.textMuted }}>Low-stock materials land here automatically under their preferred supplier. Switch to 📋 All materials to add anything else.</div>
+              <Btn variant="light" onClick={() => setView('all')} style={{ marginTop: 12 }}>📋 Show all materials</Btn>
+            </>
+          ) : (
+            <>
+              <div style={{ fontWeight: 700, marginBottom: 8 }}>No material matches this filter</div>
+              <Btn variant="light" onClick={() => { setView('list'); setSupFilter('__all'); setSearch(''); }}>✕ Clear filters</Btn>
+            </>
+          )}
         </div>
       ) : (
-        <div style={{ display: 'grid', gap: 14 }}>
+        <div dir="ltr" style={{ display: 'grid', gap: 14, textAlign: 'left' }}>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', fontSize: 12 }}>
             <Badge tone="info">🛒 {counts.total} items</Badge>
             <Badge tone="neutral">🏭 {buckets.length} suppliers</Badge>
             {counts.skipped > 0 && <Badge tone="warning">☐ {counts.skipped} not ordering</Badge>}
             <span style={{ marginInlineStart: 'auto', fontWeight: 800 }}>Est. cost: {money(totalEst, cur)}</span>
           </div>
+
+          {/* ── View filters. These change what you SEE. The order that gets printed or
+                sent is always every ticked material, whatever is on screen. ── */}
+          <div style={{ display: 'grid', gap: 7, background: C.surfaceAlt, borderRadius: 12, padding: 9 }}>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {[['list', '🛒 On the list', counts.total + counts.skipped],
+                ['auto', '🔴 Low stock', counts.low + counts.near],
+                ['manual', '🔖 Added by me', counts.manual],
+                ['all', '📋 All materials', allCount]].map(([key, label, n]) => (
+                  <button key={key} onClick={() => setView(key)}
+                    style={{ border: `1px solid ${view === key ? C.primary : C.border}`, background: view === key ? C.primary : '#fff', color: view === key ? '#fff' : C.textMid, borderRadius: 999, padding: '5px 11px', fontSize: 11, fontWeight: 800, cursor: 'pointer' }}>
+                    {label} <span style={{ opacity: 0.75 }}>({n})</span>
+                  </button>
+                ))}
+            </div>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <div style={{ flex: 1 }}>
+                <Select value={supFilter} onChange={setSupFilter}
+                  options={[{ value: '__all', label: '🏭 All suppliers' }, ...supOptions]} />
+              </div>
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search material…" aria-label="Search material"
+                style={{ flex: 1, minWidth: 0, padding: '7px 10px', fontSize: 16, color: C.text, background: '#fff', border: `1px solid ${C.border}`, borderRadius: 9 }} />
+              {(view !== 'list' || supFilter !== '__all' || search) && (
+                <button onClick={() => { setView('list'); setSupFilter('__all'); setSearch(''); }} title="Clear filters"
+                  style={{ ...chipBtn, color: C.danger, flexShrink: 0 }}>✕ Clear</button>
+              )}
+            </div>
+            {view === 'all' && <div style={{ fontSize: 10.5, color: C.textMuted }}>Showing every material. Tick anything to add it to the order — this is how you bring back something you removed.</div>}
+            {(view !== 'list' || supFilter !== '__all' || search) && (
+              <div style={{ fontSize: 10.5, color: C.warning, fontWeight: 700 }}>⚠ Filter changes this view only — printing or sending still includes all {counts.total} ticked items.</div>
+            )}
+          </div>
+
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: -6 }}>
             <span style={{ fontSize: 10.5, color: C.textMuted, flex: 1, minWidth: 180 }}>🔒 Cost is for your eyes only — it never appears on the PDF, the print sheet or the shared text.</span>
             {counts.skipped > 0 && (
@@ -330,41 +405,48 @@ export default function PurchasePlanning({ onClose }) {
                       <div key={g.product.id} style={{ background: C.surfaceAlt, borderRadius: 12, padding: 10 }}>
                         <div style={{ fontSize: 12.5, fontWeight: 800, color: C.primary, marginBottom: 6 }}>▸ {g.product.nameEn || g.product.nameAr} <span style={{ color: C.textMuted, fontWeight: 600 }}>({g.needed.length})</span></div>
                         <div style={{ display: 'grid', gap: 5 }}>
-                          {g.needed.filter((it) => showSkipped || !it.skipped).map((it) => (
-                            <div key={it.v.id} style={{ background: '#fff', borderRadius: 9, padding: '7px 10px', border: it.skipped ? `1px dashed ${C.border}` : '1px solid transparent' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: it.skipped ? 0.5 : 1 }}>
+                          {g.needed.filter((it) => showSkipped || !(it.onList && it.skipped)).map((it) => (
+                            <div key={it.v.id} style={{ background: '#fff', borderRadius: 9, padding: '7px 10px', border: it.inOrder ? '1px solid transparent' : `1px dashed ${C.border}` }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: it.inOrder ? 1 : 0.55 }}>
                                 <div style={{ flex: 1, minWidth: 0 }}>
-                                  <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: it.skipped ? 'line-through' : 'none' }}>{it.v.nameEn || it.v.sku}</div>
+                                  <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: (it.onList && it.skipped) ? 'line-through' : 'none' }}>{it.v.nameEn || it.v.sku}</div>
                                   <div style={{ fontSize: 10.5, color: C.textMuted }}>Stock: {fmtNum(num(it.v.stockQty))}{num(it.v.stockMin) > 0 ? ` / ${fmtNum(num(it.v.stockMin))}` : ''}</div>
                                 </div>
                                 {badgeFor(it)}
                                 <div style={{ textAlign: 'center', flexShrink: 0 }}>
-                                  <QtyInput value={it.qty} onCommit={(n) => setQty(it.v, n)} disabled={it.skipped} />
+                                  <QtyInput value={it.qty} onCommit={(n) => setQty(it.v, n)} disabled={!it.inOrder} />
                                   <div style={{ fontSize: 9, color: C.textMuted, marginTop: 1 }}>Qty</div>
                                 </div>
                               </div>
                               {/* Cost — internal only. Never reaches the PDF, the print sheet or the shared text. */}
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, opacity: it.skipped ? 0.5 : 1 }}>
-                                <span style={{ fontSize: 10, color: C.textMuted }}>🔒</span>
-                                <span style={{ fontSize: 10.5, color: C.textMuted }}>{it.unitCost > 0 ? `${money(it.unitCost, cur)} × ${fmtNum(it.qty)} =` : 'No cost recorded'}</span>
-                                {it.unitCost > 0 && <span style={{ fontSize: 12.5, fontWeight: 900, color: C.primary }}>{money(it.lineCost, cur)}</span>}
-                              </div>
+                              {it.inOrder && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                                  <span style={{ fontSize: 10, color: C.textMuted }}>🔒</span>
+                                  <span style={{ fontSize: 10.5, color: C.textMuted }}>{it.unitCost > 0 ? `${money(it.unitCost, cur)} × ${fmtNum(it.qty)} =` : 'No cost recorded'}</span>
+                                  {it.unitCost > 0 && <span style={{ fontSize: 12.5, fontWeight: 900, color: C.primary }}>{money(it.lineCost, cur)}</span>}
+                                </div>
+                              )}
                               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5, flexWrap: 'wrap' }}>
-                                <button onClick={() => toggleSkip(it.v, !it.skipped)}
-                                  style={{ border: `1px solid ${it.skipped ? C.border : C.primary}`, background: it.skipped ? 'transparent' : C.primary, color: it.skipped ? C.textMuted : '#fff', borderRadius: 8, padding: '3px 10px', fontSize: 10.5, fontWeight: 800, cursor: 'pointer' }}>
-                                  {it.skipped ? '☐ Not ordering' : '☑ Ordering'}
-                                </button>
-                                {!it.skipped && it.overridden && (
+                                {!it.onList ? (
+                                  <button onClick={() => addToList(it.v)}
+                                    style={{ border: `1px solid ${C.border}`, background: 'transparent', color: C.textMuted, borderRadius: 8, padding: '3px 10px', fontSize: 10.5, fontWeight: 800, cursor: 'pointer' }}>☐ Not on the list</button>
+                                ) : (
+                                  <button onClick={() => toggleSkip(it.v, !it.skipped)}
+                                    style={{ border: `1px solid ${it.skipped ? C.border : C.primary}`, background: it.skipped ? 'transparent' : C.primary, color: it.skipped ? C.textMuted : '#fff', borderRadius: 8, padding: '3px 10px', fontSize: 10.5, fontWeight: 800, cursor: 'pointer' }}>
+                                    {it.skipped ? '☐ Not ordering' : '☑ Ordering'}
+                                  </button>
+                                )}
+                                {it.inOrder && it.overridden && (
                                   <button onClick={() => resetQty(it.v)} title="Reset to suggested qty" style={{ ...chipBtn, color: C.primary }}>↺ Reset</button>
                                 )}
-                                {it.skipped && it.manual && (
+                                {it.onList && it.skipped && it.manual && (
                                   <button onClick={() => dropFromList(it.v)} title="Remove from the list for good" style={{ ...chipBtn, color: C.danger }}>✕ Remove</button>
                                 )}
-                                {!it.skipped && (moveOpen.has(it.v.id) ? null : (
+                                {it.inOrder && !moveOpen.has(it.v.id) && (
                                   <button onClick={() => toggleMove(it.v.id)} style={{ ...chipBtn, color: C.textMuted }}>↔ Move to another supplier</button>
-                                ))}
+                                )}
                               </div>
-                              {moveOpen.has(it.v.id) && !it.skipped && (
+                              {moveOpen.has(it.v.id) && it.inOrder && (
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
                                   <span style={{ fontSize: 10, color: C.textMuted, flexShrink: 0 }}>↔ Move to</span>
                                   <div style={{ flex: 1 }}>
