@@ -334,7 +334,7 @@ export default function PurchasePlanning({ onClose }) {
           )}
         </div>
       ) : (
-        <div dir="ltr" style={{ display: 'grid', gap: 14, textAlign: 'left' }}>
+        <div dir="ltr" style={{ display: 'grid', gap: 14, textAlign: 'left', minWidth: 0, overflowX: 'hidden' }}>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', fontSize: 12 }}>
             <Badge tone="info">🛒 {counts.total} items</Badge>
             <Badge tone="neutral">🏭 {buckets.length} suppliers</Badge>
@@ -395,44 +395,44 @@ export default function PurchasePlanning({ onClose }) {
                   style={{ background: '#25D366', color: '#fff', border: 'none', borderRadius: 9, padding: '6px 11px', fontSize: 14, fontWeight: 800, cursor: b.count ? 'pointer' : 'default', opacity: b.count ? 1 : 0.4 }}>📱</button>
                 <button onClick={() => printList(b)} disabled={b.count === 0} title="Print" style={{ background: '#fff', color: C.primary, border: 'none', borderRadius: 9, padding: '6px 11px', fontSize: 14, fontWeight: 800, cursor: b.count ? 'pointer' : 'default', opacity: b.count ? 1 : 0.4 }}>🖨️</button>
               </div>
-              <div style={{ padding: 10 }}>
+              <div style={{ padding: 10, minWidth: 0 }}>
 
               {b.tree.map((cat) => (
-                <div key={cat.category.id} style={{ marginBottom: 8 }}>
-                  <div style={{ fontSize: 12.5, fontWeight: 900, color: C.text, borderBottom: `2px solid ${C.primary}`, paddingBottom: 3, marginBottom: 6 }}>{cat.category.icon || '🗂️'} {cat.name}</div>
-                  <div style={{ display: 'grid', gap: 8 }}>
+                <div key={cat.category.id} style={{ marginBottom: 8, minWidth: 0 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 900, color: C.text, borderBottom: `2px solid ${C.primary}`, paddingBottom: 3, marginBottom: 6, overflowWrap: 'anywhere' }}>{cat.category.icon || '🗂️'} {cat.name}</div>
+                  <div style={{ display: 'grid', gap: 8, minWidth: 0 }}>
                     {cat.groups.map((g) => (
-                      <div key={g.product.id} style={{ background: C.surfaceAlt, borderRadius: 12, padding: 10 }}>
-                        <div style={{ fontSize: 12.5, fontWeight: 800, color: C.primary, marginBottom: 6 }}>▸ {g.product.nameEn || g.product.nameAr} <span style={{ color: C.textMuted, fontWeight: 600 }}>({g.needed.length})</span></div>
-                        <div style={{ display: 'grid', gap: 5 }}>
+                      <div key={g.product.id} style={{ background: C.surfaceAlt, borderRadius: 12, padding: 10, minWidth: 0 }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 800, color: C.primary, marginBottom: 6, overflowWrap: 'anywhere', lineHeight: 1.35 }}>▸ {g.product.nameEn || g.product.nameAr} <span style={{ color: C.textMuted, fontWeight: 600 }}>({g.needed.length})</span></div>
+                        <div style={{ display: 'grid', gap: 5, minWidth: 0 }}>
                           {g.needed.filter((it) => showSkipped || !(it.onList && it.skipped)).map((it) => (
-                            <div key={it.v.id} style={{ background: '#fff', borderRadius: 9, padding: '7px 10px', border: it.inOrder ? '1px solid transparent' : `1px dashed ${C.border}` }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: it.inOrder ? 1 : 0.55 }}>
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                  <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: (it.onList && it.skipped) ? 'line-through' : 'none' }}>{it.v.nameEn || it.v.sku}</div>
-                                  <div style={{ fontSize: 10.5, color: C.textMuted }}>Stock: {fmtNum(num(it.v.stockQty))}{num(it.v.stockMin) > 0 ? ` / ${fmtNum(num(it.v.stockMin))}` : ''}</div>
-                                </div>
-                                {badgeFor(it)}
-                                <div style={{ textAlign: 'center', flexShrink: 0 }}>
-                                  <QtyInput value={it.qty} onCommit={(n) => setQty(it.v, n)} disabled={!it.inOrder} />
-                                  <div style={{ fontSize: 9, color: C.textMuted, marginTop: 1 }}>Qty</div>
+                            <div key={it.v.id} style={{ background: '#fff', borderRadius: 9, padding: '8px 10px', minWidth: 0, border: it.inOrder ? '1px solid transparent' : `1px dashed ${C.border}` }}>
+                              {/* Name gets its own full-width line and wraps. Orthodontic names run
+                                  long, and squeezing them next to the qty box truncated them. */}
+                              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 7, opacity: it.inOrder ? 1 : 0.6 }}>
+                                <span style={{ flexShrink: 0, marginTop: 1 }}>{badgeFor(it)}</span>
+                                <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 700, color: C.text, lineHeight: 1.35, overflowWrap: 'anywhere', textDecoration: (it.onList && it.skipped) ? 'line-through' : 'none' }}>
+                                  {it.v.nameEn || it.v.sku}
                                 </div>
                               </div>
-                              {/* Cost — internal only. Never reaches the PDF, the print sheet or the shared text. */}
-                              {it.inOrder && (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
-                                  <span style={{ fontSize: 10, color: C.textMuted }}>🔒</span>
-                                  <span style={{ fontSize: 10.5, color: C.textMuted }}>{it.unitCost > 0 ? `${money(it.unitCost, cur)} × ${fmtNum(it.qty)} =` : 'No cost recorded'}</span>
-                                  {it.unitCost > 0 && <span style={{ fontSize: 12.5, fontWeight: 900, color: C.primary }}>{money(it.lineCost, cur)}</span>}
-                                </div>
-                              )}
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5, flexWrap: 'wrap' }}>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 12px', marginTop: 3, fontSize: 10.5, color: C.textMuted }}>
+                                <span>Stock: {fmtNum(num(it.v.stockQty))}{num(it.v.stockMin) > 0 ? ` / ${fmtNum(num(it.v.stockMin))}` : ''}</span>
+                                {/* Cost — internal only. Never reaches the PDF, the print sheet or the shared text. */}
+                                {it.inOrder && (
+                                  <span>🔒 {it.unitCost > 0 ? <>{money(it.unitCost, cur)} × {fmtNum(it.qty)} = <b style={{ color: C.primary, fontSize: 12 }}>{money(it.lineCost, cur)}</b></> : 'No cost recorded'}</span>
+                                )}
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 7, flexWrap: 'wrap' }}>
+                                <span style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
+                                  <QtyInput value={it.qty} onCommit={(n) => setQty(it.v, n)} disabled={!it.inOrder} />
+                                  <span style={{ fontSize: 10, color: C.textMuted, fontWeight: 700 }}>Qty</span>
+                                </span>
                                 {!it.onList ? (
                                   <button onClick={() => addToList(it.v)}
-                                    style={{ border: `1px solid ${C.border}`, background: 'transparent', color: C.textMuted, borderRadius: 8, padding: '3px 10px', fontSize: 10.5, fontWeight: 800, cursor: 'pointer' }}>☐ Not on the list</button>
+                                    style={{ border: `1px solid ${C.border}`, background: 'transparent', color: C.textMuted, borderRadius: 8, padding: '4px 10px', fontSize: 10.5, fontWeight: 800, cursor: 'pointer' }}>☐ Not on the list</button>
                                 ) : (
                                   <button onClick={() => toggleSkip(it.v, !it.skipped)}
-                                    style={{ border: `1px solid ${it.skipped ? C.border : C.primary}`, background: it.skipped ? 'transparent' : C.primary, color: it.skipped ? C.textMuted : '#fff', borderRadius: 8, padding: '3px 10px', fontSize: 10.5, fontWeight: 800, cursor: 'pointer' }}>
+                                    style={{ border: `1px solid ${it.skipped ? C.border : C.primary}`, background: it.skipped ? 'transparent' : C.primary, color: it.skipped ? C.textMuted : '#fff', borderRadius: 8, padding: '4px 10px', fontSize: 10.5, fontWeight: 800, cursor: 'pointer' }}>
                                     {it.skipped ? '☐ Not ordering' : '☑ Ordering'}
                                   </button>
                                 )}
@@ -443,7 +443,7 @@ export default function PurchasePlanning({ onClose }) {
                                   <button onClick={() => dropFromList(it.v)} title="Remove from the list for good" style={{ ...chipBtn, color: C.danger }}>✕ Remove</button>
                                 )}
                                 {it.inOrder && !moveOpen.has(it.v.id) && (
-                                  <button onClick={() => toggleMove(it.v.id)} style={{ ...chipBtn, color: C.textMuted }}>↔ Move to another supplier</button>
+                                  <button onClick={() => toggleMove(it.v.id)} style={{ ...chipBtn, color: C.textMuted }}>↔ Move supplier</button>
                                 )}
                               </div>
                               {moveOpen.has(it.v.id) && it.inOrder && (
