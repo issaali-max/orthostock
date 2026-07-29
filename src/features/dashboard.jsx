@@ -5,7 +5,7 @@ import { C, TABLES, SHADOW } from '../lib/constants.js';
 import { fmtCur, fmtNum, num } from '../lib/money.js';
 import { todayISO } from '../lib/dates.js';
 import RestockList from './catalogue/RestockList.jsx';
-import { pnl, periodTrend, buildAlerts, emirateStats, topProducts, topCustomers, openingDebtTotal, vatLiability } from '../lib/engine.js';
+import { pnl, periodSeries, buildAlerts, emirateStats, topProducts, topCustomers, openingDebtTotal, vatLiability } from '../lib/engine.js';
 import FinancialPanel from './dashboard/FinancialPanel.jsx';
 import { Badge, Card, EmptyState, Modal, PageHeader } from '../ui/components.jsx';
 
@@ -85,7 +85,10 @@ export default function Dashboard() {
     return { sold, buyers };
   }, [dInv, dItems, dVar, dCust, range]); // eslint-disable-line react-hooks/exhaustive-deps
   const soldList = periodReport.sold;
-  const trend = useMemo(() => periodTrend(data, trendMode, trendMode === 'year' ? 4 : 6), [dInv, dItems, dExp, dExpG, trendMode]); // eslint-disable-line react-hooks/exhaustive-deps
+  const trend = useMemo(() => periodSeries(data, trendMode, trendMode === 'year' ? 4 : 6), [dInv, dItems, dExp, dExpG, trendMode]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Month-by-month comparison, newest first. Same pnl() as the card above it.
+  const [cmpCount, setCmpCount] = useState(6);
+  const compare = useMemo(() => periodSeries(data, 'month', cmpCount).slice().reverse(), [dInv, dItems, dExp, dExpG, dPur, dPurIt, cmpCount]); // eslint-disable-line react-hooks/exhaustive-deps
   const emirates = useMemo(() => emirateStats(data), [dInv, dItems, dCust]); // eslint-disable-line react-hooks/exhaustive-deps
   const topProd = useMemo(() => topProducts(data, 10, bounds), [dInv, dItems, dVar, range]); // eslint-disable-line react-hooks/exhaustive-deps
   const topCust = useMemo(() => topCustomers(data, 10, { bounds }), [dInv, dItems, dCust, range]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -171,8 +174,8 @@ export default function Dashboard() {
 
       {/* ── KPI strip ── */}
       <div className="rise" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 14 }}>
-        <Kpi icon="💰" label={t('revenue')} value={cur(kpi.revenue)} color={C.primary} />
-        <Kpi icon="📈" label={t('profit')} value={cur(kpi.profit)} color={C.success} />
+        <Kpi icon="💰" label={t('revenueLifetime')} value={cur(kpi.revenue)} color={C.primary} />
+        <Kpi icon="📈" label={t('salesMarginLifetime')} value={cur(kpi.profit)} color={C.success} />
         <Kpi icon="⏳" label={t('debt')} value={cur(kpi.debt)} color={kpi.debt > 0 ? C.danger : C.success} />
         {kpi.oldDebt > 0 && <Kpi icon="📜" label={t('oldDebt')} value={cur(kpi.oldDebt)} color={C.danger} />}
         {kpi.vatDue > 0 && <Kpi icon="🧾" label={t('vatDue')} value={cur(kpi.vatDue)} color={C.warning} />}
@@ -252,6 +255,61 @@ export default function Dashboard() {
               <Bar dataKey="net" name={t('netProfit')} fill={C.primary} radius={[3, 3, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
+        </div>
+      </Card>
+
+      {/* ── Month-by-month comparison ── */}
+      <Card className="rise" style={{ marginBottom: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <SectionTitle>📅 {t('monthCompare')}</SectionTitle>
+          <div style={{ marginInlineStart: 'auto', display: 'flex', gap: 4 }}>
+            {[6, 12, 24].map((n) => (
+              <button key={n} onClick={() => setCmpCount(n)} style={{
+                border: `1px solid ${cmpCount === n ? C.primary : C.border}`, borderRadius: 999, padding: '3px 10px',
+                fontSize: 11, fontWeight: 800, cursor: 'pointer',
+                background: cmpCount === n ? C.primary : 'transparent', color: cmpCount === n ? '#fff' : C.textMid,
+              }}>{n}</button>
+            ))}
+          </div>
+        </div>
+        <div style={{ overflowX: 'auto', marginTop: 8 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 340 }}>
+            <thead>
+              <tr style={{ color: C.textMuted, fontSize: 10.5 }}>
+                <th style={cmpTh('start')}>{t('month')}</th>
+                <th style={cmpTh('end')}>{t('revenues')}</th>
+                <th style={cmpTh('end')}>{t('expenses')}</th>
+                <th style={cmpTh('end')}>{t('netAfterAll')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {compare.map((m, i) => {
+                const prev = compare[i + 1];                       // list is newest-first
+                const delta = prev && prev.net !== 0 ? ((m.net - prev.net) / Math.abs(prev.net)) * 100 : null;
+                return (
+                  <tr key={m.key} style={{ borderTop: `1px solid ${C.border}` }}>
+                    <td style={cmpTd('start')}>
+                      <div style={{ fontWeight: 800, color: C.text }}>{m.key}</div>
+                      <div style={{ fontSize: 9.5, color: C.textMuted }}>{m.invoiceCount} {t('invoices')}</div>
+                    </td>
+                    <td style={{ ...cmpTd('end'), fontWeight: 700 }}>{cur(m.revenue)}</td>
+                    <td style={{ ...cmpTd('end'), color: m.totalExp > 0 ? C.warning : C.textMuted }}>{cur(m.totalExp)}</td>
+                    <td style={cmpTd('end')}>
+                      <div style={{ fontWeight: 900, color: m.net >= 0 ? C.success : C.danger }}>{cur(m.net)}</div>
+                      {delta !== null && (
+                        <div style={{ fontSize: 9.5, color: delta >= 0 ? C.success : C.danger }}>
+                          {delta >= 0 ? '▲' : '▼'} {Math.abs(Math.round(delta))}%
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <div style={{ fontSize: 10.5, color: C.textMuted, marginTop: 8, lineHeight: 1.6 }}>
+          {t('monthCompareHint')}
         </div>
       </Card>
 
@@ -474,3 +532,6 @@ function PnlRow({ label, value, color, strong }) {
     </div>
   );
 }
+
+const cmpTh = (align) => ({ textAlign: align, padding: '4px 6px', fontWeight: 700, whiteSpace: 'nowrap' });
+const cmpTd = (align) => ({ textAlign: align, padding: '7px 6px', whiteSpace: 'nowrap' });

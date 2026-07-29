@@ -821,7 +821,15 @@ export function buildAlerts(data, opts = {}) {
 // ─────────────────────────────────────────────────────────────
 export function pnl(data, opts = {}) {
   const { from, to } = opts;
-  const inRange = (iso) => (!iso ? true : (!from || iso >= from) && (!to || iso <= to));
+  // A record with no date belongs to no period. It used to return true here, which put
+  // every undated invoice inside today AND this month AND this year simultaneously and
+  // made period totals impossible to reconcile. With no bounds at all we still count
+  // everything, so the lifetime figures are unchanged.
+  const inRange = (iso) => {
+    if (!from && !to) return true;
+    if (!iso) return false;
+    return (!from || iso >= from) && (!to || iso <= to);
+  };
 
   const invoices = (data[TABLES.invoices] || []).filter((i) => i.status !== 'returned' && inRange(i.date));
   const invIds = new Set(invoices.map((i) => i.id));
@@ -859,6 +867,39 @@ export function pnl(data, opts = {}) {
     invoiceCount: invoices.length, expenseCount: expenses.length,
     margin: revenue > 0 ? round2((grossProfit / revenue) * 100) : 0,
   };
+}
+
+// Per-period P&L series for the comparison table and the trend chart.
+// Every period is computed by pnl() itself rather than by a second bucketing pass, so a
+// month's row here ALWAYS reconciles with the P&L card for that same month. The previous
+// implementation bucketed separately and silently omitted freeRestockGain from `net`,
+// so the chart and the card disagreed. Slower, but the numbers cannot drift apart.
+export function periodSeries(data, mode = 'month', n = 6) {
+  const now = new Date();
+  const out = [];
+  for (let i = n - 1; i >= 0; i--) {
+    let key, from, to;
+    if (mode === 'year') {
+      const y = now.getFullYear() - i;
+      key = String(y); from = `${y}-01-01`; to = `${y}-12-31`;
+    } else {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const y = d.getFullYear(), mm = String(d.getMonth() + 1).padStart(2, '0');
+      const lastDay = new Date(y, d.getMonth() + 1, 0).getDate();
+      key = `${y}-${mm}`; from = `${key}-01`; to = `${key}-${String(lastDay).padStart(2, '0')}`;
+    }
+    const p = pnl(data, { from, to });
+    out.push({
+      key, from, to,
+      revenue: p.revenue, cogs: p.cogs, salesProfit: p.salesProfit,
+      freeRestockGain: p.freeRestockGain, grossProfit: p.grossProfit,
+      businessExp: p.businessExp, personalExp: p.personalExp, homeExp: p.homeExp,
+      totalExp: round2(p.businessExp + p.personalExp + p.homeExp),
+      operatingProfit: p.operatingProfit, net: p.netAfterAll,
+      margin: p.margin, invoiceCount: p.invoiceCount,
+    });
+  }
+  return out;
 }
 
 // Last `n` months of revenue / sales-profit / expenses for the trend chart.
@@ -1177,31 +1218,8 @@ export async function commitDividend(app, { securityId, date, amount, type = 'di
 // salesProfit, businessExp, personalExp, net (= salesProfit − both expenses).
 function periodKey(iso, mode) { return mode === 'year' ? (iso || '').slice(0, 4) : (iso || '').slice(0, 7); }
 
-export function periodTrend(data, mode = 'month', n = 6) {
-  const invoices = (data[TABLES.invoices] || []).filter((i) => i.status !== 'returned');
-  const items = data[TABLES.invoiceItems] || [];
-  const expenses = data[TABLES.expenses] || [];
-  const groups = data[TABLES.expenseGroups] || [];
-  const typeOf = (gid) => groups.find((g) => g.id === gid)?.type || 'business';
-  const invKey = new Map(invoices.map((i) => [i.id, periodKey(i.date, mode)]));
-
-  const now = new Date();
-  const buckets = [];
-  for (let i = n - 1; i >= 0; i--) {
-    if (mode === 'year') buckets.push({ key: String(now.getFullYear() - i), revenue: 0, salesProfit: 0, businessExp: 0, personalExp: 0, net: 0 });
-    else { const d = new Date(now.getFullYear(), now.getMonth() - i, 1); buckets.push({ key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, revenue: 0, salesProfit: 0, businessExp: 0, personalExp: 0, net: 0 }); }
-  }
-  const byKey = Object.fromEntries(buckets.map((b) => [b.key, b]));
-  for (const inv of invoices) { const b = byKey[periodKey(inv.date, mode)]; if (b) b.revenue += num(inv.total); }
-  for (const it of items) { const b = byKey[invKey.get(it.invoiceId)]; if (b) b.salesProfit += num(it.lineProfit); }
-  const fx = rateOf(data);
-  for (const e of expenses) { const b = byKey[periodKey(e.date, mode)]; if (b) { if (typeOf(e.groupId) === 'business') b.businessExp += toAED(e.amount, e.currency, fx); else b.personalExp += toAED(e.amount, e.currency, fx); } } // home+personal = non-business
-  return buckets.map((b) => ({
-    key: b.key, revenue: round2(b.revenue), salesProfit: round2(b.salesProfit),
-    businessExp: round2(b.businessExp), personalExp: round2(b.personalExp),
-    net: round2(b.salesProfit - b.businessExp - b.personalExp),
-  }));
-}
+// periodTrend was replaced by periodSeries (above), which derives every period from
+// pnl() so the chart and the P&L card can never disagree.
 
 // ── Trade editing with full FIFO rebuild ──────────────────────────────────
 // Editing/deleting a buy or sell invalidates FIFO consumption AND realized P&L,

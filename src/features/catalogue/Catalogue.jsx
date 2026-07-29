@@ -3,7 +3,7 @@ import { useApp } from '../../app/AppProvider.jsx';
 import { C, RADIUS, SHADOW, TABLES } from '../../lib/constants.js';
 import { StoredImage } from '../../ui/StoredImage.jsx';
 import { fmtCur, fmtNum, num } from '../../lib/money.js';
-import { Badge, Btn, EmptyState, Field, Input, Modal, PageHeader, SearchBar } from '../../ui/components.jsx';
+import { Badge, Btn, EmptyState, Field, Input, Modal, PageHeader, SearchBar, Select } from '../../ui/components.jsx';
 import { BandGrid } from '../../ui/BandGrid.jsx';
 import { isGridWorthy } from '../../lib/bandGrid.js';
 import RestockList from './RestockList.jsx';
@@ -41,17 +41,32 @@ export default function Catalogue() {
   const [editMode, setEditMode] = useState(false);
   const [edit, setEdit] = useState(null);
   const [genGroup, setGenGroup] = useState(null);
-  const [buyAdd, setBuyAdd] = useState(null); // { v, qty } — add to purchase list from stock
+  const [buyAdd, setBuyAdd] = useState(null); // { v, qty, sup } — add to purchase list from stock
   const openBuyAdd = (v) => {
     const stock = num(v.stockQty), min = num(v.stockMin);
     const suggest = min > 0 ? Math.max(1, Math.ceil(min - stock)) : 1;
-    setBuyAdd({ v, qty: String(v.onList && num(v.listQty) > 0 ? num(v.listQty) : suggest) });
+    // Prefill with the supplier already chosen for the list, else the material's own
+    // preferred supplier. Changing it here only ever touches the purchase list.
+    const sup = (v.listSupplierId !== undefined && v.listSupplierId !== null && v.listSupplierId !== '')
+      ? v.listSupplierId : (v.supplierId || '');
+    setBuyAdd({ v, qty: String(v.onList && num(v.listQty) > 0 ? num(v.listQty) : suggest), sup: sup || '__none' });
   };
   const confirmBuyAdd = async () => {
-    await app.updateRow(TABLES.variants, buyAdd.v.id, { onList: true, listQty: num(buyAdd.qty) || 1 });
+    await app.updateRow(TABLES.variants, buyAdd.v.id, {
+      onList: true,
+      listSkip: false,                                   // adding always re-ticks it
+      listQty: num(buyAdd.qty) || 1,
+      listSupplierId: buyAdd.sup === '__none' ? '' : buyAdd.sup,
+    });
     app.showToast(`🛒 ${buyAdd.v.nameEn || buyAdd.v.sku}`, 'success');
     setBuyAdd(null);
   };
+  const buySupOptions = useMemo(() => [
+    { value: '__none', label: 'بدون مورد' },
+    ...(data[TABLES.suppliers] || []).filter((s) => s.isActive !== false)
+      .slice().sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+      .map((s) => ({ value: s.id, label: s.name })),
+  ], [data[TABLES.suppliers]]);
   const [flat, setFlat] = useState(false); // default: browse by category (flat all-materials view removed)
   const [flatStatus, setFlatStatus] = useState('');
   const [flatBrand, setFlatBrand] = useState('');
@@ -532,7 +547,10 @@ export default function Catalogue() {
             <div style={{ fontWeight: 800, color: C.text }}>{buyAdd.v.nameEn || buyAdd.v.sku}</div>
             <div style={{ fontSize: 12, color: C.textMuted }}>{t('stock')}: {fmtNum(num(buyAdd.v.stockQty))}{num(buyAdd.v.stockMin) > 0 ? ` / ${fmtNum(num(buyAdd.v.stockMin))}` : ''}</div>
             <Field label={t('orderQty') || 'الكمية'}><Input type="number" value={buyAdd.qty} onChange={(val) => setBuyAdd((r) => ({ ...r, qty: val }))} inputMode="numeric" /></Field>
-            {buyAdd.v.onList && <div style={{ fontSize: 11.5, color: C.warning }}>⚠ موجودة في القائمة — سيُحدَّث العدد.</div>}
+            <Field label="المورد في قائمة المشتريات" hint="يُستخدم في قائمة المشتريات فقط — المورد الأصلي للمادة لا يتغيّر">
+              <Select value={buyAdd.sup} onChange={(val) => setBuyAdd((r) => ({ ...r, sup: val }))} options={buySupOptions} />
+            </Field>
+            {buyAdd.v.onList && <div style={{ fontSize: 11.5, color: C.warning }}>⚠ موجودة في القائمة — سيُحدَّث العدد والمورد.</div>}
           </div>
         )}
       </Modal>

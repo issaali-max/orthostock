@@ -50,9 +50,10 @@ export default function PurchasePlanning({ onClose }) {
   const [phone, setPhone] = useState('');
   const [sending, setSending] = useState(false);
   const [showSkipped, setShowSkipped] = useState(true);        // unticked rows stay visible by default
-  const [view, setView] = useState('list');                    // list | auto | manual | all
+  const [view, setView] = useState('order');                   // order | auto | manual | all
   const [supFilter, setSupFilter] = useState('__all');
   const [search, setSearch] = useState('');
+  const filterActive = view !== 'order' || supFilter !== '__all' || !!search;
   const toggleMove = (id) => setMoveOpen((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const { data, settings, showToast, updateRow } = app;
   const cur = settings?.baseCurrency || 'AED';
@@ -77,7 +78,7 @@ export default function PurchasePlanning({ onClose }) {
   const supOptions = [{ value: '__none', label: 'No supplier' },
     ...suppliers.map((s) => ({ value: s.id, label: s.name }))];
 
-  const { buckets, counts, totalEst, allCount } = useMemo(() => {
+  const { buckets, counts, totalEst, allCount, supUsed } = useMemo(() => {
     const cats = (data[TABLES.categories] || []).filter((c) => c.isActive !== false);
     const prods = (data[TABLES.products] || []).filter((p) => p.isActive !== false);
     const variants = (data[TABLES.variants] || []).filter((v) => v.isActive !== false);
@@ -89,11 +90,11 @@ export default function PurchasePlanning({ onClose }) {
     //    low/out automatically, or added by you — and it is independent of the view
     //    filter below. Filtering changes what you SEE, never what you send.
     const rows = [];
-    let nLow = 0, nNear = 0, nManual = 0, nSkipped = 0, est = 0, nAll = 0;
+    let nOrder = 0, nLow = 0, nMine = 0, nSkipped = 0, est = 0, nAll = 0;
     for (const v of variants) {
       nAll++;
       const s = statusOf(v);
-      const auto = s === 'low' || s === 'out';
+      const auto = s === 'low' || s === 'out' || s === 'near';
       const manual = !!v.onList;
       const onList = manual || auto;
       const skipped = !!v.listSkip;
@@ -103,16 +104,20 @@ export default function PurchasePlanning({ onClose }) {
       const unitCost = num(v.purchasePriceAvg) || num(v.purchasePriceLatest);
 
       if (inOrder) {
-        if (manual) nManual++; else if (s === 'near') nNear++; else nLow++;
+        nOrder++;
+        // Independent lenses, not a partition: a material you added by hand can also be
+        // low on stock, and it belongs under both chips.
+        if (auto) nLow++;
+        if (manual) nMine++;
         est += qty * unitCost;
       } else if (onList) { nSkipped++; }
 
       // 2) View filter — source, then name search. Recorded as `visible`, NOT used to
       //    drop the row: the order must stay complete whatever the view is showing.
       let visible = view === 'all' ? true
-        : view === 'auto' ? (auto && !manual)
+        : view === 'auto' ? auto
           : view === 'manual' ? manual
-            : onList;                                   // 'list' (default)
+            : onList;                                   // 'order' (default)
       if (visible && needle) visible = `${v.nameEn || ''} ${v.sku || ''}`.toLowerCase().includes(needle);
 
       rows.push({ v, status: s, manual, onList, inOrder, visible, qty, overridden, skipped, unitCost, lineCost: round2(qty * unitCost) });
@@ -121,6 +126,16 @@ export default function PurchasePlanning({ onClose }) {
     // 3) Bucket by the EFFECTIVE list supplier: the per-list override wins, else the
     //    material's preferred supplier, else the no-supplier bucket.
     const effSup = (v) => (v.listSupplierId !== undefined && v.listSupplierId !== null) ? v.listSupplierId : (v.supplierId || '');
+
+    // Suppliers offered in the filter: only those that actually have something to buy.
+    // Built before the supplier filter is applied, so you can always switch back.
+    const withOrders = new Set();
+    for (const r of rows) if (r.inOrder) withOrders.add(effSup(r.v));
+    const supUsed = [
+      ...suppliers.filter((s) => withOrders.has(s.id)).map((s) => ({ value: s.id, label: s.name })),
+      ...(withOrders.has('') ? [{ value: '', label: 'No supplier' }] : []),
+    ];
+
     const bySup = new Map();
     for (const r of rows) {
       const key = effSup(r.v);
@@ -163,8 +178,8 @@ export default function PurchasePlanning({ onClose }) {
       .sort((a, b) => (a.sid === '' ? 1 : b.sid === '' ? -1 : (supIndex.get(a.sid) ?? 999) - (supIndex.get(b.sid) ?? 999)));
 
     return {
-      buckets, allCount: nAll, totalEst: round2(est),
-      counts: { low: nLow, near: nNear, manual: nManual, skipped: nSkipped, total: nLow + nNear + nManual },
+      buckets, allCount: nAll, totalEst: round2(est), supUsed,
+      counts: { low: nLow, mine: nMine, skipped: nSkipped, total: nOrder },
     };
   }, [data, suppliers, view, supFilter, search]);
 
@@ -320,7 +335,7 @@ export default function PurchasePlanning({ onClose }) {
       </>}>
       {buckets.length === 0 ? (
         <div style={{ padding: 24, textAlign: 'center' }}>
-          {counts.total === 0 && view === 'list' && !search ? (
+          {counts.total === 0 && view === 'order' && !search ? (
             <>
               <div style={{ color: C.success, fontWeight: 700, marginBottom: 8 }}>✓ Nothing to reorder</div>
               <div style={{ fontSize: 12, color: C.textMuted }}>Low-stock materials land here automatically under their preferred supplier. Switch to 📋 All materials to add anything else.</div>
@@ -329,7 +344,7 @@ export default function PurchasePlanning({ onClose }) {
           ) : (
             <>
               <div style={{ fontWeight: 700, marginBottom: 8 }}>No material matches this filter</div>
-              <Btn variant="light" onClick={() => { setView('list'); setSupFilter('__all'); setSearch(''); }}>✕ Clear filters</Btn>
+              <Btn variant="light" onClick={() => { setView('order'); setSupFilter('__all'); setSearch(''); }}>✕ Clear filters</Btn>
             </>
           )}
         </div>
@@ -346,9 +361,9 @@ export default function PurchasePlanning({ onClose }) {
                 sent is always every ticked material, whatever is on screen. ── */}
           <div style={{ display: 'grid', gap: 7, background: C.surfaceAlt, borderRadius: 12, padding: 9 }}>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {[['list', '🛒 On the list', counts.total + counts.skipped],
-                ['auto', '🔴 Low stock', counts.low + counts.near],
-                ['manual', '🔖 Added by me', counts.manual],
+              {[['order', '🛒 Whole order', counts.total],
+                ['auto', '🔴 Low stock only', counts.low],
+                ['manual', '🔖 I added these', counts.mine],
                 ['all', '📋 All materials', allCount]].map(([key, label, n]) => (
                   <button key={key} onClick={() => setView(key)}
                     style={{ border: `1px solid ${view === key ? C.primary : C.border}`, background: view === key ? C.primary : '#fff', color: view === key ? '#fff' : C.textMid, borderRadius: 999, padding: '5px 11px', fontSize: 11, fontWeight: 800, cursor: 'pointer' }}>
@@ -359,17 +374,17 @@ export default function PurchasePlanning({ onClose }) {
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               <div style={{ flex: 1 }}>
                 <Select value={supFilter} onChange={setSupFilter}
-                  options={[{ value: '__all', label: '🏭 All suppliers' }, ...supOptions]} />
+                  options={[{ value: '__all', label: `🏭 All suppliers (${supUsed.length})` }, ...supUsed]} />
               </div>
               <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search material…" aria-label="Search material"
                 style={{ flex: 1, minWidth: 0, padding: '7px 10px', fontSize: 16, color: C.text, background: '#fff', border: `1px solid ${C.border}`, borderRadius: 9 }} />
-              {(view !== 'list' || supFilter !== '__all' || search) && (
-                <button onClick={() => { setView('list'); setSupFilter('__all'); setSearch(''); }} title="Clear filters"
+              {filterActive && (
+                <button onClick={() => { setView('order'); setSupFilter('__all'); setSearch(''); }} title="Clear filters"
                   style={{ ...chipBtn, color: C.danger, flexShrink: 0 }}>✕ Clear</button>
               )}
             </div>
             {view === 'all' && <div style={{ fontSize: 10.5, color: C.textMuted }}>Showing every material. Tick anything to add it to the order — this is how you bring back something you removed.</div>}
-            {(view !== 'list' || supFilter !== '__all' || search) && (
+            {filterActive && (
               <div style={{ fontSize: 10.5, color: C.warning, fontWeight: 700 }}>⚠ Filter changes this view only — printing or sending still includes all {counts.total} ticked items.</div>
             )}
           </div>
@@ -389,7 +404,10 @@ export default function PurchasePlanning({ onClose }) {
                 <div style={{ width: 34, height: 34, borderRadius: 10, background: 'rgba(255,255,255,.18)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17, flexShrink: 0 }}>{b.sid ? '🏭' : '❔'}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 14.5, fontWeight: 900, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.name}</div>
-                  <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,.85)', fontWeight: 700 }}>🛒 {b.count} items{b.skipped > 0 ? ` · ☐ ${b.skipped}` : ''} · Est. cost: {money(b.est, cur)}</div>
+                  <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,.85)', fontWeight: 700 }}>
+                    🛒 {b.count} items{b.skipped > 0 ? ` · ☐ ${b.skipped}` : ''} · Est. cost: {money(b.est, cur)}
+                    {filterActive && <><br />👁 showing {b.visibleCount}</>}
+                  </div>
                 </div>
                 <button onClick={() => openSend(b)} disabled={b.count === 0} title="Send as PDF on WhatsApp"
                   style={{ background: '#25D366', color: '#fff', border: 'none', borderRadius: 9, padding: '6px 11px', fontSize: 14, fontWeight: 800, cursor: b.count ? 'pointer' : 'default', opacity: b.count ? 1 : 0.4 }}>📱</button>
