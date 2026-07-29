@@ -1492,74 +1492,37 @@ const addCur = (bucket, currency, amount) => { const c = currency === 'USD' ? 'U
 
 // A flat, dated list of every cash movement, each tagged with its ORIGINAL currency.
 // direction: 'in' (money received) or 'out' (money paid).
+// Cash movements behind the dashboard's "available cash".
+//
+// This used to be a SECOND implementation alongside accountLedger, and the two drifted:
+// it missed customer opening-debt payments (cash in) and it charged every personal-debt
+// loan (cash out) including legacy ones that accountLedger deliberately excludes as
+// pre-app money. Both errors push the same way, so the dashboard could read negative
+// while the drawer and bank were comfortably positive. It now reads accountLedger's
+// moves, so there is exactly one rule for where money is.
 export function cashEvents(app) {
   const data = app.data || app;
+  const { moves } = accountLedger(data);
   const ev = [];
-  const push = (date, currency, amount, direction, source, label) => {
-    const a = num(amount); if (a === 0) return;
-    ev.push({ date: date || '', currency: currency === 'USD' ? 'USD' : 'AED', amount: round2(a), direction, source, label });
-  };
-
-  // 1) Invoice payments RECEIVED → cash IN (in the invoice's currency). Use the dated
-  //    payments[] log when present, else fall back to paidAmount on the invoice date.
-  for (const inv of (data[TABLES.invoices] || [])) {
-    if (inv.isActive === false || inv.status === 'returned') continue;
-    const cur = inv.currency || 'AED';
-    if (Array.isArray(inv.payments) && inv.payments.length) {
-      for (const p of inv.payments) {
-        const method = p.method || inv.paymentMethod;
-        if (method === 'cheque' && p.chequeStatus !== 'cleared') continue; // a cheque is cash only once CLEARED
-        push(p.date || inv.date, cur, p.amount, 'in', 'invoice', inv.invoiceNumber);
-      }
-    } else if (num(inv.paidAmount) > 0) {
-      push(inv.date, cur, inv.paidAmount, 'in', 'invoice', inv.invoiceNumber);
-    }
+  for (const m of moves) {
+    if (m.account !== 'bank' && m.account !== 'drawer') continue;
+    if (m.pending) continue;                       // a cheque is cash only once cleared
+    const a = num(m.amount); if (a === 0) continue;
+    const source = m.type === 'invoicePayment' ? 'invoice'
+      : m.type === 'expense' ? 'expense'
+        : m.type === 'purchase' ? 'purchase'
+          : m.type === 'personalDebt' ? (m.direction === 'in' ? 'debtCollect' : 'debtLend')
+            : m.otherAccount === 'investment' ? 'investTransfer' : 'manual';
+    const label = m.invoiceNumber || m.customerName || m.supplierName
+      || m.groupNameAr || m.groupNameEn || m.reason || m.label || '';
+    ev.push({
+      date: m.date || '', currency: m.currency === 'USD' ? 'USD' : 'AED',
+      amount: round2(a), direction: m.direction, source, label, account: m.account,
+    });
   }
-
-  // 2) Purchases → cash OUT for the amount actually PAID at purchase time (the rest is
-  //    supplier debt, not cash). Purchases are AED.
-  for (const po of (data[TABLES.purchases] || [])) {
-    if (po.isActive === false) continue;
-    push(po.date, 'AED', po.paidAmount, 'out', 'purchase', po.purchaseNumber);
-  }
-  // 2b) Later supplier payments → cash OUT.
-  for (const sp of (data[TABLES.supplierPayments] || [])) {
-    push(sp.date, sp.currency || 'AED', sp.amount, 'out', 'supplierPayment', '');
-  }
-
-  // 3) Expenses → cash OUT (in the expense's currency; default AED).
-  for (const e of (data[TABLES.expenses] || [])) {
-    if (e.isActive === false) continue;
-    push(e.date, e.currency || 'AED', e.amount, 'out', 'expense', e.note || '');
-  }
-
-  // 3.5) Manual money movements on bank/drawer (the Money section): deposits IN,
-  //      withdrawals OUT, and transfer legs (bank↔drawer nets to zero; the bank/drawer
-  //      leg of an investment transfer moves business cash for real).
-  for (const f of (data[TABLES.cashFlows] || [])) {
-    if (f.isActive === false) continue;
-    const account = f.account || 'investment';
-    if (account !== 'bank' && account !== 'drawer') continue;
-    const dirIn = f.type === 'deposit' || f.type === 'transferIn';
-    // A transfer to/from the INVESTMENT account is asset↔asset, not spending/income —
-    // it must still move the bank/drawer balance, but the drill shows it separately
-    // (source 'investTransfer') instead of inflating the in/out spending totals.
-    const isInvest = f.toAccount === 'investment' || f.fromAccount === 'investment';
-    push(f.date, f.currency || 'AED', f.amount, dirIn ? 'in' : 'out', isInvest ? 'investTransfer' : 'manual', f.reason || f.notes || '');
-  }
-
-  // 4) Personal debts (externalDebts): lending money OUT, collecting it back IN.
-  for (const person of (data[TABLES.externalDebts] || [])) {
-    if (person.isActive === false) continue;
-    const cur = person.currency || 'AED';
-    for (const tx of (person.txns || [])) {
-      if (tx.type === 'collect') push(tx.date, cur, tx.amount, 'in', 'debtCollect', person.personName || person.name || '');
-      else push(tx.date, cur, tx.amount, 'out', 'debtLend', person.personName || person.name || '');
-    }
-  }
-
   return ev.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 }
+
 
 // Doctor/centre receivables: unpaid balance across active invoices, per customer.
 export function receivables(app) {
@@ -1594,19 +1557,34 @@ export function receivables(app) {
 
 // Investments: current market value per currency (qty × current price), from the
 // existing securities — logic unchanged, just read.
-export function investmentValue(app) {
+// Investments, split by kind so the dashboard can show WHERE the money is invested:
+//   stocks   — remaining lot quantity × today's price, per currency (live market value)
+//   projects — capital still committed to off-market projects (completed ones have
+//              returned their money and are no longer invested capital)
+export function investmentBreakdown(app) {
   const data = app.data || app;
   const lots = data[TABLES.tradeLots] || [];
-  const val = blankCur();
+  const stocks = blankCur();
   for (const s of (data[TABLES.securities] || [])) {
     if (s.isActive === false) continue;
     // The real holding = remaining quantity across this security's buy lots
     // (securities have no standalone qty field — that was the "investments = 0" bug).
     const qty = lots.filter((l) => l.securityId === s.id).reduce((a, l) => a + num(l.qtyRemaining), 0);
     if (qty <= 0) continue;
-    addCur(val, s.currency || 'USD', qty * num(s.currentPrice));
+    addCur(stocks, s.currency || 'USD', qty * num(s.currentPrice));
   }
-  return val;
+  const projects = blankCur();
+  for (const p of (data[TABLES.projects] || [])) {
+    if (p.isActive === false || p.status === 'completed') continue;
+    addCur(projects, p.currency || 'AED', p.amount);
+  }
+  const total = blankCur();
+  for (const k of ['AED', 'USD']) total[k] = round2(num(stocks[k]) + num(projects[k]));
+  return { stocks, projects, total };
+}
+
+export function investmentValue(app) {
+  return investmentBreakdown(app).total;
 }
 
 // Inventory value at average cost (AED): Σ stockQty × purchasePriceAvg.
@@ -1647,7 +1625,8 @@ export function financialPosition(app, today = todayISO()) {
   for (const k of ['AED', 'USD']) cash[k].top = cash[k].top.sort((a, b2) => b2.amount - a.amount).slice(0, 6);
 
   const recv = receivables(app);
-  const inv = investmentValue(app);
+  const invSplit = investmentBreakdown(app);
+  const inv = invSplit.total;
   const stockVal = inventoryValue(app);
 
   // Personal debts: money owed TO me (net positive lent) vs money I owe.
@@ -1675,7 +1654,7 @@ export function financialPosition(app, today = todayISO()) {
   }
 
   return {
-    cash, receivables: recv, investments: inv, inventoryValue: stockVal,
+    cash, receivables: recv, investments: inv, investmentSplit: invSplit, inventoryValue: stockVal,
     owedToMe, iOwe, supplierOwed, expBusiness, expPersonal,
   };
 }

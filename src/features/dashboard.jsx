@@ -22,6 +22,9 @@ export default function Dashboard() {
 
   const bounds = range === 'day' ? { from: todayISO(), to: todayISO() }
     : range === 'year' ? { from: yearStart() } : { from: monthStart() };
+  // Spelled out everywhere a period figure is shown, so no number is ever ambiguous
+  // about whether it covers today, this month or this year.
+  const rangeLabel = range === 'day' ? t('today') : range === 'year' ? t('thisYear') : t('thisMonth');
 
   // Stable per-table refs (loadAll keeps unchanged tables' references) so these
   // heavy reports only recompute when their own inputs change — keeps the UI fast.
@@ -88,7 +91,20 @@ export default function Dashboard() {
   const trend = useMemo(() => periodSeries(data, trendMode, trendMode === 'year' ? 4 : 6), [dInv, dItems, dExp, dExpG, trendMode]); // eslint-disable-line react-hooks/exhaustive-deps
   // Month-by-month comparison, newest first. Same pnl() as the card above it.
   const [cmpCount, setCmpCount] = useState(6);
+  const [cmpCols, setCmpCols] = useState(['revenue', 'totalExp', 'net']);
   const compare = useMemo(() => periodSeries(data, 'month', cmpCount).slice().reverse(), [dInv, dItems, dExp, dExpG, dPur, dPurIt, cmpCount]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Every metric the comparison can show. `tone` decides the colour of the number.
+  const CMP_METRICS = [
+    { key: 'revenue', label: t('revenues'), tone: 'plain' },
+    { key: 'cogs', label: t('cogs'), tone: 'cost' },
+    { key: 'salesProfit', label: t('salesProfit'), tone: 'good' },
+    { key: 'totalExp', label: t('expenses'), tone: 'cost' },
+    { key: 'operatingProfit', label: t('operatingProfit'), tone: 'signed' },
+    { key: 'net', label: t('netAfterAll'), tone: 'signed' },
+  ];
+  const toggleCol = (k) => setCmpCols((prev) => (prev.includes(k) ? (prev.length > 1 ? prev.filter((x) => x !== k) : prev) : [...prev, k]));
+  const activeCols = CMP_METRICS.filter((m) => cmpCols.includes(m.key));
+  const cmpColor = (tone, v) => (tone === 'good' ? C.success : tone === 'cost' ? (v > 0 ? C.warning : C.textMuted) : tone === 'signed' ? (v >= 0 ? C.success : C.danger) : C.text);
   const emirates = useMemo(() => emirateStats(data), [dInv, dItems, dCust]); // eslint-disable-line react-hooks/exhaustive-deps
   const topProd = useMemo(() => topProducts(data, 10, bounds), [dInv, dItems, dVar, range]); // eslint-disable-line react-hooks/exhaustive-deps
   const topCust = useMemo(() => topCustomers(data, 10, { bounds }), [dInv, dItems, dCust, range]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -132,6 +148,79 @@ export default function Dashboard() {
 
       <PageHeader title={t('overview')} />
 
+      {/* ── Month-by-month comparison (first thing on the page) ── */}
+      <Card className="rise" style={{ marginBottom: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <SectionTitle>📅 {t('monthCompare')}</SectionTitle>
+          <div style={{ marginInlineStart: 'auto', display: 'flex', gap: 4 }}>
+            {[6, 12, 24].map((n) => (
+              <button key={n} onClick={() => setCmpCount(n)} style={{
+                border: `1px solid ${cmpCount === n ? C.primary : C.border}`, borderRadius: 999, padding: '3px 10px',
+                fontSize: 11, fontWeight: 800, cursor: 'pointer',
+                background: cmpCount === n ? C.primary : 'transparent', color: cmpCount === n ? '#fff' : C.textMid,
+              }}>{n}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* Pick what to compare. At least one column always stays on. */}
+        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 8 }}>
+          {CMP_METRICS.map((m) => (
+            <button key={m.key} onClick={() => toggleCol(m.key)} style={{
+              border: `1px solid ${cmpCols.includes(m.key) ? C.primary : C.border}`, borderRadius: 999,
+              padding: '4px 10px', fontSize: 10.5, fontWeight: 800, cursor: 'pointer',
+              background: cmpCols.includes(m.key) ? C.primary : '#fff', color: cmpCols.includes(m.key) ? '#fff' : C.textMid,
+            }}>{cmpCols.includes(m.key) ? '☑' : '☐'} {m.label}</button>
+          ))}
+          <button onClick={() => setCmpCols(CMP_METRICS.map((m) => m.key))} style={{
+            border: `1px dashed ${C.border}`, borderRadius: 999, padding: '4px 10px',
+            fontSize: 10.5, fontWeight: 800, cursor: 'pointer', background: 'transparent', color: C.primary,
+          }}>＋ {t('compareAll')}</button>
+        </div>
+
+        <div style={{ overflowX: 'auto', marginTop: 10 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 120 + activeCols.length * 92 }}>
+            <thead>
+              <tr style={{ color: C.textMuted, fontSize: 10.5 }}>
+                <th style={cmpTh('start')}>{t('month')}</th>
+                {activeCols.map((m) => <th key={m.key} style={cmpTh('end')}>{m.label}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {compare.map((row, i) => {
+                const prev = compare[i + 1];                       // list is newest-first
+                return (
+                  <tr key={row.key} style={{ borderTop: `1px solid ${C.border}` }}>
+                    <td style={cmpTd('start')}>
+                      <div style={{ fontWeight: 800, color: C.text }}>{row.key}</div>
+                      <div style={{ fontSize: 9.5, color: C.textMuted }}>{row.invoiceCount} {t('invoices')}</div>
+                    </td>
+                    {activeCols.map((m) => {
+                      const v = row[m.key];
+                      const p = prev ? prev[m.key] : null;
+                      const delta = p ? ((v - p) / Math.abs(p)) * 100 : null;
+                      return (
+                        <td key={m.key} style={cmpTd('end')}>
+                          <div style={{ fontWeight: 800, color: cmpColor(m.tone, v) }}>{cur(v)}</div>
+                          {delta !== null && Math.abs(delta) >= 1 && (
+                            <div style={{ fontSize: 9.5, color: delta >= 0 ? C.success : C.danger }}>
+                              {delta >= 0 ? '▲' : '▼'} {Math.abs(Math.round(delta))}%
+                            </div>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <div style={{ fontSize: 10.5, color: C.textMuted, marginTop: 8, lineHeight: 1.6 }}>
+          {t('monthCompareHint')}
+        </div>
+      </Card>
+
       {/* ── HERO: Profit & Loss ── */}
       <div className="rise" style={{
         borderRadius: 20, padding: 18, marginBottom: 14, color: '#fff',
@@ -140,7 +229,7 @@ export default function Dashboard() {
       }}>
         <div style={{ position: 'absolute', insetInlineEnd: -40, top: -40, width: 160, height: 160, borderRadius: 999, background: 'rgba(255,255,255,.08)' }} />
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, position: 'relative' }}>
-          <div style={{ fontSize: 13, fontWeight: 700, opacity: .9 }}>📊 {t('profitLoss')}</div>
+          <div style={{ fontSize: 13, fontWeight: 700, opacity: .9 }}>📊 {t('profitLoss')} — {rangeLabel}</div>
           <div style={{ display: 'flex', gap: 4, background: 'rgba(255,255,255,.15)', padding: 3, borderRadius: 10 }}>
             {[['day', t('today')], ['month', t('thisMonth')], ['year', t('thisYear')]].map(([k, label]) => (
               <button key={k} onClick={() => setRange(k)} style={{
@@ -189,9 +278,9 @@ export default function Dashboard() {
 
       {/* ── P&L waterfall ── */}
       <Card className="rise" style={{ marginBottom: 14 }}>
-        <SectionTitle>🧮 {t('profitLoss')} — {range === 'day' ? t('today') : range === 'year' ? t('thisYear') : t('thisMonth')}</SectionTitle>
+        <SectionTitle>🧮 {t('profitLoss')} — {rangeLabel}</SectionTitle>
         <div style={{ display: 'grid', gap: 1, background: C.border, borderRadius: 12, overflow: 'hidden', marginTop: 8 }}>
-          <PnlRow label={t('revenueLabel')} value={cur(pl.revenue)} color={C.text} />
+          <PnlRow label={`${t('revenueLabel')} — ${rangeLabel}`} value={cur(pl.revenue)} color={C.text} />
           <PnlRow label={t('cogs')} value={'− ' + cur(pl.cogs)} color={C.danger} />
           <PnlRow label={t('salesProfit')} value={cur(pl.salesProfit)} color={C.success} strong />
           {pl.freeRestockGain > 0 && <PnlRow label={`🎁 ${t('freeRestock')}`} value={'＋ ' + cur(pl.freeRestockGain)} color={C.success} />}
@@ -255,61 +344,6 @@ export default function Dashboard() {
               <Bar dataKey="net" name={t('netProfit')} fill={C.primary} radius={[3, 3, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
-        </div>
-      </Card>
-
-      {/* ── Month-by-month comparison ── */}
-      <Card className="rise" style={{ marginBottom: 14 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <SectionTitle>📅 {t('monthCompare')}</SectionTitle>
-          <div style={{ marginInlineStart: 'auto', display: 'flex', gap: 4 }}>
-            {[6, 12, 24].map((n) => (
-              <button key={n} onClick={() => setCmpCount(n)} style={{
-                border: `1px solid ${cmpCount === n ? C.primary : C.border}`, borderRadius: 999, padding: '3px 10px',
-                fontSize: 11, fontWeight: 800, cursor: 'pointer',
-                background: cmpCount === n ? C.primary : 'transparent', color: cmpCount === n ? '#fff' : C.textMid,
-              }}>{n}</button>
-            ))}
-          </div>
-        </div>
-        <div style={{ overflowX: 'auto', marginTop: 8 }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 340 }}>
-            <thead>
-              <tr style={{ color: C.textMuted, fontSize: 10.5 }}>
-                <th style={cmpTh('start')}>{t('month')}</th>
-                <th style={cmpTh('end')}>{t('revenues')}</th>
-                <th style={cmpTh('end')}>{t('expenses')}</th>
-                <th style={cmpTh('end')}>{t('netAfterAll')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {compare.map((m, i) => {
-                const prev = compare[i + 1];                       // list is newest-first
-                const delta = prev && prev.net !== 0 ? ((m.net - prev.net) / Math.abs(prev.net)) * 100 : null;
-                return (
-                  <tr key={m.key} style={{ borderTop: `1px solid ${C.border}` }}>
-                    <td style={cmpTd('start')}>
-                      <div style={{ fontWeight: 800, color: C.text }}>{m.key}</div>
-                      <div style={{ fontSize: 9.5, color: C.textMuted }}>{m.invoiceCount} {t('invoices')}</div>
-                    </td>
-                    <td style={{ ...cmpTd('end'), fontWeight: 700 }}>{cur(m.revenue)}</td>
-                    <td style={{ ...cmpTd('end'), color: m.totalExp > 0 ? C.warning : C.textMuted }}>{cur(m.totalExp)}</td>
-                    <td style={cmpTd('end')}>
-                      <div style={{ fontWeight: 900, color: m.net >= 0 ? C.success : C.danger }}>{cur(m.net)}</div>
-                      {delta !== null && (
-                        <div style={{ fontSize: 9.5, color: delta >= 0 ? C.success : C.danger }}>
-                          {delta >= 0 ? '▲' : '▼'} {Math.abs(Math.round(delta))}%
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        <div style={{ fontSize: 10.5, color: C.textMuted, marginTop: 8, lineHeight: 1.6 }}>
-          {t('monthCompareHint')}
         </div>
       </Card>
 

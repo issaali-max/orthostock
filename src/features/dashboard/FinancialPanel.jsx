@@ -26,6 +26,8 @@ export default function FinancialPanel({ app }) {
   const investV = aedBase(fin.investments);
   const owedV = aedBase(fin.owedToMe);   // people who owe ME (asset)
   const iOweV = aedBase(fin.iOwe);       // people I owe (liability)
+  const stocksV = aedBase(fin.investmentSplit.stocks);     // live market value today
+  const projectsV = aedBase(fin.investmentSplit.projects); // capital still committed
   const supplierV = num(fin.supplierOwed); // suppliers I owe (liability, AED)
   const inventoryV = num(fin.inventoryValue); // stock at average cost (AED)
 
@@ -52,7 +54,11 @@ export default function FinancialPanel({ app }) {
     { key: 'cash', icon: '💵', label: t('cashBalance'), value: cur(cash), color: cash >= 0 ? C.success : C.danger },
     { key: 'inventory', icon: '📦', label: t('inventoryValue'), value: cur(inventoryV), color: HUE.inventory },
     { key: 'receivables', icon: '🏥', label: t('doctorDebts'), value: cur(recvV), color: recvV > 0 ? C.success : C.textMid, badge: recv.byCustomer.length, sign: '＋' },
-    { key: 'investments', icon: '📈', label: t('investments'), value: cur(investV), color: HUE.investments },
+    { key: 'investments', icon: '📈', label: t('investments'), value: cur(investV), color: HUE.investments,
+      parts: [
+        { icon: '📊', label: t('stockInvestments'), value: cur(stocksV), hint: t('marketValueToday') },
+        { icon: '🏗️', label: t('projectInvestments'), value: cur(projectsV) },
+      ].filter((p) => p.value) },
     { key: 'owed', icon: '🤝', label: t('debtsToMe'), value: cur(owedV), color: owedV > 0 ? C.success : C.textMid, sign: '＋' },
     { key: 'iowe', icon: '🧾', label: t('debtsIOwe'), value: cur(-liabilities), color: liabilities > 0 ? C.danger : C.textMid, sign: liabilities > 0 ? '−' : '' },
   ];
@@ -126,6 +132,20 @@ export default function FinancialPanel({ app }) {
             </div>
             <div style={{ fontSize: 11.5, color: C.textMuted, fontWeight: 700, marginTop: 6 }}>{c.label}</div>
             <div style={{ fontSize: 17, fontWeight: 900, color: c.color, marginTop: 1 }}>{c.value}</div>
+            {c.parts?.length > 0 && (
+              <div style={{ marginTop: 6, display: 'grid', gap: 3, borderTop: `1px dashed ${C.border}`, paddingTop: 5 }}>
+                {c.parts.map((p) => (
+                  <div key={p.label} style={{ display: 'flex', alignItems: 'baseline', gap: 4, fontSize: 10.5 }}>
+                    <span>{p.icon}</span>
+                    <span style={{ color: C.textMuted, fontWeight: 700 }}>{p.label}</span>
+                    <span style={{ marginInlineStart: 'auto', fontWeight: 800, color: C.textMid }}>{p.value}</span>
+                  </div>
+                ))}
+                {c.parts.some((p) => p.hint) && (
+                  <div style={{ fontSize: 9, color: C.textMuted }}>{c.parts.find((p) => p.hint).hint}</div>
+                )}
+              </div>
+            )}
             <div style={{ fontSize: 10, color: C.primaryLight, fontWeight: 700, marginTop: 4 }}>{t('tapToView')} ›</div>
           </button>
         ))}
