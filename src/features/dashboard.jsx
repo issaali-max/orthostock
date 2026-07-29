@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 import { useApp } from '../app/AppProvider.jsx';
 import { C, TABLES, SHADOW } from '../lib/constants.js';
 import { fmtCur, fmtNum, num } from '../lib/money.js';
@@ -17,7 +17,6 @@ export default function Dashboard() {
   const app = useApp();
   const { t, data, displayCurrency, usdRate, lang, settings } = app;
   const [range, setRange] = useState('month'); // day | month | year
-  const [trendMode, setTrendMode] = useState('month'); // month | year
   const [showSold, setShowSold] = useState(false);
 
   const bounds = range === 'day' ? { from: todayISO(), to: todayISO() }
@@ -88,23 +87,27 @@ export default function Dashboard() {
     return { sold, buyers };
   }, [dInv, dItems, dVar, dCust, range]); // eslint-disable-line react-hooks/exhaustive-deps
   const soldList = periodReport.sold;
-  const trend = useMemo(() => periodSeries(data, trendMode, trendMode === 'year' ? 4 : 6), [dInv, dItems, dExp, dExpG, trendMode]); // eslint-disable-line react-hooks/exhaustive-deps
   // Month-by-month comparison, newest first. Same pnl() as the card above it.
   const [cmpCount, setCmpCount] = useState(6);
   const [cmpCols, setCmpCols] = useState(['revenue', 'totalExp', 'net']);
-  const compare = useMemo(() => periodSeries(data, 'month', cmpCount).slice().reverse(), [dInv, dItems, dExp, dExpG, dPur, dPurIt, cmpCount]); // eslint-disable-line react-hooks/exhaustive-deps
-  // Every metric the comparison can show. `tone` decides the colour of the number.
+  const [cmpMode, setCmpMode] = useState('month');   // month | year
+  const [cmpChart, setCmpChart] = useState('bar');   // bar | line
+  const compare = useMemo(() => periodSeries(data, cmpMode, cmpCount).slice().reverse(), [dInv, dItems, dExp, dExpG, dPur, dPurIt, cmpMode, cmpCount]); // eslint-disable-line react-hooks/exhaustive-deps
+  const chartData = useMemo(() => compare.slice().reverse(), [compare]);  // chart reads oldest → newest
+  // Every metric the comparison can show. `tone` decides the colour of the number,
+  // `fill` the colour of its series on the chart.
   const CMP_METRICS = [
-    { key: 'revenue', label: t('revenues'), tone: 'plain' },
-    { key: 'cogs', label: t('cogs'), tone: 'cost' },
-    { key: 'salesProfit', label: t('salesProfit'), tone: 'good' },
-    { key: 'totalExp', label: t('expenses'), tone: 'cost' },
-    { key: 'operatingProfit', label: t('operatingProfit'), tone: 'signed' },
-    { key: 'net', label: t('netAfterAll'), tone: 'signed' },
+    { key: 'revenue', label: t('revenues'), tone: 'plain', fill: '#1558A0' },
+    { key: 'cogs', label: t('cogs'), tone: 'cost', fill: '#D9534F' },
+    { key: 'salesProfit', label: t('salesProfit'), tone: 'good', fill: '#1A8F52' },
+    { key: 'totalExp', label: t('expenses'), tone: 'cost', fill: '#D97B20' },
+    { key: 'operatingProfit', label: t('operatingProfit'), tone: 'signed', fill: '#0E8A8F' },
+    { key: 'net', label: t('netAfterAll'), tone: 'signed', fill: '#7C4DFF' },
   ];
   const toggleCol = (k) => setCmpCols((prev) => (prev.includes(k) ? (prev.length > 1 ? prev.filter((x) => x !== k) : prev) : [...prev, k]));
   const activeCols = CMP_METRICS.filter((m) => cmpCols.includes(m.key));
   const cmpColor = (tone, v) => (tone === 'good' ? C.success : tone === 'cost' ? (v > 0 ? C.warning : C.textMuted) : tone === 'signed' ? (v >= 0 ? C.success : C.danger) : C.text);
+  const cmpSteps = cmpMode === 'year' ? [3, 5, 10] : [6, 12, 24];
   const emirates = useMemo(() => emirateStats(data), [dInv, dItems, dCust]); // eslint-disable-line react-hooks/exhaustive-deps
   const topProd = useMemo(() => topProducts(data, 10, bounds), [dInv, dItems, dVar, range]); // eslint-disable-line react-hooks/exhaustive-deps
   const topCust = useMemo(() => topCustomers(data, 10, { bounds }), [dInv, dItems, dCust, range]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -151,9 +154,17 @@ export default function Dashboard() {
       {/* ── Month-by-month comparison (first thing on the page) ── */}
       <Card className="rise" style={{ marginBottom: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <SectionTitle>📅 {t('monthCompare')}</SectionTitle>
-          <div style={{ marginInlineStart: 'auto', display: 'flex', gap: 4 }}>
-            {[6, 12, 24].map((n) => (
+          <SectionTitle>📅 {cmpMode === 'year' ? t('yearCompare') : t('monthCompare')}</SectionTitle>
+          <div style={{ marginInlineStart: 'auto', display: 'flex', gap: 4, background: C.surfaceAlt, padding: 3, borderRadius: 9 }}>
+            {[['month', t('monthly')], ['year', t('yearly')]].map(([k, label]) => (
+              <button key={k} onClick={() => { setCmpMode(k); setCmpCount(k === 'year' ? 5 : 6); }} style={{
+                padding: '4px 11px', borderRadius: 7, fontSize: 11.5, fontWeight: 700, cursor: 'pointer', border: 'none',
+                background: cmpMode === k ? C.primary : 'transparent', color: cmpMode === k ? '#fff' : C.textMid,
+              }}>{label}</button>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 4 }}>
+            {cmpSteps.map((n) => (
               <button key={n} onClick={() => setCmpCount(n)} style={{
                 border: `1px solid ${cmpCount === n ? C.primary : C.border}`, borderRadius: 999, padding: '3px 10px',
                 fontSize: 11, fontWeight: 800, cursor: 'pointer',
@@ -176,13 +187,46 @@ export default function Dashboard() {
             border: `1px dashed ${C.border}`, borderRadius: 999, padding: '4px 10px',
             fontSize: 10.5, fontWeight: 800, cursor: 'pointer', background: 'transparent', color: C.primary,
           }}>＋ {t('compareAll')}</button>
+          <div style={{ marginInlineStart: 'auto', display: 'flex', gap: 4 }}>
+            {[['bar', '📊'], ['line', '📈']].map(([k, icon]) => (
+              <button key={k} onClick={() => setCmpChart(k)} title={k} style={{
+                border: `1px solid ${cmpChart === k ? C.primary : C.border}`, borderRadius: 8, padding: '3px 9px',
+                fontSize: 12, cursor: 'pointer', background: cmpChart === k ? C.surfaceAlt : '#fff',
+              }}>{icon}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* Same months, same metrics as the table below — one selection drives both. */}
+        <div style={{ width: '100%', height: 240, marginTop: 10 }} dir="ltr">
+          <ResponsiveContainer>
+            {cmpChart === 'bar' ? (
+              <BarChart data={chartData} margin={{ top: 4, right: 4, left: -18, bottom: 0 }} barCategoryGap="18%" barGap={1}>
+                <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
+                <XAxis dataKey="key" tickFormatter={(k) => (cmpMode === 'year' ? k : (k || '').slice(2))} fontSize={9.5} stroke={C.textMuted} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                <YAxis fontSize={10} stroke={C.textMuted} tickLine={false} axisLine={false} width={44} />
+                <Tooltip contentStyle={{ borderRadius: 10, border: `1px solid ${C.border}`, fontSize: 12 }} />
+                <Legend wrapperStyle={{ fontSize: 10 }} />
+                {activeCols.map((m) => <Bar key={m.key} dataKey={m.key} name={m.label} fill={m.fill} radius={[3, 3, 0, 0]} />)}
+              </BarChart>
+            ) : (
+              <LineChart data={chartData} margin={{ top: 4, right: 6, left: -18, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
+                <XAxis dataKey="key" tickFormatter={(k) => (cmpMode === 'year' ? k : (k || '').slice(2))} fontSize={9.5} stroke={C.textMuted} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                <YAxis fontSize={10} stroke={C.textMuted} tickLine={false} axisLine={false} width={44} />
+                <Tooltip contentStyle={{ borderRadius: 10, border: `1px solid ${C.border}`, fontSize: 12 }} />
+                <Legend wrapperStyle={{ fontSize: 10 }} />
+                {activeCols.map((m) => <Line key={m.key} type="monotone" dataKey={m.key} name={m.label} stroke={m.fill} strokeWidth={2} dot={{ r: 2 }} />)}
+              </LineChart>
+            )}
+          </ResponsiveContainer>
         </div>
 
         <div style={{ overflowX: 'auto', marginTop: 10 }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 120 + activeCols.length * 92 }}>
             <thead>
               <tr style={{ color: C.textMuted, fontSize: 10.5 }}>
-                <th style={cmpTh('start')}>{t('month')}</th>
+                <th style={cmpTh('start')}>{t('periodCol')}</th>
                 {activeCols.map((m) => <th key={m.key} style={cmpTh('end')}>{m.label}</th>)}
               </tr>
             </thead>
@@ -316,36 +360,6 @@ export default function Dashboard() {
           </div>
         </Card>
       )}
-
-      {/* ── Comparison trend (4 series, monthly/yearly) ── */}
-      <Card className="rise" style={{ marginBottom: 14 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
-          <SectionTitle>📊 {t('comparison')}</SectionTitle>
-          <div style={{ display: 'flex', gap: 4, background: C.surfaceAlt, padding: 3, borderRadius: 9 }}>
-            {[['month', t('monthly')], ['year', t('yearly')]].map(([k, label]) => (
-              <button key={k} onClick={() => setTrendMode(k)} style={{
-                padding: '5px 12px', borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: 'pointer', border: 'none',
-                background: trendMode === k ? C.primary : 'transparent', color: trendMode === k ? '#fff' : C.textMid,
-              }}>{label}</button>
-            ))}
-          </div>
-        </div>
-        <div style={{ width: '100%', height: 230, marginTop: 8 }} dir="ltr">
-          <ResponsiveContainer>
-            <BarChart data={trend} margin={{ top: 4, right: 4, left: -18, bottom: 0 }} barCategoryGap="18%" barGap={1}>
-              <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
-              <XAxis dataKey="key" tickFormatter={(k) => (trendMode === 'year' ? k : (k || '').slice(5))} fontSize={10} stroke={C.textMuted} tickLine={false} axisLine={false} />
-              <YAxis fontSize={10} stroke={C.textMuted} tickLine={false} axisLine={false} width={42} />
-              <Tooltip contentStyle={{ borderRadius: 10, border: `1px solid ${C.border}`, fontSize: 12 }} />
-              <Legend wrapperStyle={{ fontSize: 10 }} />
-              <Bar dataKey="salesProfit" name={t('salesProfit')} fill={C.success} radius={[3, 3, 0, 0]} />
-              <Bar dataKey="businessExp" name={t('businessExpenses')} fill={C.primaryLight} radius={[3, 3, 0, 0]} />
-              <Bar dataKey="personalExp" name={t('personalExpenses')} fill={C.warning} radius={[3, 3, 0, 0]} />
-              <Bar dataKey="net" name={t('netProfit')} fill={C.primary} radius={[3, 3, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </Card>
 
       {/* ── Sales by emirate ── */}
       <Card className="rise" style={{ marginBottom: 14 }}>
