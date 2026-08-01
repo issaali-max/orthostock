@@ -84,5 +84,18 @@ ok('yearly totals sum the months', yearly.periods[0].invoiced === 1900 && yearly
 const empty = statementOfAccount(data, 'c-none', 'month');
 ok('unknown customer yields an empty statement', empty.periods.length === 0 && empty.balance === 0);
 
+
+// ── Aging of what is still outstanding ──
+const ag = soa.outstanding;
+ok('only unpaid invoices are aged', ag.every((o) => o.due > 0));
+ok('settled invoice is not listed', !ag.some((o) => o.ref === 'INV-003'));
+ok('partly paid invoice is listed with its remainder', ag.some((o) => o.ref === 'INV-001' && o.due === 600));
+ok('pre-app remainder is listed first', ag[0].opening === true && ag[0].due === 1500);
+ok('aged oldest first', ag.every((o, i) => i === 0 || (ag[i - 1].date || '') <= (o.date || '')));
+ok('dated rows carry a day count', ag.filter((o) => o.date).every((o) => typeof o.ageDays === 'number'));
+ok('an undated opening balance is not given a fake age', ag[0].ageDays === null && soa.aging.undated === 1500);
+ok('undated debt is not silently bucketed as recent', soa.aging.d0_30 !== 1500);
+ok('aging buckets sum to the balance', Object.values(soa.aging).reduce((a, b) => a + b, 0) === soa.balance);
+
 console.log(fail === 0 ? '\nALL SOA TESTS PASSED' : `\n${fail} FAILED`);
 process.exit(fail === 0 ? 0 : 1);

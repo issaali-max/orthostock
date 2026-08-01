@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { C, RADIUS, SHADOW } from '../lib/constants.js';
 
 // ── Button ──
@@ -141,6 +141,20 @@ export function SearchBar({ value, onChange, placeholder }) {
 
 // ── Modal ──
 export function Modal({ open, onClose, title, children, footer, width = 460, dismissable = false }) {
+  // Nesting. Every modal used to sit at zIndex 1000, so one opened from INSIDE another
+  // rendered behind its parent and the button that opened it looked dead. Each modal
+  // claims a depth on open and stacks above whatever is already on screen.
+  const depthRef = useRef(0);
+  const [level, setLevel] = useState(1);
+  useEffect(() => {
+    if (!open) return undefined;
+    window.__modalDepth = (window.__modalDepth || 0) + 1;
+    depthRef.current = window.__modalDepth;
+    setLevel(depthRef.current);
+    return () => { window.__modalDepth = Math.max(0, (window.__modalDepth || 1) - 1); };
+  }, [open]);
+  const z = 1000 + (level - 1) * 10;
+
   // Lock the BODY scroll while open so swiping scrolls only the modal content.
   useEffect(() => {
     if (!open) return;
@@ -155,7 +169,7 @@ export function Modal({ open, onClose, title, children, footer, width = 460, dis
       // tapped; input modals leave it off so unsaved typing isn't lost.
       onClick={dismissable ? (e) => { if (e.target === e.currentTarget) onClose(); } : undefined}
       style={{
-        position: 'fixed', inset: 0, background: 'rgba(14,29,46,0.45)', zIndex: 1000,
+        position: 'fixed', inset: 0, background: 'rgba(14,29,46,0.45)', zIndex: z,
         display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
         padding: 0, paddingTop: 'calc(env(safe-area-inset-top) + 16px)', boxSizing: 'border-box',
         overscrollBehavior: 'contain',

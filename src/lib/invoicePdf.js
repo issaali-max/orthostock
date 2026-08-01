@@ -383,7 +383,7 @@ function soaRows(periods, cur, labelOf) {
   return rows;
 }
 
-function buildSoaHtml({ settings, customer, periods, balance, cur, rangeLabel, date, labelOf }) {
+function buildSoaHtml({ settings, customer, periods, balance, cur, rangeLabel, date, labelOf, outstanding = [], aging = null }) {
   const rows = soaRows(periods, cur, labelOf);
   const pages = []; let idx = 0;
   while (idx < rows.length || pages.length === 0) {
@@ -394,8 +394,35 @@ function buildSoaHtml({ settings, customer, periods, balance, cur, rangeLabel, d
   const count = pages.length;
   const th = (w, txt, align = 'center') => `<th style="background:${NAVY};color:#fff;padding:7px 5px;font-size:10px;font-weight:700;text-align:${align};${w ? `width:${w};` : ''}border:1px solid ${NAVY}">${txt}</th>`;
   const head = `<tr>${th('68px', 'Date')}${th('', 'Description', 'left')}${th('82px', 'Amount', 'right')}${th('86px', 'Balance', 'right')}</tr>`;
+  const outRows = outstanding.map((o) => {
+    const td = (txt, align, opts = {}) => `<td dir="ltr" style="padding:4px 7px;font-size:10px;text-align:${align};border:1px solid ${LINE};${opts.bold ? 'font-weight:800;' : ''}${opts.color ? `color:${opts.color};` : ''}">${txt}</td>`;
+    const age = o.ageDays === null ? '—' : `${o.ageDays}`;
+    const late = o.ageDays !== null && o.ageDays > 60;
+    return `<tr>${td(esc(o.date) || '—', 'center', { color: MUTE })}${td(o.opening ? 'Previous balance' : `Invoice ${esc(o.ref)}`, 'left')}${td(esc(money(o.total, cur)), 'right', { color: MUTE })}${td(esc(money(o.due, cur)), 'right', { bold: true })}${td(age, 'center', { bold: late, color: late ? '#B4232B' : MUTE })}</tr>`;
+  }).join('');
+
+  const agingLine = aging ? [
+    ['0–30 days', aging.d0_30], ['31–60', aging.d31_60], ['61–90', aging.d61_90], ['Over 90', aging.d90plus],
+    ...(aging.undated > 0 ? [['Undated', aging.undated]] : []),
+  ].filter(([, v]) => v > 0).map(([k, v]) => `<span style="margin-right:14px"><b style="color:${NAVY}">${esc(k)}:</b> ${esc(money(v, cur))}</span>`).join('') : '';
+
   const summary = `
-    <div dir="ltr" style="display:flex;justify-content:flex-end;margin-top:10px;direction:ltr">
+    ${outstanding.length ? `
+    <div dir="ltr" style="margin-top:14px;direction:ltr">
+      <div style="font-size:11px;font-weight:800;color:${NAVY};margin-bottom:4px">OUTSTANDING INVOICES</div>
+      <table dir="ltr" style="width:100%;border-collapse:collapse">
+        <thead><tr>
+          <th style="background:${NAVY};color:#fff;padding:6px 5px;font-size:9.5px;width:68px;border:1px solid ${NAVY}">Date</th>
+          <th style="background:${NAVY};color:#fff;padding:6px 5px;font-size:9.5px;text-align:left;border:1px solid ${NAVY}">Reference</th>
+          <th style="background:${NAVY};color:#fff;padding:6px 5px;font-size:9.5px;width:80px;text-align:right;border:1px solid ${NAVY}">Invoice</th>
+          <th style="background:${NAVY};color:#fff;padding:6px 5px;font-size:9.5px;width:84px;text-align:right;border:1px solid ${NAVY}">Outstanding</th>
+          <th style="background:${NAVY};color:#fff;padding:6px 5px;font-size:9.5px;width:52px;border:1px solid ${NAVY}">Days</th>
+        </tr></thead>
+        <tbody>${outRows}</tbody>
+      </table>
+      ${agingLine ? `<div style="font-size:9.5px;color:${MUTE};margin-top:5px">${agingLine}</div>` : ''}
+    </div>` : ''}
+    <div dir="ltr" style="display:flex;justify-content:flex-end;margin-top:12px;direction:ltr">
       <div style="min-width:250px;border:2px solid ${NAVY};border-radius:6px;padding:10px 12px;font-size:11px">
         <div style="display:flex;justify-content:space-between;padding:3px 0">
           <span style="color:${MUTE}">Balance due</span>

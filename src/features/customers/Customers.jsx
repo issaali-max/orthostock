@@ -7,7 +7,7 @@ import { fmtCur, num, round2, fmtNum } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
 import { customerStats, clinicRating, recordInvoicePayment, recordOpeningDebtPayment, orderList, giftsToCenters, outstandingLoans, lendMaterial, returnLoan, statementOfAccount } from '../../lib/engine.js';
 import { printSoa, generateSoaPdf } from '../../lib/invoicePdf.js';
-import { money, isValidPhone, sendDocumentWhatsApp, downloadBlob } from '../../lib/whatsapp.js';
+import { money, isValidPhone, normalizePhone, sendDocumentWhatsApp, downloadBlob } from '../../lib/whatsapp.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, PaymentModal, ProductChips, SearchBar, Select, Textarea } from '../../ui/components.jsx';
 import { BandGrid } from '../../ui/BandGrid.jsx';
 import { isGridWorthy } from '../../lib/bandGrid.js';
@@ -585,6 +585,7 @@ function SoaModal({ customer, onClose }) {
     settings, customer,
     periods: soa.periods,                       // document reads oldest → newest
     balance: soa.balance, cur, labelOf,
+    outstanding: soa.outstanding, aging: soa.aging,
     rangeLabel: mode === 'year' ? 'Yearly' : 'Monthly',
     date: new Date().toLocaleDateString('en-GB'),
   });
@@ -636,6 +637,22 @@ function SoaModal({ customer, onClose }) {
           <span style={{ marginInlineStart: 'auto', fontSize: 19, fontWeight: 900 }}>{m(soa.balance)}</span>
         </div>
 
+        {soa.outstanding.length > 0 && (
+          <div style={{ border: `1px solid ${C.border}`, borderRadius: 12, padding: 10, marginBottom: 12 }}>
+            <div style={{ fontSize: 11.5, fontWeight: 900, color: C.text, marginBottom: 6 }}>⏳ Outstanding invoices</div>
+            {soa.outstanding.map((o, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 11.5, padding: '3px 0', borderTop: i ? `1px dashed ${C.border}` : 'none' }}>
+                <span style={{ color: C.textMuted, fontSize: 10, minWidth: 68 }}>{o.date || '—'}</span>
+                <span style={{ flex: 1, minWidth: 0 }}>{o.opening ? 'Previous balance' : <>Invoice <b>{o.ref}</b></>}</span>
+                <span style={{ fontWeight: 800, color: C.danger, whiteSpace: 'nowrap' }}>{m(o.due)}</span>
+                <span style={{ fontSize: 10, minWidth: 56, textAlign: 'right', whiteSpace: 'nowrap', fontWeight: o.ageDays > 60 ? 800 : 400, color: o.ageDays === null ? C.textMuted : o.ageDays > 60 ? C.danger : C.textMuted }}>
+                  {o.ageDays === null ? 'undated' : `${o.ageDays}d`}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
         {periods.length === 0 ? (
           <div style={{ padding: 20, textAlign: 'center', color: C.textMuted, fontSize: 12.5 }}>No activity yet for this client.</div>
         ) : periods.map((p) => (
@@ -676,17 +693,21 @@ function SoaModal({ customer, onClose }) {
         </div>
       </div>
 
+      {/* Inline, not a nested <Modal>: every modal shares zIndex 1000, so a modal opened
+          from inside another renders BEHIND it and looks like a dead button. */}
       {sendOpen && (
-        <Modal open title="📱 Send statement" onClose={() => setSendOpen(false)} width={400}
-          footer={<>
-            <Btn variant="ghost" onClick={() => setSendOpen(false)}>Cancel</Btn>
-            <Btn onClick={doSend} disabled={busy || !isValidPhone(phone)}>{busy ? 'Preparing…' : 'Send on WhatsApp'}</Btn>
-          </>}>
-          <Field label="WhatsApp number" hint={customer?.whatsapp || customer?.phone ? 'Saved number — you can edit it' : 'No saved number'}>
+        <div style={{ border: `2px solid ${C.primary}`, borderRadius: 12, padding: 12, marginTop: 12, background: C.surfaceAlt }}>
+          <div style={{ fontSize: 12.5, fontWeight: 900, color: C.text, marginBottom: 8 }}>📱 Send to {customer?.name}</div>
+          <Field label="WhatsApp number" hint={customer?.whatsapp || customer?.phone ? 'Saved number — you can edit it' : 'No saved number for this client'}>
             <Input value={phone} onChange={setPhone} placeholder="+9715XXXXXXXX" inputMode="tel" />
           </Field>
-          {phone && !isValidPhone(phone) && <div style={{ fontSize: 12, color: C.danger }}>Invalid number</div>}
-        </Modal>
+          {phone && !isValidPhone(phone) && <div style={{ fontSize: 12, color: C.danger, marginBottom: 6 }}>Invalid number</div>}
+          {phone && isValidPhone(phone) && <div style={{ fontSize: 11.5, color: C.textMuted, marginBottom: 6 }}>→ wa.me/{normalizePhone(phone)}</div>}
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <Btn size="sm" variant="ghost" onClick={() => setSendOpen(false)}>Cancel</Btn>
+            <Btn size="sm" onClick={doSend} disabled={busy || !isValidPhone(phone)}>{busy ? 'Preparing…' : 'Send on WhatsApp'}</Btn>
+          </div>
+        </div>
       )}
     </Modal>
   );

@@ -813,7 +813,6 @@ export function statementOfAccount(data, customerId, mode = 'month', opts = {}) 
   const preBalance = round2(num(c?.openingDebt));
   const ev = soaEvents(data, customerId);
   const keyOf = (iso) => (mode === 'year' ? (iso || '').slice(0, 4) : (iso || '').slice(0, 7));
-
   const periods = new Map();
   const order = [];
   let running = preBalance;
@@ -834,7 +833,35 @@ export function statementOfAccount(data, customerId, mode = 'month', opts = {}) 
     list.push({ key: keyOf(todayISO()), opening: preBalance, invoiced: 0, paid: 0, closing: preBalance, rows: [] });
   }
   if (opts.desc) list.reverse();
-  return { periods: list, openingBalance: preBalance, balance: round2(running), eventCount: ev.length };
+
+  // Aging of what is STILL outstanding, oldest first. This is the one thing the sample
+  // statement did better than mine: "how long has this been sitting unpaid" is the
+  // question a client actually acts on.
+  const today = todayISO();
+  const days = (iso) => (iso ? Math.max(0, Math.round((new Date(today) - new Date(iso)) / 86400000)) : null);
+  const outstanding = [];
+  for (const inv of (data[TABLES.invoices] || [])) {
+    if (inv.customerId !== customerId || inv.isActive === false || inv.status === 'returned') continue;
+    const due = round2(Math.max(0, num(inv.total) - num(inv.paidAmount)));
+    if (due <= 0) continue;
+    outstanding.push({ ref: inv.invoiceNumber || '', date: inv.date || '', total: round2(num(inv.total)), due, ageDays: days(inv.date) });
+  }
+  outstanding.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  const preDue = round2(preBalance - num(c?.openingPaid));
+  if (preDue > 0) {
+    outstanding.unshift({ ref: '', date: c?.openingDebtDate || '', total: preBalance, due: preDue, ageDays: days(c?.openingDebtDate), opening: true });
+  }
+  const buckets = { d0_30: 0, d31_60: 0, d61_90: 0, d90plus: 0, undated: 0 };
+  for (const o of outstanding) {
+    // An opening balance with no recorded date has no knowable age. Bucketing it as
+    // "0-30 days" would understate how long it has been owed, so it is reported
+    // separately rather than guessed at.
+    if (o.ageDays === null) { buckets.undated = round2(buckets.undated + o.due); continue; }
+    const k = o.ageDays <= 30 ? 'd0_30' : o.ageDays <= 60 ? 'd31_60' : o.ageDays <= 90 ? 'd61_90' : 'd90plus';
+    buckets[k] = round2(buckets[k] + o.due);
+  }
+
+  return { periods: list, openingBalance: preBalance, balance: round2(running), eventCount: ev.length, outstanding, aging: buckets };
 }
 
 export function openingDebtTotal(customers) {
