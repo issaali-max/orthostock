@@ -430,7 +430,15 @@ function buildSoaHtml({ settings, customer, periods, balance, cur, rangeLabel, d
         </div>
       </div>
     </div>`;
-  const party = [['Client', esc(customer?.name || '—')], ...(customer?.phone ? [['Phone', esc(customer.phone)]] : [])];
+  // Same rule as the invoice (nameEn first), so a clinic sees ONE name across every
+  // document we send it. The statement used `name` only, which meant a centre with an
+  // English name was addressed differently here than on its own invoices.
+  const custName = esc(customer?.nameEn || customer?.name || '—');
+  const party = [
+    ['Client', custName],
+    ...(customer?.trn ? [['Customer TRN#', esc(customer.trn)]] : []),
+    ...(customer?.phone ? [['Phone', esc(customer.phone)]] : []),
+  ];
   const meta = [['Period', esc(rangeLabel)], ['Issued', esc(date)], ['Page #', '']];
   return pages.map((pageRows, i) => {
     const last = i === count - 1;
@@ -448,7 +456,7 @@ function buildSoaHtml({ settings, customer, periods, balance, cur, rangeLabel, d
   }).join('');
 }
 
-const soaName = (a) => `SOA-${String(a.customer?.name || 'client').replace(/[^\w-]/g, '_')}-${a.date}`;
+const soaName = (a) => `SOA-${String(a.customer?.nameEn || a.customer?.name || 'client').replace(/[^\w-]/g, '_')}-${a.date}`;
 export function printSoa(args) { return printDoc(buildSoaHtml(args), soaName(args)); }
 export function generateSoaPdf(args) { return docToPdf(buildSoaHtml(args), `${soaName(args)}.pdf`); }
 
