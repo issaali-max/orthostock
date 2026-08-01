@@ -756,6 +756,87 @@ export function vatLiability(invoices, items, settings) {
 }
 
 // Total old/opening debt outstanding across all customers (receivables not tied to invoices).
+// ───────────────────────────── Statement of Account (SOA) ─────────────────────────────
+// A per-customer running statement. The rule that matters: the opening balance of a
+// period is everything that happened BEFORE it — invoices raised minus payments
+// received, plus any pre-app opening debt. Get that wrong and every later period is
+// wrong too, so it is derived from the same events as the rows rather than stored.
+//
+// Deliberately summary-level: one line per invoice (number, date, total, still due) and
+// one line per payment. No material lines — the customer knows what they bought; what
+// they need from us is what is still owed.
+function soaEvents(data, customerId) {
+  const ev = [];
+  const c = (data[TABLES.customers] || []).find((x) => x.id === customerId);
+
+  // Opening-debt repayments. openingPaid is the authoritative total (customerStats uses
+  // it); openingPayments is the dated log. If the log is short of the total — an older
+  // repayment recorded before logging existed — the remainder is carried as one undated
+  // row so the statement still reconciles with the customer's debt elsewhere in the app.
+  const logged = (c?.openingPayments || []).reduce((s, p) => s + num(p.amount), 0);
+  for (const p of (c?.openingPayments || [])) {
+    if (num(p.amount) <= 0) continue;
+    ev.push({ date: p.date || '', kind: 'openingPayment', ref: '', debit: 0, credit: round2(num(p.amount)), method: p.method || 'cash' });
+  }
+  const unlogged = round2(num(c?.openingPaid) - logged);
+  if (unlogged > 0) ev.push({ date: '', kind: 'openingPayment', ref: '', debit: 0, credit: unlogged, method: '' });
+
+  for (const inv of (data[TABLES.invoices] || [])) {
+    if (inv.customerId !== customerId || inv.isActive === false || inv.status === 'returned') continue;
+    ev.push({
+      date: inv.date || '', kind: 'invoice', ref: inv.invoiceNumber || '', invoiceId: inv.id,
+      debit: round2(num(inv.total)), credit: 0,
+      invoiceTotal: round2(num(inv.total)),
+      invoiceDue: round2(Math.max(0, num(inv.total) - num(inv.paidAmount))),
+    });
+    for (const p of (inv.payments || [])) {
+      if (num(p.amount) <= 0) continue;
+      // An uncleared cheque IS credited here: the customer has handed over payment, and
+      // the balance must agree with the debt the app shows for them. It is flagged
+      // pending so it can be shown as such. (Cash-on-hand is a different question —
+      // accountLedger deliberately excludes it there until it clears.)
+      const pending = p.method === 'cheque' && p.chequeStatus !== 'cleared';
+      ev.push({ date: p.date || inv.date || '', kind: 'payment', ref: inv.invoiceNumber || '', invoiceId: inv.id, debit: 0, credit: round2(num(p.amount)), method: p.method || 'cash', pending });
+    }
+  }
+  // Chronological; on the same day an invoice is raised before it is paid.
+  const rank = (e) => (e.kind === 'invoice' ? 0 : 1);
+  return ev.sort((a, b) => (a.date || '').localeCompare(b.date || '') || rank(a) - rank(b));
+}
+
+// Groups a customer's activity into periods. mode: 'month' | 'year'.
+// Every period reports: opening balance, invoiced, paid, closing balance, and its rows.
+export function statementOfAccount(data, customerId, mode = 'month', opts = {}) {
+  const c = (data[TABLES.customers] || []).find((x) => x.id === customerId);
+  // Pre-app debt is a BALANCE the customer already carried, not something invoiced in any
+  // period. It seeds the running balance so the first period simply opens with it.
+  const preBalance = round2(num(c?.openingDebt));
+  const ev = soaEvents(data, customerId);
+  const keyOf = (iso) => (mode === 'year' ? (iso || '').slice(0, 4) : (iso || '').slice(0, 7));
+
+  const periods = new Map();
+  const order = [];
+  let running = preBalance;
+  for (const e of ev) {
+    const key = keyOf(e.date) || keyOf(todayISO());     // undated activity lands in today's period
+    if (!periods.has(key)) { periods.set(key, { key, opening: running, invoiced: 0, paid: 0, closing: running, rows: [] }); order.push(key); }
+    const p = periods.get(key);
+    running = round2(running + e.debit - e.credit);
+    p.invoiced = round2(p.invoiced + e.debit);
+    p.paid = round2(p.paid + e.credit);
+    p.rows.push({ ...e, balance: running });
+    p.closing = running;
+  }
+
+  const list = [...periods.values()].sort((a, b) => a.key.localeCompare(b.key));
+  // A customer whose only history is pre-app debt still deserves a statement.
+  if (!list.length && preBalance > 0) {
+    list.push({ key: keyOf(todayISO()), opening: preBalance, invoiced: 0, paid: 0, closing: preBalance, rows: [] });
+  }
+  if (opts.desc) list.reverse();
+  return { periods: list, openingBalance: preBalance, balance: round2(running), eventCount: ev.length };
+}
+
 export function openingDebtTotal(customers) {
   return round2((customers || []).reduce((s, c) => {
     if (c.isActive === false) return s;

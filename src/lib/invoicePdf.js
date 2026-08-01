@@ -355,6 +355,76 @@ function buildReceiptHtml({ receipt, settings, customer }) {
 
 export function buildInvoiceHtml(args) { return buildHtml(args); }
 
+// ── STATEMENT OF ACCOUNT (SOA) ──
+// Summary level by design: one line per invoice and per payment, never material lines.
+// The customer knows what they bought; what they need from us is what is still owed.
+const SOA_ROWS_FIRST = 18, SOA_ROWS_NEXT = 28;
+
+function soaRows(periods, cur, labelOf) {
+  const rows = [];
+  const td = (txt, align, opts = {}) => `<td dir="ltr" style="height:22px;padding:3px 7px;font-size:10px;text-align:${align};border:1px solid ${LINE};direction:ltr;${opts.bold ? 'font-weight:800;' : ''}${opts.color ? `color:${opts.color};` : ''}">${txt}</td>`;
+  const band = (txt, right, bg, color, weight) =>
+    `<tr><td colspan="4" dir="ltr" style="padding:5px 8px;background:${bg};color:${color};font-size:10.5px;font-weight:${weight};border:1px solid ${LINE};text-align:left">${txt}<span style="float:right">${right}</span></td></tr>`;
+
+  for (const p of periods) {
+    rows.push(band(esc(labelOf(p.key)), `Opening: ${esc(money(p.opening, cur))}`, '#eef2f7', NAVY, 800));
+    for (const r of p.rows) {
+      if (r.kind === 'invoice') {
+        const due = r.invoiceDue > 0 ? ` · outstanding ${esc(money(r.invoiceDue, cur))}` : ' · settled';
+        rows.push(`<tr>${td(esc(r.date), 'center', { color: MUTE })}${td(`Invoice ${esc(r.ref)}${due}`, 'left')}${td(esc(money(r.debit, cur)), 'right', { bold: true })}${td(esc(money(r.balance, cur)), 'right')}</tr>`);
+      } else {
+        const kind = r.kind === 'openingPayment' ? 'Payment — previous balance' : `Payment — invoice ${esc(r.ref)}`;
+        const note = r.pending ? ' (cheque not yet cleared)' : r.method ? ` (${esc(r.method)})` : '';
+        rows.push(`<tr>${td(esc(r.date) || '—', 'center', { color: MUTE })}${td(`${kind}${note}`, 'left', { color: MUTE })}${td(`- ${esc(money(r.credit, cur))}`, 'right', { bold: true, color: '#1A8F52' })}${td(esc(money(r.balance, cur)), 'right')}</tr>`);
+      }
+    }
+    rows.push(band(`Invoiced ${esc(money(p.invoiced, cur))} · Paid ${esc(money(p.paid, cur))}`, `Closing: ${esc(money(p.closing, cur))}`, '#f7f9fb', NAVY, 800));
+  }
+  return rows;
+}
+
+function buildSoaHtml({ settings, customer, periods, balance, cur, rangeLabel, date, labelOf }) {
+  const rows = soaRows(periods, cur, labelOf);
+  const pages = []; let idx = 0;
+  while (idx < rows.length || pages.length === 0) {
+    const cap = pages.length === 0 ? SOA_ROWS_FIRST : SOA_ROWS_NEXT;
+    pages.push(rows.slice(idx, idx + cap));
+    idx += cap;
+  }
+  const count = pages.length;
+  const th = (w, txt, align = 'center') => `<th style="background:${NAVY};color:#fff;padding:7px 5px;font-size:10px;font-weight:700;text-align:${align};${w ? `width:${w};` : ''}border:1px solid ${NAVY}">${txt}</th>`;
+  const head = `<tr>${th('68px', 'Date')}${th('', 'Description', 'left')}${th('82px', 'Amount', 'right')}${th('86px', 'Balance', 'right')}</tr>`;
+  const summary = `
+    <div dir="ltr" style="display:flex;justify-content:flex-end;margin-top:10px;direction:ltr">
+      <div style="min-width:250px;border:2px solid ${NAVY};border-radius:6px;padding:10px 12px;font-size:11px">
+        <div style="display:flex;justify-content:space-between;padding:3px 0">
+          <span style="color:${MUTE}">Balance due</span>
+          <b style="color:${NAVY};font-size:15px">${money(balance, cur)}</b>
+        </div>
+      </div>
+    </div>`;
+  const party = [['Client', esc(customer?.name || '—')], ...(customer?.phone ? [['Phone', esc(customer.phone)]] : [])];
+  const meta = [['Period', esc(rangeLabel)], ['Issued', esc(date)], ['Page #', '']];
+  return pages.map((pageRows, i) => {
+    const last = i === count - 1;
+    const metaWithPage = meta.map(([k, v]) => (k === 'Page #' ? [k, `${i + 1} of ${count}`] : [k, v]));
+    return `
+    <div class="page" dir="ltr" style="width:794px;min-height:1123px;box-sizing:border-box;background:#fff;color:${INK};font-family:Arial,Helvetica,sans-serif;padding:24px 26px;display:flex;flex-direction:column;text-align:left;direction:ltr;${last ? '' : 'page-break-after:always;'}">
+      ${docHeader({ settings, title: 'STATEMENT OF ACCOUNT', meta: metaWithPage, party, billingAddress: esc(customer?.address || ''), billingLabel: 'Address', showTrn: true })}
+      <table dir="ltr" style="width:100%;border-collapse:collapse;margin-top:10px;direction:ltr">
+        <thead>${head}</thead>
+        <tbody>${pageRows.join('')}</tbody>
+      </table>
+      ${last ? summary : ''}
+      ${docFooter(settings, i + 1, count)}
+    </div>`;
+  }).join('');
+}
+
+const soaName = (a) => `SOA-${String(a.customer?.name || 'client').replace(/[^\w-]/g, '_')}-${a.date}`;
+export function printSoa(args) { return printDoc(buildSoaHtml(args), soaName(args)); }
+export function generateSoaPdf(args) { return docToPdf(buildSoaHtml(args), `${soaName(args)}.pdf`); }
+
 // ── PURCHASE ORDER (outgoing, to a supplier) ──
 // Deliberately PRICE-FREE. This document leaves the company, and our purchase costs
 // are internal: the supplier receives item names and quantities only. Nothing in this

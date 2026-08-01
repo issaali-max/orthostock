@@ -5,7 +5,9 @@ import { C, WEEKDAYS, emirateOptions, emirateLabel, citiesOfEmirate, allCities, 
 import { byInvoiceNewest } from '../../lib/sort.js';
 import { fmtCur, num, round2, fmtNum } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
-import { customerStats, clinicRating, recordInvoicePayment, recordOpeningDebtPayment, orderList, giftsToCenters, outstandingLoans, lendMaterial, returnLoan } from '../../lib/engine.js';
+import { customerStats, clinicRating, recordInvoicePayment, recordOpeningDebtPayment, orderList, giftsToCenters, outstandingLoans, lendMaterial, returnLoan, statementOfAccount } from '../../lib/engine.js';
+import { printSoa, generateSoaPdf } from '../../lib/invoicePdf.js';
+import { money, isValidPhone, sendDocumentWhatsApp, downloadBlob } from '../../lib/whatsapp.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, PaymentModal, ProductChips, SearchBar, Select, Textarea } from '../../ui/components.jsx';
 import { BandGrid } from '../../ui/BandGrid.jsx';
 import { isGridWorthy } from '../../lib/bandGrid.js';
@@ -176,6 +178,7 @@ function CustomerProfile({ customer, onBack, onEdit, t, lang, displayCurrency, u
   // immediately — the `customer` prop is a snapshot frozen when the row was tapped (never refreshed).
   const live = (app.data[TABLES.customers] || []).find((c) => c.id === customer.id) || customer;
   const st = customerStats(invoices, items, customer.id, live);
+  const [soaOpen, setSoaOpen] = useState(false);
   const rating = clinicRating(allCustomers, invoices, items, customer.id);
   const custOrders = useMemo(() => orderList(app).filter((o) => o.customerId === customer.id), [app.data, customer.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const custGifts = useMemo(() => giftsToCenters(app, { customerId: customer.id }), [app.data, customer.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -231,8 +234,11 @@ function CustomerProfile({ customer, onBack, onEdit, t, lang, displayCurrency, u
         <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
           <Btn size="sm" variant="ghost" onClick={() => setDebtModal('set')}>📜 {st.openingDebt > 0 ? t('editOldDebt') : t('addOldDebt')}</Btn>
           {st.openingOutstanding > 0 && <Btn size="sm" onClick={() => setDebtModal('pay')}>💵 {t('settleOldDebt')}</Btn>}
+          <Btn size="sm" variant="light" onClick={() => setSoaOpen(true)}>📄 SOA</Btn>
         </div>
       </Card>
+
+      {soaOpen && <SoaModal customer={live} onClose={() => setSoaOpen(false)} />}
 
       {(() => {
         const loans = outstandingLoans(live);
@@ -552,6 +558,136 @@ function PayOldDebtModal({ outstanding, t, displayCurrency, usdRate, onClose, on
           ))}
         </div>
       </Field>
+    </Modal>
+  );
+}
+
+// ── Statement of Account ──
+// Always English: this is the document the clinic receives. Monthly or yearly, summary
+// level only — one line per invoice and per payment, never material detail.
+function SoaModal({ customer, onClose }) {
+  const app = useApp();
+  const { settings, showToast } = app;
+  const cur = settings?.baseCurrency || 'AED';
+  const [mode, setMode] = useState('month');
+  const [busy, setBusy] = useState(false);
+  const [sendOpen, setSendOpen] = useState(false);
+  const [phone, setPhone] = useState(customer?.whatsapp || customer?.phone || '');
+
+  const soa = useMemo(() => statementOfAccount(app.data, customer.id, mode), [app.data, customer.id, mode]);
+  const periods = useMemo(() => soa.periods.slice().reverse(), [soa]);   // newest first on screen
+
+  const labelOf = (key) => (mode === 'year' ? key
+    : new Date(`${key}-01T00:00:00`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }));
+  const m = (v) => money(v, cur);
+
+  const docArgs = () => ({
+    settings, customer,
+    periods: soa.periods,                       // document reads oldest → newest
+    balance: soa.balance, cur, labelOf,
+    rangeLabel: mode === 'year' ? 'Yearly' : 'Monthly',
+    date: new Date().toLocaleDateString('en-GB'),
+  });
+
+  const doPrint = () => printSoa(docArgs());
+  const doDownload = async () => {
+    setBusy(true);
+    try { const { blob, filename } = await generateSoaPdf(docArgs()); downloadBlob(blob, filename); showToast('PDF downloaded', 'success'); }
+    catch (e) { console.warn('[soa]', e?.message || e); showToast('Could not generate the PDF', 'error'); }
+    finally { setBusy(false); }
+  };
+  const doSend = async () => {
+    setBusy(true);
+    try {
+      const args = docArgs();
+      const { blob, filename } = await generateSoaPdf(args);
+      const msg = `${settings?.companyName || 'OrthoStock'} — Statement of Account\n`
+        + `Client: ${customer?.name || ''}\nIssued: ${args.date}\n`
+        + `Balance due: ${m(soa.balance)}\n\nPlease find your statement attached.`;
+      const res = await sendDocumentWhatsApp({ phone, message: msg, pdfBlob: blob, pdfName: filename });
+      if (res.method !== 'cancelled') { showToast('Statement sent', 'success'); setSendOpen(false); }
+    } catch (e) { console.warn('[soa]', e?.message || e); showToast('Could not generate the PDF', 'error'); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <Modal open title="📄 Statement of Account" onClose={onClose} width={620}
+      footer={<>
+        <Btn variant="ghost" onClick={onClose}>Close</Btn>
+        <Btn variant="light" onClick={doDownload} disabled={busy}>⬇ PDF</Btn>
+        <Btn variant="light" onClick={doPrint} disabled={busy}>🖨️ Print</Btn>
+        <Btn onClick={() => setSendOpen(true)} disabled={busy}>📱 Send</Btn>
+      </>}>
+      <div dir="ltr" style={{ textAlign: 'left' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+          <div style={{ fontSize: 14, fontWeight: 900, color: C.text }}>{customer?.name}</div>
+          <div style={{ marginInlineStart: 'auto', display: 'flex', gap: 4, background: C.surfaceAlt, padding: 3, borderRadius: 9 }}>
+            {[['month', 'Monthly'], ['year', 'Yearly']].map(([k, label]) => (
+              <button key={k} onClick={() => setMode(k)} style={{
+                padding: '4px 12px', borderRadius: 7, fontSize: 11.5, fontWeight: 700, cursor: 'pointer', border: 'none',
+                background: mode === k ? C.primary : 'transparent', color: mode === k ? '#fff' : C.textMid,
+              }}>{label}</button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ background: C.primary, color: '#fff', borderRadius: 12, padding: '10px 14px', marginBottom: 12, display: 'flex', alignItems: 'center' }}>
+          <span style={{ fontSize: 12, fontWeight: 700, opacity: 0.9 }}>Balance due today</span>
+          <span style={{ marginInlineStart: 'auto', fontSize: 19, fontWeight: 900 }}>{m(soa.balance)}</span>
+        </div>
+
+        {periods.length === 0 ? (
+          <div style={{ padding: 20, textAlign: 'center', color: C.textMuted, fontSize: 12.5 }}>No activity yet for this client.</div>
+        ) : periods.map((p) => (
+          <div key={p.key} style={{ border: `1px solid ${C.border}`, borderRadius: 12, marginBottom: 10, overflow: 'hidden' }}>
+            <div style={{ background: C.surfaceAlt, padding: '8px 11px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 12.5, fontWeight: 900, color: C.text }}>{labelOf(p.key)}</span>
+              <span style={{ marginInlineStart: 'auto', fontSize: 10.5, color: C.textMuted }}>
+                Opening <b style={{ color: C.textMid }}>{m(p.opening)}</b> → Closing <b style={{ color: p.closing > 0 ? C.danger : C.success }}>{m(p.closing)}</b>
+              </span>
+            </div>
+            <div style={{ display: 'flex', gap: 14, padding: '6px 11px', fontSize: 10.5, color: C.textMuted, borderBottom: `1px solid ${C.border}` }}>
+              <span>Invoiced <b style={{ color: C.text }}>{m(p.invoiced)}</b></span>
+              <span>Paid <b style={{ color: C.success }}>{m(p.paid)}</b></span>
+            </div>
+            <div style={{ padding: '4px 11px 8px' }}>
+              {p.rows.map((r, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '4px 0', borderTop: i ? `1px dashed ${C.border}` : 'none', fontSize: 11.5 }}>
+                  <span style={{ color: C.textMuted, fontSize: 10, minWidth: 68 }}>{r.date || '—'}</span>
+                  <span style={{ flex: 1, minWidth: 0, color: C.text, overflowWrap: 'anywhere' }}>
+                    {r.kind === 'invoice'
+                      ? <>Invoice <b>{r.ref}</b>{r.invoiceDue > 0 ? <span style={{ color: C.danger }}> · outstanding {m(r.invoiceDue)}</span> : <span style={{ color: C.success }}> · settled</span>}</>
+                      : <span style={{ color: C.textMuted }}>
+                          {r.kind === 'openingPayment' ? 'Payment — previous balance' : <>Payment — invoice {r.ref}</>}
+                          {r.pending ? ' (cheque not cleared)' : ''}
+                        </span>}
+                  </span>
+                  <span style={{ fontWeight: 800, color: r.debit > 0 ? C.text : C.success, whiteSpace: 'nowrap' }}>
+                    {r.debit > 0 ? m(r.debit) : `- ${m(r.credit)}`}
+                  </span>
+                  <span style={{ fontSize: 10.5, color: C.textMuted, minWidth: 74, textAlign: 'right', whiteSpace: 'nowrap' }}>{m(r.balance)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+        <div style={{ fontSize: 10.5, color: C.textMuted, lineHeight: 1.6 }}>
+          Summary level only — invoice numbers and amounts, no material lines. Each period opens where the previous one closed.
+        </div>
+      </div>
+
+      {sendOpen && (
+        <Modal open title="📱 Send statement" onClose={() => setSendOpen(false)} width={400}
+          footer={<>
+            <Btn variant="ghost" onClick={() => setSendOpen(false)}>Cancel</Btn>
+            <Btn onClick={doSend} disabled={busy || !isValidPhone(phone)}>{busy ? 'Preparing…' : 'Send on WhatsApp'}</Btn>
+          </>}>
+          <Field label="WhatsApp number" hint={customer?.whatsapp || customer?.phone ? 'Saved number — you can edit it' : 'No saved number'}>
+            <Input value={phone} onChange={setPhone} placeholder="+9715XXXXXXXX" inputMode="tel" />
+          </Field>
+          {phone && !isValidPhone(phone) && <div style={{ fontSize: 12, color: C.danger }}>Invalid number</div>}
+        </Modal>
+      )}
     </Modal>
   );
 }
