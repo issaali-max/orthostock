@@ -80,8 +80,28 @@ export async function sendDocumentWhatsApp({ phone, message, pdfBlob, pdfName })
   return { method: 'download_link' };
 }
 
-export function downloadBlob(blob, name) {
-  const url = URL.createObjectURL(blob);
+// Share a document WITHOUT a phone number: hand the PDF to the OS share sheet and let
+// the user pick WhatsApp and then the contact from their own address book. This is the
+// right flow when contacts already live in WhatsApp — typing a number is pure friction,
+// and a mistyped one sends a client's statement to a stranger.
+export async function shareDocument({ message, pdfBlob, pdfName }) {
+  const file = pdfBlob ? new File([pdfBlob], pdfName || 'document.pdf', { type: 'application/pdf' }) : null;
+  try {
+    if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], text: message });
+      return { method: 'share' };
+    }
+  } catch (e) {
+    if (e?.name === 'AbortError') return { method: 'cancelled' };
+  }
+  // Desktop and anything without file sharing: save the PDF and open WhatsApp with the
+  // text ready, contact still chosen by the user.
+  try { if (pdfBlob) downloadBlob(pdfBlob, pdfName || 'document.pdf'); } catch { /* ignore */ }
+  try { window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank'); } catch { /* popups blocked */ }
+  return { method: 'download_link' };
+}
+
+export function downloadBlob(blob, name) {  const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url; a.download = name;
   document.body.appendChild(a); a.click(); a.remove();

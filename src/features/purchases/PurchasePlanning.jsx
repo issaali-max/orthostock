@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useApp } from '../../app/AppProvider.jsx';
-import { Modal, Btn, Badge, Select, Field, Input } from '../../ui/components.jsx';
+import { Modal, Btn, Badge, Select } from '../../ui/components.jsx';
 import { C, TABLES } from '../../lib/constants.js';
 import { num, fmtNum, round2 } from '../../lib/money.js';
-import { money, normalizePhone, isValidPhone, purchaseOrderMessage, sendDocumentWhatsApp, downloadBlob } from '../../lib/whatsapp.js';
+import { money, purchaseOrderMessage, shareDocument, downloadBlob } from '../../lib/whatsapp.js';
 import { generatePurchaseOrderPdf, printPurchaseOrder } from '../../lib/invoicePdf.js';
 import { parseBand } from '../../lib/bandGrid.js';
 
@@ -46,8 +46,6 @@ const chipBtn = { border: `1px dashed ${C.border}`, background: 'transparent', b
 export default function PurchasePlanning({ onClose }) {
   const app = useApp();
   const [moveOpen, setMoveOpen] = useState(() => new Set());   // rows with the ↔ move select expanded
-  const [send, setSend] = useState(null);                      // { bucket } — WhatsApp send sheet
-  const [phone, setPhone] = useState('');
   const [sending, setSending] = useState(false);
   const [showSkipped, setShowSkipped] = useState(true);        // unticked rows stay visible by default
   const [view, setView] = useState('order');                   // order | auto | manual | all
@@ -289,29 +287,27 @@ export default function PurchasePlanning({ onClose }) {
     return { settings, supplier: bucket.supplier || { name: bucket.name }, tree, reference, date, totalItems, totalQty };
   };
 
-  const doSend = async () => {
-    if (!send) return;
+  const doShare = async (bucket) => {
     setSending(true);
     try {
-      const args = poArgs(send.bucket);
+      const args = poArgs(bucket);
       const { blob, filename } = await generatePurchaseOrderPdf(args);
       const message = purchaseOrderMessage({
         companyName: settings?.companyName, supplierName: args.supplier?.name,
         reference: args.reference, date: args.date, totalItems: args.totalItems,
       });
-      const res = await sendDocumentWhatsApp({ phone, message, pdfBlob: blob, pdfName: filename });
-      if (res.method !== 'cancelled') { showToast('Purchase order sent', 'success'); setSend(null); }
+      const res = await shareDocument({ message, pdfBlob: blob, pdfName: filename });
+      if (res.method !== 'cancelled') showToast('Purchase order ready to share', 'success');
     } catch (e) {
       console.warn('[purchase order]', e?.message || e);
       showToast('Could not generate the PDF', 'error');
     } finally { setSending(false); }
   };
 
-  const doDownload = async () => {
-    if (!send) return;
+  const doDownload = async (bucket) => {
     setSending(true);
     try {
-      const { blob, filename } = await generatePurchaseOrderPdf(poArgs(send.bucket));
+      const { blob, filename } = await generatePurchaseOrderPdf(poArgs(bucket));
       downloadBlob(blob, filename);
       showToast('PDF downloaded', 'success');
     } catch (e) {
@@ -320,11 +316,6 @@ export default function PurchasePlanning({ onClose }) {
     } finally { setSending(false); }
   };
 
-  const openSend = (b) => {
-    const s = b.supplier;
-    setPhone(s?.whatsapp || s?.phone || '');
-    setSend({ bucket: b });
-  };
 
   return (
     <Modal open title="🛒 Purchase List" onClose={onClose} width={660}
@@ -409,8 +400,10 @@ export default function PurchasePlanning({ onClose }) {
                     {filterActive && <><br />👁 showing {b.visibleCount}</>}
                   </div>
                 </div>
-                <button onClick={() => openSend(b)} disabled={b.count === 0} title="Send as PDF on WhatsApp"
-                  style={{ background: '#25D366', color: '#fff', border: 'none', borderRadius: 9, padding: '6px 11px', fontSize: 14, fontWeight: 800, cursor: b.count ? 'pointer' : 'default', opacity: b.count ? 1 : 0.4 }}>📱</button>
+                <button onClick={() => doShare(b)} disabled={b.count === 0 || sending} title="Share as PDF (pick the supplier in WhatsApp)"
+                  style={{ background: '#25D366', color: '#fff', border: 'none', borderRadius: 9, padding: '6px 11px', fontSize: 14, fontWeight: 800, cursor: b.count ? 'pointer' : 'default', opacity: b.count ? 1 : 0.4 }}>📤</button>
+                <button onClick={() => doDownload(b)} disabled={b.count === 0 || sending} title="Download the PDF"
+                  style={{ background: 'rgba(255,255,255,.15)', color: '#fff', border: '1px solid rgba(255,255,255,.35)', borderRadius: 9, padding: '6px 10px', fontSize: 13, fontWeight: 800, cursor: b.count ? 'pointer' : 'default', opacity: b.count ? 1 : 0.4 }}>⬇</button>
                 <button onClick={() => printList(b)} disabled={b.count === 0} title="Print" style={{ background: '#fff', color: C.primary, border: 'none', borderRadius: 9, padding: '6px 11px', fontSize: 14, fontWeight: 800, cursor: b.count ? 'pointer' : 'default', opacity: b.count ? 1 : 0.4 }}>🖨️</button>
               </div>
               <div style={{ padding: 10, minWidth: 0 }}>
@@ -487,25 +480,6 @@ export default function PurchasePlanning({ onClose }) {
         </div>
       )}
 
-      {send && (
-        <Modal open title="📱 Send purchase order" onClose={() => setSend(null)} width={420}
-          footer={<>
-            <Btn variant="ghost" onClick={() => setSend(null)}>Cancel</Btn>
-            <Btn variant="light" onClick={doDownload} disabled={sending}>⬇ PDF</Btn>
-            <Btn onClick={doSend} disabled={sending || !isValidPhone(phone)}>{sending ? 'Preparing…' : 'Send on WhatsApp'}</Btn>
-          </>}>
-          <div style={{ fontSize: 12.5, fontWeight: 800, color: C.text, marginBottom: 2 }}>{send.bucket.name}</div>
-          <div style={{ fontSize: 11.5, color: C.textMuted, marginBottom: 12 }}>{send.bucket.count} items · names and quantities only — no prices</div>
-          <Field label="WhatsApp number" hint={send.bucket.supplier?.whatsapp || send.bucket.supplier?.phone ? 'Saved supplier number — you can edit it' : 'No saved number — enter it manually'}>
-            <Input value={phone} onChange={setPhone} placeholder="+9715XXXXXXXX" inputMode="tel" />
-          </Field>
-          {phone && !isValidPhone(phone) && <div style={{ fontSize: 12, color: C.danger }}>Invalid number</div>}
-          {phone && isValidPhone(phone) && <div style={{ fontSize: 12, color: C.textMuted }}>→ wa.me/{normalizePhone(phone)}</div>}
-          <div style={{ fontSize: 11, color: C.textMuted, marginTop: 10, lineHeight: 1.6 }}>
-            A PDF is generated with your company header. On mobile you can attach it straight to WhatsApp; otherwise the PDF downloads and WhatsApp opens with the message ready for you to attach it.
-          </div>
-        </Modal>
-      )}
     </Modal>
   );
 }

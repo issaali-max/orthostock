@@ -7,7 +7,7 @@ import { fmtCur, num, round2, fmtNum } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
 import { customerStats, clinicRating, recordInvoicePayment, recordOpeningDebtPayment, orderList, giftsToCenters, outstandingLoans, lendMaterial, returnLoan, statementOfAccount } from '../../lib/engine.js';
 import { printSoa, generateSoaPdf } from '../../lib/invoicePdf.js';
-import { money, isValidPhone, normalizePhone, sendDocumentWhatsApp, downloadBlob } from '../../lib/whatsapp.js';
+import { money, shareDocument, downloadBlob } from '../../lib/whatsapp.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, PaymentModal, ProductChips, SearchBar, Select, Textarea } from '../../ui/components.jsx';
 import { BandGrid } from '../../ui/BandGrid.jsx';
 import { isGridWorthy } from '../../lib/bandGrid.js';
@@ -571,11 +571,8 @@ function SoaModal({ customer, onClose }) {
   const cur = settings?.baseCurrency || 'AED';
   const [mode, setMode] = useState('month');
   const [busy, setBusy] = useState(false);
-  const [sendOpen, setSendOpen] = useState(false);
-  const [phone, setPhone] = useState(customer?.whatsapp || customer?.phone || '');
   // Same rule the invoice uses, so the clinic sees one name on every document.
   const custName = customer?.nameEn || customer?.name || '—';
-  const savedPhone = customer?.whatsapp || customer?.phone || '';
 
   const soa = useMemo(() => statementOfAccount(app.data, customer.id, mode), [app.data, customer.id, mode]);
   const periods = useMemo(() => soa.periods.slice().reverse(), [soa]);   // newest first on screen
@@ -600,8 +597,7 @@ function SoaModal({ customer, onClose }) {
     catch (e) { console.warn('[soa]', e?.message || e); showToast('Could not generate the PDF', 'error'); }
     finally { setBusy(false); }
   };
-  const doSend = async (to) => {
-    const target = to || phone;
+  const doShare = async () => {
     setBusy(true);
     try {
       const args = docArgs();
@@ -609,17 +605,12 @@ function SoaModal({ customer, onClose }) {
       const msg = `${settings?.companyName || 'OrthoStock'} — Statement of Account\n`
         + `Client: ${custName}\nIssued: ${args.date}\n`
         + `Balance due: ${m(soa.balance)}\n\nPlease find your statement attached.`;
-      const res = await sendDocumentWhatsApp({ phone: target, message: msg, pdfBlob: blob, pdfName: filename });
-      if (res.method !== 'cancelled') { showToast('Statement sent', 'success'); setSendOpen(false); }
+      const res = await shareDocument({ message: msg, pdfBlob: blob, pdfName: filename });
+      if (res.method !== 'cancelled') showToast('Statement ready to share', 'success');
     } catch (e) { console.warn('[soa]', e?.message || e); showToast('Could not generate the PDF', 'error'); }
     finally { setBusy(false); }
   };
 
-  // One tap when the clinic already has a number on file; ask only when it doesn't.
-  const onSendClick = () => {
-    if (isValidPhone(savedPhone) && !sendOpen) doSend(savedPhone);
-    else setSendOpen(true);
-  };
 
   return (
     <Modal open title="📄 Statement of Account" onClose={onClose} width={620}
@@ -627,7 +618,7 @@ function SoaModal({ customer, onClose }) {
         <Btn variant="ghost" onClick={onClose}>Close</Btn>
         <Btn variant="light" onClick={doDownload} disabled={busy}>⬇ PDF</Btn>
         <Btn variant="light" onClick={doPrint} disabled={busy}>🖨️ Print</Btn>
-        <Btn onClick={onSendClick} disabled={busy}>{busy ? '…' : '📱 Send'}</Btn>
+        <Btn onClick={doShare} disabled={busy}>{busy ? '…' : '📤 Share'}</Btn>
       </>}>
       <div dir="ltr" style={{ textAlign: 'left' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
@@ -645,11 +636,6 @@ function SoaModal({ customer, onClose }) {
         <div style={{ background: C.primary, color: '#fff', borderRadius: 12, padding: '10px 14px', marginBottom: 6, display: 'flex', alignItems: 'center' }}>
           <span style={{ fontSize: 12, fontWeight: 700, opacity: 0.9 }}>Balance due today</span>
           <span style={{ marginInlineStart: 'auto', fontSize: 19, fontWeight: 900 }}>{m(soa.balance)}</span>
-        </div>
-        <div onClick={() => setSendOpen(true)} style={{ fontSize: 10.5, color: C.textMuted, marginBottom: 12, cursor: 'pointer' }}>
-          {isValidPhone(savedPhone)
-            ? <>📱 Send goes to <b style={{ color: C.primary }}>{savedPhone}</b> — tap to change it.</>
-            : <>📱 No WhatsApp number saved for this client — Send will ask for one.</>}
         </div>
 
         {soa.outstanding.length > 0 && (
@@ -708,22 +694,6 @@ function SoaModal({ customer, onClose }) {
         </div>
       </div>
 
-      {/* Inline, not a nested <Modal>: every modal shares zIndex 1000, so a modal opened
-          from inside another renders BEHIND it and looks like a dead button. */}
-      {sendOpen && (
-        <div style={{ border: `2px solid ${C.primary}`, borderRadius: 12, padding: 12, marginTop: 12, background: C.surfaceAlt }}>
-          <div style={{ fontSize: 12.5, fontWeight: 900, color: C.text, marginBottom: 8 }}>📱 Send to {custName}</div>
-          <Field label="WhatsApp number" hint={customer?.whatsapp || customer?.phone ? 'Saved number — you can edit it' : 'No saved number for this client'}>
-            <Input value={phone} onChange={setPhone} placeholder="+9715XXXXXXXX" inputMode="tel" />
-          </Field>
-          {phone && !isValidPhone(phone) && <div style={{ fontSize: 12, color: C.danger, marginBottom: 6 }}>Invalid number</div>}
-          {phone && isValidPhone(phone) && <div style={{ fontSize: 11.5, color: C.textMuted, marginBottom: 6 }}>→ wa.me/{normalizePhone(phone)}</div>}
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-            <Btn size="sm" variant="ghost" onClick={() => setSendOpen(false)}>Cancel</Btn>
-            <Btn size="sm" onClick={() => doSend(phone)} disabled={busy || !isValidPhone(phone)}>{busy ? 'Preparing…' : 'Send on WhatsApp'}</Btn>
-          </div>
-        </div>
-      )}
     </Modal>
   );
 }
