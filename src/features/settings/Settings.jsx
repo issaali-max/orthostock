@@ -406,6 +406,19 @@ export default function Settings() {
         </div>
       </Card>
 
+      {/* Data health. The modal existed but nothing opened it, so the repairs inside it
+          — including the payment-log fix — were unreachable. */}
+      <Card style={{ marginTop: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>🩺 {t('dataHealth')}</div>
+            <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>{t('dataHealthNote')}</div>
+          </div>
+          {paymentLogMismatches(data).length > 0 && <Badge tone="danger">{paymentLogMismatches(data).length}</Badge>}
+          <Btn size="sm" variant="light" onClick={() => setShowHealth(true)}>{t('runCheck')}</Btn>
+        </div>
+      </Card>
+
       {/* Stock audit: variant.stockQty vs the sum of its movements */}
       <Card style={{ marginTop: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
