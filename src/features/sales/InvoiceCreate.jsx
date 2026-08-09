@@ -115,7 +115,14 @@ export default function InvoiceCreate({ open, onClose, editing }) {
     setBusy(true);
     try {
       const number = editing ? editing.invoiceNumber : await nextNumber(TABLES.invoices, 'INV', 'invoiceNumber');
-      const paid = paymentStatus === 'paid' ? totals.total : paymentStatus === 'partial' ? num(paidAmount) : 0;
+      // A discount applied on EDIT lowers the total, and a payment recorded before it can
+      // then exceed that total. Cap it: an invoice can never be paid more than it is worth
+      // (that showed as a negative debt and over-credited the drawer). The status is then
+      // DERIVED from the money rather than trusted from the dropdown, so a partial payment
+      // that a discount turned into full settlement is not still labelled partial.
+      const rawPaid = paymentStatus === 'paid' ? totals.total : paymentStatus === 'partial' ? num(paidAmount) : 0;
+      const paid = Math.min(round2(Math.max(0, rawPaid)), totals.total);
+      const settledStatus = paid <= 0 ? 'unpaid' : paid >= totals.total ? 'paid' : 'partial';
       // Keep the dated payment log in step with what is actually paid. Reusing the old
       // log verbatim (the previous behaviour) left an edited invoice claiming one figure
       // while the drawer credited another.
@@ -125,7 +132,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
         invoiceData: {
           invoiceNumber: number, customerId: customerId || null, date,
           subtotal: netSubtotal, discountTotal: round2(invDisc), total: totals.total,
-          paidAmount: paid, paymentStatus, paymentMethod, status: 'active', currency: 'AED', notes: '', payments, taxApplied, showTrn,
+          paidAmount: paid, paymentStatus: settledStatus, paymentMethod, status: 'active', currency: 'AED', notes: '', payments, taxApplied, showTrn,
         },
         // One cart line can carry BOTH a paid qty and a gift qty for the same material —
         // split here into a normal item (priced) and a gift item (price 0, cost still charged).

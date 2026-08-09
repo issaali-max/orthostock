@@ -504,7 +504,12 @@ export default function Settings() {
                   {payGaps.length > 0 && (<div><div style={{ fontSize: 12, fontWeight: 800, color: C.danger, marginBottom: 4 }}>⚠ {t('payLogGap')} ({payGaps.length})</div>
                     <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 6 }}>{t('payLogGapHint')}</div>
                     <div style={{ display: 'grid', gap: 4 }}>{payGaps.map((g) => (
-                      <Row key={g.id} tone="bad">{g.invoiceNumber} · {t('paid')} {cur(g.paidAmount)} · {t('drawer')} {cur(g.logged)} · <b>{g.diff > 0 ? '+' : ''}{cur(g.diff)}</b></Row>
+                      <Row key={g.id} tone="bad">
+                        <div><b>{g.invoiceNumber}</b> · {t('total')} {cur(g.total)}</div>
+                        {g.issues.includes('log') && <div>· {t('paid')} {cur(g.paidAmount)} → {t('drawer')} {cur(g.logged)} <b>({g.diff > 0 ? '+' : ''}{cur(g.diff)})</b></div>}
+                        {g.issues.includes('over') && <div>· ⚠ {t('payOverTotal')} {cur(g.overBy)}</div>}
+                        {g.issues.includes('status') && <div>· {g.status} → <b>{g.expectedStatus}</b></div>}
+                      </Row>
                     ))}</div>
                     <Btn size="sm" variant="light" style={{ marginTop: 6 }} onClick={async () => {
                       if (!window.confirm(t('payLogFixConfirm'))) return;
@@ -512,8 +517,7 @@ export default function Settings() {
                       for (const g of payGaps) {
                         const inv = (data[TABLES.invoices] || []).find((x) => x.id === g.id);
                         if (!inv) continue;
-                        const payments = m.reconcilePayments(inv.payments, inv.paidAmount, { date: inv.date, method: inv.paymentMethod || 'cash' });
-                        await app.updateRow(TABLES.invoices, inv.id, { payments });
+                        await app.updateRow(TABLES.invoices, inv.id, m.repairInvoiceMoney(inv));
                       }
                       await refresh(TABLES.invoices);
                       showToast(`✓ ${payGaps.length}`, 'success');

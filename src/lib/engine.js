@@ -741,11 +741,38 @@ export function paymentLogMismatches(data) {
   const out = [];
   for (const inv of (data[TABLES.invoices] || [])) {
     if (inv.isActive === false || inv.status === 'returned') continue;
-    const logged = round2((inv.payments || []).reduce((s, p) => s + num(p.amount), 0));
+    const total = round2(num(inv.total));
     const paid = round2(num(inv.paidAmount));
-    if (logged !== paid) out.push({ id: inv.id, invoiceNumber: inv.invoiceNumber, date: inv.date, total: round2(num(inv.total)), paidAmount: paid, logged, diff: round2(paid - logged) });
+    const logged = round2((inv.payments || []).reduce((s, p) => s + num(p.amount), 0));
+    // Three ways the money on an invoice can disagree with itself:
+    //   log    — the dated log differs from paidAmount (edit left the log stale)
+    //   over   — paid exceeds the total (a discount cut the total under an earlier payment)
+    //   status — the label contradicts the figures
+    const expected = paid <= 0 ? 'unpaid' : paid >= total ? 'paid' : 'partial';
+    const issues = [];
+    if (logged !== paid) issues.push('log');
+    if (paid > total) issues.push('over');
+    if ((inv.paymentStatus || 'unpaid') !== expected) issues.push('status');
+    if (!issues.length) continue;
+    out.push({
+      id: inv.id, invoiceNumber: inv.invoiceNumber, date: inv.date,
+      total, paidAmount: paid, logged, diff: round2(paid - logged),
+      overBy: paid > total ? round2(paid - total) : 0,
+      status: inv.paymentStatus || 'unpaid', expectedStatus: expected, issues,
+    });
   }
   return out.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+}
+
+// Repairs one invoice's money so its four figures agree: paid capped at the total, the
+// status derived from it, and the log matched to it. Returns the patch, not a write —
+// the caller decides when to persist.
+export function repairInvoiceMoney(inv) {
+  const total = round2(num(inv.total));
+  const paid = Math.min(round2(Math.max(0, num(inv.paidAmount))), total);
+  const paymentStatus = paid <= 0 ? 'unpaid' : paid >= total ? 'paid' : 'partial';
+  const payments = reconcilePayments(inv.payments, paid, { date: inv.date, method: inv.paymentMethod || 'cash' });
+  return { paidAmount: paid, paymentStatus, payments };
 }
 
 export function invoiceTotals(lines, settings, taxApplied) {
