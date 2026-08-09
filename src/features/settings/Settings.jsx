@@ -8,7 +8,7 @@ import { subscribeSync, pushAllLocal, pull, cloudReady, wipeCloud, forcePushOver
 import { exportBackup } from '../../lib/backup.js';
 import { exportExcel, importExcel } from '../../lib/excel.js';
 import { resizeImageToDataUrl } from '../../lib/image.js';
-import { mergeCustomers, reconcileStock, dataHealth } from '../../lib/engine.js';
+import { mergeCustomers, reconcileStock, dataHealth, paymentLogMismatches } from '../../lib/engine.js';
 import { num, fmtCur } from '../../lib/money.js';
 
 
@@ -477,7 +477,8 @@ export default function Settings() {
       <Modal open={showHealth} onClose={() => setShowHealth(false)} title={`🩺 ${t('dataHealth')}`}>
         {showHealth && (() => {
           const h = dataHealth(data);
-          const ok = h.orphan.length === 0 && h.hiddenDebt.length === 0 && h.dupCustomers.length === 0 && (!h.dupMaterials || h.dupMaterials.length === 0) && (!h.dupInvoiceNumbers || h.dupInvoiceNumbers.length === 0);
+          const payGaps = paymentLogMismatches(data);
+          const ok = h.orphan.length === 0 && h.hiddenDebt.length === 0 && h.dupCustomers.length === 0 && (!h.dupMaterials || h.dupMaterials.length === 0) && (!h.dupInvoiceNumbers || h.dupInvoiceNumbers.length === 0) && payGaps.length === 0;
           const Row = ({ tone, children }) => <div style={{ background: tone === 'bad' ? '#FBECEC' : C.surfaceAlt, borderRadius: 8, padding: '6px 10px', fontSize: 12, color: C.textMid }}>{children}</div>;
           return (
             <div style={{ display: 'grid', gap: 10 }}>
@@ -487,6 +488,24 @@ export default function Settings() {
               </div>
               {ok ? <div style={{ padding: 12, textAlign: 'center', color: C.success, fontWeight: 700 }}>✓ {t('dataHealthOk')}</div> : (
                 <>
+                  {payGaps.length > 0 && (<div><div style={{ fontSize: 12, fontWeight: 800, color: C.danger, marginBottom: 4 }}>⚠ {t('payLogGap')} ({payGaps.length})</div>
+                    <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 6 }}>{t('payLogGapHint')}</div>
+                    <div style={{ display: 'grid', gap: 4 }}>{payGaps.map((g) => (
+                      <Row key={g.id} tone="bad">{g.invoiceNumber} · {t('paid')} {cur(g.paidAmount)} · {t('drawer')} {cur(g.logged)} · <b>{g.diff > 0 ? '+' : ''}{cur(g.diff)}</b></Row>
+                    ))}</div>
+                    <Btn size="sm" variant="light" style={{ marginTop: 6 }} onClick={async () => {
+                      if (!window.confirm(t('payLogFixConfirm'))) return;
+                      const m = await import('../../lib/engine.js');
+                      for (const g of payGaps) {
+                        const inv = (data[TABLES.invoices] || []).find((x) => x.id === g.id);
+                        if (!inv) continue;
+                        const payments = m.reconcilePayments(inv.payments, inv.paidAmount, { date: inv.date, method: inv.paymentMethod || 'cash' });
+                        await app.updateRow(TABLES.invoices, inv.id, { payments });
+                      }
+                      await refresh(TABLES.invoices);
+                      showToast(`✓ ${payGaps.length}`, 'success');
+                      setShowHealth(false);
+                    }}>🔧 {t('payLogFix')}</Btn></div>)}
                   {h.orphan.length > 0 && (<div><div style={{ fontSize: 12, fontWeight: 800, color: C.danger, marginBottom: 4 }}>⚠ {t('orphanInvoices')} ({h.orphan.length})</div>
                     <div style={{ display: 'grid', gap: 4 }}>{h.orphan.map((o, i) => <Row key={i} tone="bad">{o.invoiceNumber} · {cur(o.remaining)}</Row>)}</div></div>)}
                   {h.hiddenDebt.length > 0 && (<div><div style={{ fontSize: 12, fontWeight: 800, color: C.warning, marginBottom: 4 }}>⚠ {t('hiddenDebt')} ({h.hiddenDebt.length})</div>

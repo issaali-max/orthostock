@@ -699,6 +699,55 @@ export function supplierStats(purchases, supplierId) {
 }
 
 // Invoice totals (VAT on subtotal).
+// Keep the payment LOG in step with the amount actually paid.
+//
+// An invoice carries two records of the same fact: paidAmount (a number) and payments
+// (the dated log the drawer/bank ledger reads). Editing an invoice recomputed
+// paidAmount but reused the old log untouched, so changing a total left the two
+// disagreeing — the invoice read "paid 300" while the drawer credited the old 252.
+//
+// Rules: keep every existing entry's date and method (that history is real), adjust the
+// LAST entry to absorb the difference, and only append a new entry when there is nothing
+// to adjust. Never produce a negative entry.
+export function reconcilePayments(existing, paidTotal, { date, method } = {}) {
+  const target = round2(num(paidTotal));
+  const list = (existing || []).filter((p) => num(p.amount) > 0).map((p) => ({ ...p }));
+  const sum = round2(list.reduce((s, p) => s + num(p.amount), 0));
+  if (sum === target) return list;
+  if (target <= 0) return [];
+  if (!list.length) {
+    return [{ date: date || todayISO(), amount: target, method: method || 'cash', ...(method === 'cheque' ? { chequeStatus: 'received' } : {}) }];
+  }
+  const diff = round2(target - sum);
+  const last = list[list.length - 1];
+  const adjusted = round2(num(last.amount) + diff);
+  if (adjusted > 0) { last.amount = adjusted; return list; }
+  // The reduction is bigger than the last entry: drop entries from the end until it fits.
+  let remaining = target;
+  const out = [];
+  for (const p of list) {
+    if (remaining <= 0) break;
+    const amt = Math.min(num(p.amount), remaining);
+    out.push({ ...p, amount: round2(amt) });
+    remaining = round2(remaining - amt);
+  }
+  if (remaining > 0 && out.length) out[out.length - 1].amount = round2(num(out[out.length - 1].amount) + remaining);
+  return out;
+}
+
+// Finds invoices whose payment log disagrees with paidAmount — the divergence above,
+// already written to existing records. Reported, not silently rewritten.
+export function paymentLogMismatches(data) {
+  const out = [];
+  for (const inv of (data[TABLES.invoices] || [])) {
+    if (inv.isActive === false || inv.status === 'returned') continue;
+    const logged = round2((inv.payments || []).reduce((s, p) => s + num(p.amount), 0));
+    const paid = round2(num(inv.paidAmount));
+    if (logged !== paid) out.push({ id: inv.id, invoiceNumber: inv.invoiceNumber, date: inv.date, total: round2(num(inv.total)), paidAmount: paid, logged, diff: round2(paid - logged) });
+  }
+  return out.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+}
+
 export function invoiceTotals(lines, settings, taxApplied) {
   const subtotal = lines.reduce((s, l) => s + num(l.unitPrice) * num(l.qty) - num(l.discountAmount), 0);
   // taxApplied (per-invoice) overrides the global setting when provided (true/false).

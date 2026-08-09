@@ -4,7 +4,7 @@ import QuickOrder from '../orders/QuickOrder.jsx';
 import { C, TABLES, emirateOptions, citiesOfEmirate, allCities } from '../../lib/constants.js';
 import { fmtCur, fmtNum, num, round2, safeDiv } from '../../lib/money.js';
 import { todayISO } from '../../lib/dates.js';
-import { saveInvoiceAtomic, invoiceTotals, deleteInvoiceAtomic, nextNumber } from '../../lib/engine.js';
+import { saveInvoiceAtomic, invoiceTotals, deleteInvoiceAtomic, nextNumber, reconcilePayments } from '../../lib/engine.js';
 import { Btn, Field, Input, Modal, ProductChips, Select } from '../../ui/components.jsx';
 import { BandGrid } from '../../ui/BandGrid.jsx';
 import { isGridWorthy } from '../../lib/bandGrid.js';
@@ -116,7 +116,10 @@ export default function InvoiceCreate({ open, onClose, editing }) {
     try {
       const number = editing ? editing.invoiceNumber : await nextNumber(TABLES.invoices, 'INV', 'invoiceNumber');
       const paid = paymentStatus === 'paid' ? totals.total : paymentStatus === 'partial' ? num(paidAmount) : 0;
-      const payments = editing?.payments?.length ? editing.payments : (paid > 0 ? [{ date, amount: round2(paid), method: paymentMethod, ...(paymentMethod === 'cheque' ? { chequeStatus: 'received' } : {}) }] : []);
+      // Keep the dated payment log in step with what is actually paid. Reusing the old
+      // log verbatim (the previous behaviour) left an edited invoice claiming one figure
+      // while the drawer credited another.
+      const payments = reconcilePayments(editing?.payments, paid, { date, method: paymentMethod });
       await saveInvoiceAtomic(app, {
         editingId: editing ? editing.id : null,
         invoiceData: {
