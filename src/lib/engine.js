@@ -67,7 +67,10 @@ export function accountLedger(appOrData) {
 
   // 1) Invoice payments → bank (transfer/card/cheque) or drawer (cash), linked to invoice+doctor.
   for (const inv of (data[TABLES.invoices] || [])) {
-    if (inv.isActive === false) continue;
+    // A returned invoice is excluded everywhere else — revenue, profit, debt, statements.
+    // It was still credited here, so returning a paid invoice left its money sitting in
+    // the drawer forever with no sale to justify it.
+    if (inv.isActive === false || inv.status === 'returned') continue;
     (inv.payments || []).forEach((p, i) => {
       const method = p.method || inv.paymentMethod || 'cash';
       const account = PAYMENT_ACCOUNT[method] || 'drawer';
@@ -657,7 +660,10 @@ export async function mergeCustomers(app, keepId, dropIds) {
 }
 
 export function customerStats(invoices, items, customerId, customer = null) {
-  const mine = invoices.filter((i) => i.customerId === customerId && i.status !== 'returned');
+  // A soft-deleted invoice is not a sale and is not a debt. Without the isActive check a
+  // deleted invoice kept appearing in the customer's revenue AND in what they owe, which
+  // is the version of this omission that would reach a client.
+  const mine = invoices.filter((i) => i.customerId === customerId && i.isActive !== false && i.status !== 'returned');
   const ids = new Set(mine.map((i) => i.id));
   const myItems = items.filter((it) => ids.has(it.invoiceId));
   const revenue = mine.reduce((s, i) => s + num(i.total), 0);
@@ -848,7 +854,7 @@ export function vatLiability(invoices, items, settings) {
   for (const it of (items || [])) { if (!byInv.has(it.invoiceId)) byInv.set(it.invoiceId, []); byInv.get(it.invoiceId).push(it); }
   let outputVat = 0;
   for (const inv of (invoices || [])) {
-    if (inv.status === 'returned') continue;
+    if (inv.isActive === false || inv.status === 'returned') continue;
     outputVat += num(invoiceBreakdown(inv, byInv.get(inv.id) || [], settings).vat);
   }
   return round2(outputVat);
@@ -983,7 +989,7 @@ export function variantLabel(v) {
 export function buildAlerts(data, opts = {}) {
   const overdueDays = num(opts.overdueDays) || 30;
   const variants = (data[TABLES.variants] || []).filter((v) => v.isActive !== false);
-  const invoices = (data[TABLES.invoices] || []).filter((i) => i.status !== 'returned');
+  const invoices = (data[TABLES.invoices] || []).filter((i) => i.isActive !== false && i.status !== 'returned');
   const customers = data[TABLES.customers] || [];
   const a = [];
 
@@ -1038,7 +1044,9 @@ export function pnl(data, opts = {}) {
     return (!from || iso >= from) && (!to || iso <= to);
   };
 
-  const invoices = (data[TABLES.invoices] || []).filter((i) => i.status !== 'returned' && inRange(i.date));
+  // isActive === false is a soft delete. It was missing here, so a deleted invoice kept
+  // adding revenue and profit to every period.
+  const invoices = (data[TABLES.invoices] || []).filter((i) => i.isActive !== false && i.status !== 'returned' && inRange(i.date));
   const invIds = new Set(invoices.map((i) => i.id));
   const items = (data[TABLES.invoiceItems] || []).filter((it) => invIds.has(it.invoiceId));
   const expenses = (data[TABLES.expenses] || []).filter((e) => inRange(e.date));
@@ -1111,7 +1119,7 @@ export function periodSeries(data, mode = 'month', n = 6) {
 
 // Last `n` months of revenue / sales-profit / expenses for the trend chart.
 export function monthlyTrend(data, n = 6) {
-  const invoices = (data[TABLES.invoices] || []).filter((i) => i.status !== 'returned');
+  const invoices = (data[TABLES.invoices] || []).filter((i) => i.isActive !== false && i.status !== 'returned');
   const items = data[TABLES.invoiceItems] || [];
   const expenses = data[TABLES.expenses] || [];
   const invMonth = new Map(invoices.map((i) => [i.id, (i.date || '').slice(0, 7)]));
@@ -1131,7 +1139,7 @@ export function monthlyTrend(data, n = 6) {
 
 // Sales & profit grouped by the customer's emirate (7 UAE emirates).
 export function emirateStats(data) {
-  const invoices = (data[TABLES.invoices] || []).filter((i) => i.status !== 'returned');
+  const invoices = (data[TABLES.invoices] || []).filter((i) => i.isActive !== false && i.status !== 'returned');
   const items = data[TABLES.invoiceItems] || [];
   const customers = data[TABLES.customers] || [];
   const emOf = new Map(customers.map((c) => [c.id, c.emirate || '—']));
@@ -1166,7 +1174,7 @@ const invInRange = (inv, b) => !b ? true : (inv.date && inv.date >= b.from && (!
 
 // Most profitable products in a period (aggregated from invoice items).
 export function topProducts(data, n = 10, bounds) {
-  const ids = new Set((data[TABLES.invoices] || []).filter((i) => i.status !== 'returned' && invInRange(i, bounds)).map((i) => i.id));
+  const ids = new Set((data[TABLES.invoices] || []).filter((i) => i.isActive !== false && i.status !== 'returned' && invInRange(i, bounds)).map((i) => i.id));
   const variants = data[TABLES.variants] || [];
   const map = {};
   (data[TABLES.invoiceItems] || []).filter((it) => ids.has(it.invoiceId)).forEach((it) => {
@@ -1186,7 +1194,7 @@ export function topProducts(data, n = 10, bounds) {
 // opts: { type:'doctor'|'center', emirate, bounds, sortBy:'profit'|'revenue'|'debt' }
 export function topCustomers(data, n = 10, { type, emirate, bounds, sortBy = 'profit' } = {}) {
   const allInvoices = data[TABLES.invoices] || [];
-  const periodInvoices = allInvoices.filter((i) => i.status !== 'returned' && invInRange(i, bounds));
+  const periodInvoices = allInvoices.filter((i) => i.isActive !== false && i.status !== 'returned' && invInRange(i, bounds));
   const items = data[TABLES.invoiceItems] || [];
   let customers = (data[TABLES.customers] || []).filter((c) => c.isActive !== false);
   if (type) customers = customers.filter((c) => c.type === type);
