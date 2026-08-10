@@ -109,7 +109,7 @@ export default function InvoiceDetail({ invoice, onClose, onEdit }) {
                     {v?.sku && <div style={{ fontSize: 10.5, color: C.textMuted }}>{v.sku}</div>}
                   </div>
                   <div style={{ width: 44, textAlign: 'center' }}>{l.qty}</div>
-                  <div style={{ width: 70, textAlign: 'end' }}>{m(l.qty > 0 ? l.lineTotal / l.qty : l.unitPrice)}</div>
+                  <div style={{ width: 70, textAlign: 'end' }}>{m(l.unitPrice)}</div>
                   <div style={{ width: 80, textAlign: 'end', fontWeight: 700 }}>{m(l.lineTotal)}</div>
                 </div>
               );

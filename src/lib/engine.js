@@ -253,12 +253,20 @@ export async function saveInvoiceAtomic(app, { editingId, invoiceData, lines, in
     const isGift = !!l.gift;                                      // هدية للمركز: sells at 0 but cost is still charged
     const listPrice = isGift ? 0 : num(v?.sellingPriceDefault);
     const rawUnit = isGift ? 0 : num(l.unitPrice); const qty = num(l.qty);
+    // RULE: an invoice-level discount never rewrites the agreed price of a material.
+    // unitPrice is what you agreed with the centre and is what the invoice prints;
+    // netUnitPrice carries the discount, spread pro-rata, purely to attribute revenue
+    // and profit. Baking the discount into unitPrice meant reopening the invoice read
+    // the discounted figure back as the agreed price and discounted it AGAIN — every
+    // edit shrank the prices further, which is why editing a quantity wrecked the total.
     const effUnit = isGift ? 0 : round2(rawUnit * factor);
     const lineDisc = isGift ? 0 : Math.max(0, round2((listPrice - rawUnit) * qty));
     specs.push({ op: 'insert', table: TABLES.invoiceItems, row: {
-      invoiceId: invId, variantId: l.variantId, qty, listPrice, unitPrice: effUnit,
+      invoiceId: invId, variantId: l.variantId, qty, listPrice,
+      unitPrice: rawUnit, netUnitPrice: effUnit,
       discountAmount: lineDisc, discountPct: isGift ? 0 : (listPrice > 0 ? round2((1 - rawUnit / listPrice) * 100) : 0),
-      avgCostAtSale: avgCost, lineProfit: round2((effUnit - avgCost) * qty), total: round2(effUnit * qty),
+      avgCostAtSale: avgCost, lineProfit: round2((effUnit - avgCost) * qty),
+      total: round2(rawUnit * qty), netTotal: round2(effUnit * qty),
       gift: isGift,
     } });
     if (v) {
@@ -367,9 +375,10 @@ export async function commitInvoice(app, invoiceData, lines, opts = {}) {
     const lineDisc = Math.max(0, round2((listPrice - rawUnit) * qty));
     await db.insert(TABLES.invoiceItems, {
       invoiceId: inv.id, variantId: l.variantId, qty,
-      listPrice, unitPrice: effUnit,
+      listPrice, unitPrice: rawUnit, netUnitPrice: effUnit,
       discountAmount: lineDisc, discountPct: listPrice > 0 ? round2((1 - rawUnit / listPrice) * 100) : 0,
-      avgCostAtSale: avgCost, lineProfit: round2((effUnit - avgCost) * qty), total: round2(effUnit * qty),
+      avgCostAtSale: avgCost, lineProfit: round2((effUnit - avgCost) * qty),
+      total: round2(rawUnit * qty), netTotal: round2(effUnit * qty),
     });
     if (v) {
       const after = round2(num(v.stockQty) - qty);
@@ -787,22 +796,36 @@ export function invoiceTotals(lines, settings, taxApplied) {
 // the PDF and reports so discount/tax/total/paid/remaining are always identical.
 // Works from a SAVED invoice + its items (reconstructs the same numbers).
 export function invoiceBreakdown(invoice, items, settings) {
-  const lines = (items || []).map((it) => {
+  const src = items || [];
+  // Invoices saved before the split baked the invoice discount into unitPrice. For those
+  // the agreed price is recovered by un-applying the same pro-rata factor, so an old
+  // invoice reprints exactly as it was agreed rather than at its discounted figure.
+  const legacy = src.length > 0 && src.every((it) => it.netTotal == null);
+  const storedNet = round2(src.reduce((s, it) => s + num(it.total), 0));
+  const invDisc = round2(num(invoice.discountTotal));
+  const unscale = (legacy && invDisc > 0 && storedNet > 0) ? (storedNet + invDisc) / storedNet : 1;
+
+  const lines = src.map((it) => {
     const qty = num(it.qty);
     const listPrice = num(it.listPrice);
-    const lineTotal = num(it.total);                 // already net of line + invoice discount
-    const unit = qty > 0 ? round2(lineTotal / qty) : round2(num(it.unitPrice));
+    const netTotal = it.netTotal != null ? round2(num(it.netTotal)) : round2(num(it.total));
+    const unit = it.netTotal != null
+      ? (num(it.unitPrice) > 0 ? round2(num(it.unitPrice)) : (qty > 0 ? round2(netTotal / qty) : 0))
+      : round2(num(it.unitPrice) * unscale);
+    const lineTotal = it.netTotal != null ? round2(num(it.total)) : round2(unit * qty);
     return {
       variantId: it.variantId, qty,
       listPrice, unitPrice: unit,
       discountAmount: round2(num(it.discountAmount)),
-      lineTotal: round2(lineTotal),
+      lineTotal, netTotal,
       gift: !!it.gift,
     };
   });
-  // netSubtotal = sum of line totals (already after all discounts), matching what was stored
-  const netSubtotal = round2(lines.reduce((s, l) => s + l.lineTotal, 0));
-  const discountTotal = round2(num(invoice.discountTotal));
+  // Gross at the agreed prices, then the invoice discount shown separately — a discount
+  // must reduce the total, never the printed price of a material.
+  const grossSubtotal = round2(lines.reduce((s, l) => s + l.lineTotal, 0));
+  const netSubtotal = round2(lines.reduce((s, l) => s + l.netTotal, 0));
+  const discountTotal = invDisc || round2(Math.max(0, grossSubtotal - netSubtotal));
   // Per-invoice VAT flag (taxApplied) wins; older invoices without it fall back to settings.
   const taxEnabled = invoice.taxApplied == null ? !!settings?.taxEnabled : !!invoice.taxApplied;
   const vatRate = taxEnabled ? num(settings.taxRate) : 0;
@@ -812,7 +835,7 @@ export function invoiceBreakdown(invoice, items, settings) {
   const paid = round2(num(invoice.paidAmount));
   const remaining = round2(Math.max(0, total - paid));
   return {
-    lines, subtotal: netSubtotal, discountTotal, taxEnabled, vatRate,
+    lines, subtotal: netSubtotal, grossSubtotal, discountTotal, taxEnabled, vatRate,
     vat: t.vat, total, paid, remaining,
     currency: invoice.currency || settings?.baseCurrency || 'AED',
   };
@@ -1148,7 +1171,10 @@ export function topProducts(data, n = 10, bounds) {
   const map = {};
   (data[TABLES.invoiceItems] || []).filter((it) => ids.has(it.invoiceId)).forEach((it) => {
     const m = map[it.variantId] || (map[it.variantId] = { qty: 0, revenue: 0, profit: 0 });
-    m.qty += num(it.qty); m.revenue += num(it.total); m.profit += num(it.lineProfit);
+    // Revenue after the invoice discount. netTotal exists on invoices saved since the
+    // agreed/net split; older rows stored the net figure in total.
+    const net = it.netTotal != null ? num(it.netTotal) : num(it.total);
+    m.qty += num(it.qty); m.revenue += net; m.profit += num(it.lineProfit);
   });
   return Object.entries(map).map(([vid, m]) => {
     const v = variants.find((x) => x.id === vid);

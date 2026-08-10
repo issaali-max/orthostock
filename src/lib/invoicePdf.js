@@ -270,7 +270,7 @@ function buildHtml({ invoice, items, settings, customer, variantById }) {
     const net = taxOn ? Math.round(l.lineTotal * (1 + b.vatRate / 100) * 100) / 100 : l.lineTotal;
     return itemRow(i + 1, { name, qty: l.qty.toFixed(2), uom: esc(v?.uom || 'EACH'), unit: m(unit), net: m(l.lineTotal), vat: m(taxOn ? net - l.lineTotal : 0), vatPct: `${taxOn ? b.vatRate : 0}%`, total: m(net) });
   });
-  const totalsHtml = totalsBlock({ subtotal: b.subtotal, discount: b.discountTotal, vat: b.vat, grand: b.total, taxOn, m, words: esc(amountToWords(b.total, cur)) })
+  const totalsHtml = totalsBlock({ subtotal: b.grossSubtotal, discount: b.discountTotal, vat: b.vat, grand: b.total, taxOn, m, words: esc(amountToWords(b.total, cur)) })
     + `<div dir="ltr" style="display:flex;gap:14px;margin-top:8px;direction:ltr;text-align:left">
         <div style="flex:1;border:1px solid ${LINE};border-radius:6px;padding:8px 11px;font-size:11px">
           <div style="display:flex;justify-content:space-between;padding:2px 0"><span style="color:${MUTE}">Payment method</span><b>${esc(payMethodLabel(invoice.paymentMethod, false))}</b></div>
@@ -305,7 +305,7 @@ function buildQuotationHtml({ quotation, items, settings, customer, variantById 
     const net = taxOn ? Math.round(l.lineTotal * (1 + b.vatRate / 100) * 100) / 100 : l.lineTotal;
     return itemRow(i + 1, { name, qty: l.qty.toFixed(2), uom: esc(v?.uom || 'EACH'), unit: m(unit), net: m(l.lineTotal), vat: m(taxOn ? net - l.lineTotal : 0), vatPct: `${taxOn ? b.vatRate : 0}%`, total: m(net) });
   });
-  const totalsHtml = totalsBlock({ subtotal: b.subtotal, discount: b.discountTotal, vat: b.vat, grand: b.total, taxOn, m, words: esc(amountToWords(b.total, cur)) });
+  const totalsHtml = totalsBlock({ subtotal: b.grossSubtotal, discount: b.discountTotal, vat: b.vat, grand: b.total, taxOn, m, words: esc(amountToWords(b.total, cur)) });
   return paginate(rows, {
     settings, title: 'QUOTATION', taxOn, totalsHtml,
     billingAddress: esc(customer?.address || ''),
