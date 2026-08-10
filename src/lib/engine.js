@@ -250,6 +250,11 @@ export async function saveInvoiceAtomic(app, { editingId, invoiceData, lines, in
   for (const it of oldItems) specs.push({ op: 'remove', table: TABLES.invoiceItems, id: it.id });
   for (const m of oldMoves) specs.push({ op: 'remove', table: TABLES.stockMovements, id: m.id });
 
+  // The order the user arranged the cart in IS the order of the invoice. Store it so the
+  // PDF, the detail screen and a later edit all present the same sequence — previously
+  // nothing recorded it, so the order came from whatever the database returned and
+  // re-saving an invoice reshuffled it.
+  let sortIndex = 0;
   for (const l of lines) {
     const v = vById.get(l.variantId);
     const avgCost = num(v?.purchasePriceAvg);
@@ -265,7 +270,7 @@ export async function saveInvoiceAtomic(app, { editingId, invoiceData, lines, in
     const effUnit = isGift ? 0 : round2(rawUnit * factor);
     const lineDisc = isGift ? 0 : Math.max(0, round2((listPrice - rawUnit) * qty));
     specs.push({ op: 'insert', table: TABLES.invoiceItems, row: {
-      invoiceId: invId, variantId: l.variantId, qty, listPrice,
+      invoiceId: invId, variantId: l.variantId, qty, listPrice, sortIndex: sortIndex++,
       unitPrice: rawUnit, netUnitPrice: effUnit,
       discountAmount: lineDisc, discountPct: isGift ? 0 : (listPrice > 0 ? round2((1 - rawUnit / listPrice) * 100) : 0),
       avgCostAtSale: avgCost, lineProfit: round2((effUnit - avgCost) * qty),
@@ -368,6 +373,7 @@ export async function commitInvoice(app, invoiceData, lines, opts = {}) {
   const factor = gross > 0 ? Math.max(0, (gross - invDisc) / gross) : 1;
 
   const inv = await db.insert(TABLES.invoices, invoiceData);
+  let sortIndex = 0;
   for (const l of lines) {
     const v = vById(l.variantId);
     const avgCost = num(v?.purchasePriceAvg);
@@ -377,7 +383,7 @@ export async function commitInvoice(app, invoiceData, lines, opts = {}) {
     const effUnit = round2(rawUnit * factor);
     const lineDisc = Math.max(0, round2((listPrice - rawUnit) * qty));
     await db.insert(TABLES.invoiceItems, {
-      invoiceId: inv.id, variantId: l.variantId, qty,
+      invoiceId: inv.id, variantId: l.variantId, qty, sortIndex: sortIndex++,
       listPrice, unitPrice: rawUnit, netUnitPrice: effUnit,
       discountAmount: lineDisc, discountPct: listPrice > 0 ? round2((1 - rawUnit / listPrice) * 100) : 0,
       avgCostAtSale: avgCost, lineProfit: round2((effUnit - avgCost) * qty),
@@ -802,7 +808,17 @@ export function invoiceTotals(lines, settings, taxApplied) {
 // the PDF and reports so discount/tax/total/paid/remaining are always identical.
 // Works from a SAVED invoice + its items (reconstructs the same numbers).
 export function invoiceBreakdown(invoice, items, settings) {
-  const src = items || [];
+  // Present lines in the order they were entered. sortIndex is stored on save; invoices
+  // written before it fall back to their existing array position, so nothing reshuffles.
+  const src = (items || []).map((it, i) => ({ it, i }))
+    .sort((a, b) => {
+      const av = a.it.sortIndex, bv = b.it.sortIndex;
+      if (av == null && bv == null) return a.i - b.i;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      return av - bv || a.i - b.i;
+    })
+    .map((x) => x.it);
   // Invoices saved before the split baked the invoice discount into unitPrice. For those
   // the agreed price is recovered by un-applying the same pro-rata factor, so an old
   // invoice reprints exactly as it was agreed rather than at its discounted figure.

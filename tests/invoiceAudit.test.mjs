@@ -203,6 +203,47 @@ console.log('\n─── 12. Repeated edits must not drift ───');
   inv('20 no-op saves do not multiply entries', payments.length === 1, `entries=${payments.length}`);
 }
 
+
+console.log('\n─── 13. Line order must be stable and identical everywhere ───');
+{
+  // Stored deliberately SHUFFLED, as the database may return them, with the true order
+  // recorded in sortIndex.
+  const shuffled = [
+    { invoiceId: 'o1', variantId: 'v2', qty: 4, listPrice: 18.5, unitPrice: 18.5, netUnitPrice: 18.5, total: 74, netTotal: 74, sortIndex: 2 },
+    { invoiceId: 'o1', variantId: 'v1', qty: 20, listPrice: 29, unitPrice: 29, netUnitPrice: 29, total: 580, netTotal: 580, sortIndex: 0 },
+    { invoiceId: 'o1', variantId: 'v1', qty: 1, listPrice: 29, unitPrice: 0, netUnitPrice: 0, total: 0, netTotal: 0, sortIndex: 1, gift: true },
+  ];
+  const invRow = { id: 'o1', total: 654, paidAmount: 0, taxApplied: false, currency: 'AED' };
+  const b1 = invoiceBreakdown(invRow, shuffled, S);
+  inv('lines come back in the entered order', b1.lines.map((l) => l.sortIndex ?? '').join() !== 'x'
+    && b1.lines[0].qty === 20 && b1.lines[1].gift === true && b1.lines[2].qty === 4,
+    b1.lines.map((l) => `${l.variantId}:${l.qty}`).join(' '));
+
+  // Re-reading in a different physical order must produce the SAME presentation.
+  const reordered = [shuffled[2], shuffled[0], shuffled[1]];
+  const b2 = invoiceBreakdown(invRow, reordered, S);
+  inv('order is independent of how rows are stored',
+    JSON.stringify(b1.lines.map((l) => [l.variantId, l.qty])) === JSON.stringify(b2.lines.map((l) => [l.variantId, l.qty])));
+
+  // Invoices saved before sortIndex existed must keep their array order, not be dropped.
+  const legacyOrder = [
+    { invoiceId: 'o2', variantId: 'v1', qty: 5, listPrice: 10, unitPrice: 10, total: 50 },
+    { invoiceId: 'o2', variantId: 'v2', qty: 3, listPrice: 20, unitPrice: 20, total: 60 },
+  ];
+  const b3 = invoiceBreakdown({ id: 'o2', total: 110, paidAmount: 0, currency: 'AED' }, legacyOrder, S);
+  inv('a pre-sortIndex invoice keeps its original order', b3.lines[0].qty === 5 && b3.lines[1].qty === 3);
+  inv('a pre-sortIndex invoice loses no lines', b3.lines.length === 2);
+
+  // A mix of old and new rows must not lose any line either.
+  const mixed = [
+    { invoiceId: 'o3', variantId: 'v2', qty: 3, listPrice: 20, unitPrice: 20, total: 60 },
+    { invoiceId: 'o3', variantId: 'v1', qty: 5, listPrice: 10, unitPrice: 10, netUnitPrice: 10, total: 50, netTotal: 50, sortIndex: 0 },
+  ];
+  const b4 = invoiceBreakdown({ id: 'o3', total: 110, paidAmount: 0, currency: 'AED' }, mixed, S);
+  inv('a mix of ordered and unordered rows keeps every line', b4.lines.length === 2);
+  inv('ordered rows lead, unordered follow', b4.lines[0].qty === 5);
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${checks} invariants checked · ${findings.length} finding(s)`);
 if (findings.length) findings.forEach((f, i) => console.log(`  ${i + 1}. ${f.label}${f.detail ? ` — ${f.detail}` : ''}`));
