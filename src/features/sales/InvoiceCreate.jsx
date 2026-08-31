@@ -4,7 +4,7 @@ import QuickOrder from '../orders/QuickOrder.jsx';
 import { C, TABLES, emirateOptions, citiesOfEmirate, allCities } from '../../lib/constants.js';
 import { fmtCur, fmtNum, num, round2, safeDiv } from '../../lib/money.js';
 import { todayISO } from '../../lib/dates.js';
-import { saveInvoiceAtomic, invoiceTotals, deleteInvoiceAtomic, nextNumber, reconcilePayments } from '../../lib/engine.js';
+import { saveInvoiceAtomic, invoiceTotals, deleteInvoiceAtomic, nextNumber, reconcilePayments, invoiceBreakdown } from '../../lib/engine.js';
 import { Btn, Field, Input, Modal, ProductChips, Select } from '../../ui/components.jsx';
 import { BandGrid } from '../../ui/BandGrid.jsx';
 import { isGridWorthy } from '../../lib/bandGrid.js';
@@ -17,6 +17,12 @@ const variantLabel = (v) => {
 
 // Sales happen here: choose category -> materials -> build invoice.
 // `editing` (an invoice row) switches the modal into edit mode.
+// A cart line's identity. Lines were previously identified by variantId, which meant two
+// priced lines of the same material could not coexist: reopening merged them and kept only
+// the last price, and editing one row rewrote the other.
+let _lineSeq = 0;
+const newLineKey = () => `L${++_lineSeq}`;
+
 export default function InvoiceCreate({ open, onClose, editing }) {
   const app = useApp();
   const { t, lang, data, settings, displayCurrency, usdRate, showToast } = app;
@@ -70,22 +76,27 @@ export default function InvoiceCreate({ open, onClose, editing }) {
           return av - bv || a.i - b.i;
         })
         .map((x) => x.it);
-      // reconstruct cart lines: merge the paid item and the gift item of the same material
-      // back into one line carrying { qty, unitPrice, giftQty }.
-      const byVar = new Map();
-      its.forEach((it) => {
-        const e = byVar.get(it.variantId) || { variantId: it.variantId, qty: 0, giftQty: 0, unitPrice: 0 };
-        if (it.gift) { e.giftQty = round2(e.giftQty + num(it.qty)); }
-        else {
-          e.qty = round2(e.qty + num(it.qty));
-          // Use the price SAVED on this invoice line, verbatim. A per-invoice price the
-          // user set must never be recomputed from the material's current selling price.
-          e.unitPrice = num(it.unitPrice) > 0 ? num(it.unitPrice)
-            : (num(it.listPrice) > 0 ? round2(num(it.listPrice) - safeDiv(num(it.discountAmount), num(it.qty))) : 0);
+      // Rebuild the cart through invoiceBreakdown — the same function the PDF and the
+      // detail screen use. It resolves the AGREED price (including un-baking the discount
+      // from invoices saved before that split), so reopening can never re-apply a
+      // discount that is already recorded on the invoice.
+      const b = invoiceBreakdown(editing, its, settings);
+      // One cart line per stored line, identified by its own key. Keying by variantId
+      // merged two priced lines of the same material into one and kept only the LAST
+      // price, silently changing the invoice total on a save that touched nothing.
+      // A gift attaches to the first priced line of the same material, which is how it
+      // was entered; a gift with no priced line stands on its own.
+      const built = [];
+      for (const l of b.lines) {
+        if (l.gift) {
+          const host = built.find((x) => x.variantId === l.variantId && num(x.qty) > 0 && !num(x.giftQty));
+          if (host) { host.giftQty = round2(num(host.giftQty) + num(l.qty)); continue; }
+          built.push({ key: newLineKey(), variantId: l.variantId, qty: '', giftQty: num(l.qty), unitPrice: num(vById(l.variantId)?.sellingPriceDefault) });
+        } else {
+          built.push({ key: newLineKey(), variantId: l.variantId, qty: num(l.qty), giftQty: '', unitPrice: num(l.unitPrice) });
         }
-        byVar.set(it.variantId, e);
-      });
-      const _rebuilt = [...byVar.values()].map((e) => ({ ...e, unitPrice: e.qty > 0 ? e.unitPrice : num(vById(e.variantId)?.sellingPriceDefault) }));
+      }
+      const _rebuilt = built;
       setLines(_rebuilt);
       setGiftMode(_rebuilt.some((l) => num(l.giftQty) > 0));
       setCustomerId(editing.customerId || '');
@@ -102,9 +113,11 @@ export default function InvoiceCreate({ open, onClose, editing }) {
   }, [open, editing?.id]); // re-init only when the modal opens or a different invoice is edited (not on every background sync)
 
   const inCart = (id) => lines.some((l) => l.variantId === id);
-  const toggle = (v) => setLines((ls) => inCart(v.id) ? ls.filter((l) => l.variantId !== v.id) : [...ls, { variantId: v.id, qty: '', unitPrice: num(v.sellingPriceDefault), giftQty: '' }]);
-  const setLine = (id, patch) => setLines((ls) => ls.map((l) => (l.variantId === id ? { ...l, ...patch } : l)));
-  const removeLine = (id) => setLines((ls) => ls.filter((l) => l.variantId !== id));
+  const toggle = (v) => setLines((ls) => inCart(v.id) ? ls.filter((l) => l.variantId !== v.id) : [...ls, { key: newLineKey(), variantId: v.id, qty: '', unitPrice: num(v.sellingPriceDefault), giftQty: '' }]);
+  // Edits address ONE line by its key. Addressing by variantId changed every line of
+  // that material at once, so editing one price silently rewrote another row.
+  const setLine = (key, patch) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+  const removeLine = (key) => setLines((ls) => ls.filter((l) => l.key !== key));
 
   const grossSubtotal = lines.reduce((s, l) => s + num(l.unitPrice) * num(l.qty), 0);
   const lineDiscountTotal = lines.reduce((s, l) => { const v = vById(l.variantId); const list = num(v?.sellingPriceDefault); return s + Math.max(0, (list - num(l.unitPrice)) * num(l.qty)); }, 0);
@@ -354,18 +367,18 @@ export default function InvoiceCreate({ open, onClose, editing }) {
             const loss = num(l.unitPrice) < cost && num(l.unitPrice) > 0;
             const lowStk = (num(l.qty) + giftQty) > stock;
             return (
-              <div key={l.variantId} style={{ border: `1px solid ${giftQty > 0 ? C.success : C.border}`, borderRadius: 10, padding: '6px 8px', background: giftQty > 0 ? '#F1FAF5' : '#fff' }}>
+              <div key={l.key} style={{ border: `1px solid ${giftQty > 0 ? C.success : C.border}`, borderRadius: 10, padding: '6px 8px', background: giftQty > 0 ? '#F1FAF5' : '#fff' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ flex: 1, fontSize: 12, fontWeight: 700, color: C.text, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.nameEn || variantLabel(v)}</span>
-                  <Input type="number" value={l.qty} onChange={(val) => setLine(l.variantId, { qty: num(val) })} style={{ width: 54, padding: 6 }} />
-                  <Input type="number" value={l.unitPrice} onChange={(val) => setLine(l.variantId, { unitPrice: num(val) })} style={{ width: 72, padding: 6 }} />
-                  <button onClick={() => removeLine(l.variantId)} style={{ border: 'none', background: 'none', color: C.danger, cursor: 'pointer', fontSize: 18, width: 24 }}>×</button>
+                  <Input type="number" value={l.qty} onChange={(val) => setLine(l.key, { qty: num(val) })} style={{ width: 54, padding: 6 }} />
+                  <Input type="number" value={l.unitPrice} onChange={(val) => setLine(l.key, { unitPrice: num(val) })} style={{ width: 72, padding: 6 }} />
+                  <button onClick={() => removeLine(l.key)} style={{ border: 'none', background: 'none', color: C.danger, cursor: 'pointer', fontSize: 18, width: 24 }}>×</button>
                 </div>
                 {/* هدية للمركز: كمية مجانية لنفس المادة — تُخصم من المخزون والربح بسعر 0 */}
                 {giftMode && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5 }}>
                   <span style={{ flex: 1, fontSize: 11, fontWeight: 800, color: giftQty > 0 ? C.success : C.textMuted, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>🎁 {t('giftToCenter')}{giftQty > 0 ? ` · ${t('giftAtCost')} ${fmtCur(round2(cost * giftQty), displayCurrency, usdRate)}` : ''}</span>
-                  <Input type="number" value={l.giftQty} onChange={(val) => setLine(l.variantId, { giftQty: num(val) })} placeholder="0" style={{ width: 72, padding: 6 }} />
+                  <Input type="number" value={l.giftQty} onChange={(val) => setLine(l.key, { giftQty: num(val) })} placeholder="0" style={{ width: 72, padding: 6 }} />
                   <span style={{ width: 24 }} />
                 </div>
                 )}

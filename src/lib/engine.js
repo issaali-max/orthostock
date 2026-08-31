@@ -224,6 +224,28 @@ export async function logStockMovement(app, variantId, before, after, type = 'ad
 // never delete the old invoice without writing the replacement. For an edit
 // the invoice row is UPDATED in place (same id/number) and its old items and
 // movements are removed inside the same transaction.
+// Spreads an invoice-level discount across the priced lines and returns each line's net
+// total, guaranteeing the rounded totals sum to exactly (gross - discount). Rounding each
+// line independently by a ratio loses fils, and because a save re-reads what the previous
+// save wrote, that loss compounded on every edit.
+export function allocateDiscount(lines, gross, invDisc) {
+  const target = round2(gross - invDisc);
+  const nets = lines.map((l) => (l.gift ? 0 : round2(num(l.unitPrice) * num(l.qty) * (gross > 0 ? (gross - invDisc) / gross : 1))));
+  const sum = round2(nets.reduce((s, n) => s + n, 0));
+  const residual = round2(target - sum);
+  if (residual !== 0) {
+    // Give the remainder to the largest priced line, where it is proportionally smallest.
+    let bigIdx = -1, bigVal = -Infinity;
+    lines.forEach((l, i) => {
+      if (l.gift) return;
+      const v = num(l.unitPrice) * num(l.qty);
+      if (v > bigVal) { bigVal = v; bigIdx = i; }
+    });
+    if (bigIdx >= 0) nets[bigIdx] = round2(nets[bigIdx] + residual);
+  }
+  return nets;
+}
+
 export async function saveInvoiceAtomic(app, { editingId, invoiceData, lines, invoiceDiscount = 0 }) {
   const [variants, allItems, allMoves] = await Promise.all([
     db.getAll(TABLES.variants), db.getAll(TABLES.invoiceItems), db.getAll(TABLES.stockMovements),
@@ -242,8 +264,11 @@ export async function saveInvoiceAtomic(app, { editingId, invoiceData, lines, in
   }
 
   const gross = lines.reduce((s, l) => s + (l.gift ? 0 : num(l.unitPrice) * num(l.qty)), 0);
-  const invDisc = Math.max(0, num(invoiceDiscount));
-  const factor = gross > 0 ? Math.max(0, (gross - invDisc) / gross) : 1;
+  const invDisc = Math.min(Math.max(0, num(invoiceDiscount)), gross);
+  // Allocate the discount across the priced lines so the ROUNDED line totals sum to
+  // exactly gross - discount. A plain per-unit ratio leaves a few fils unaccounted for,
+  // which showed up as a total that drifted every time the invoice was saved.
+  const netTotals = allocateDiscount(lines, gross, invDisc);
 
   if (editingId) specs.push({ op: 'update', table: TABLES.invoices, id: invId, patch: { ...invoiceData } });
   else specs.push({ op: 'insert', table: TABLES.invoices, row: { id: invId, ...invoiceData } });
@@ -255,7 +280,9 @@ export async function saveInvoiceAtomic(app, { editingId, invoiceData, lines, in
   // nothing recorded it, so the order came from whatever the database returned and
   // re-saving an invoice reshuffled it.
   let sortIndex = 0;
+  let lineIdx = -1;
   for (const l of lines) {
+    lineIdx++;
     const v = vById.get(l.variantId);
     const avgCost = num(v?.purchasePriceAvg);
     const isGift = !!l.gift;                                      // هدية للمركز: sells at 0 but cost is still charged
@@ -267,14 +294,15 @@ export async function saveInvoiceAtomic(app, { editingId, invoiceData, lines, in
     // and profit. Baking the discount into unitPrice meant reopening the invoice read
     // the discounted figure back as the agreed price and discounted it AGAIN — every
     // edit shrank the prices further, which is why editing a quantity wrecked the total.
-    const effUnit = isGift ? 0 : round2(rawUnit * factor);
+    const netTotal = isGift ? 0 : num(netTotals[lineIdx]);
+    const effUnit = isGift || qty === 0 ? 0 : round2(netTotal / qty);
     const lineDisc = isGift ? 0 : Math.max(0, round2((listPrice - rawUnit) * qty));
     specs.push({ op: 'insert', table: TABLES.invoiceItems, row: {
       invoiceId: invId, variantId: l.variantId, qty, listPrice, sortIndex: sortIndex++,
       unitPrice: rawUnit, netUnitPrice: effUnit,
       discountAmount: lineDisc, discountPct: isGift ? 0 : (listPrice > 0 ? round2((1 - rawUnit / listPrice) * 100) : 0),
-      avgCostAtSale: avgCost, lineProfit: round2((effUnit - avgCost) * qty),
-      total: round2(rawUnit * qty), netTotal: round2(effUnit * qty),
+      avgCostAtSale: avgCost, lineProfit: round2(netTotal - avgCost * qty),
+      total: round2(rawUnit * qty), netTotal,
       gift: isGift,
     } });
     if (v) {
@@ -370,24 +398,27 @@ export async function commitInvoice(app, invoiceData, lines, opts = {}) {
 
   const gross = lines.reduce((s, l) => s + num(l.unitPrice) * num(l.qty), 0);
   const invDisc = Math.max(0, num(opts.invoiceDiscount));
-  const factor = gross > 0 ? Math.max(0, (gross - invDisc) / gross) : 1;
+  const netTotals = allocateDiscount(lines, gross, invDisc);   // exact, no rounding drift
 
   const inv = await db.insert(TABLES.invoices, invoiceData);
   let sortIndex = 0;
+  let lineIdx = -1;
   for (const l of lines) {
+    lineIdx++;
     const v = vById(l.variantId);
     const avgCost = num(v?.purchasePriceAvg);
     const listPrice = num(v?.sellingPriceDefault);
     const rawUnit = num(l.unitPrice);
     const qty = num(l.qty);
-    const effUnit = round2(rawUnit * factor);
+    const netTotal = num(netTotals[lineIdx]);
+    const effUnit = qty === 0 ? 0 : round2(netTotal / qty);
     const lineDisc = Math.max(0, round2((listPrice - rawUnit) * qty));
     await db.insert(TABLES.invoiceItems, {
       invoiceId: inv.id, variantId: l.variantId, qty, sortIndex: sortIndex++,
       listPrice, unitPrice: rawUnit, netUnitPrice: effUnit,
       discountAmount: lineDisc, discountPct: listPrice > 0 ? round2((1 - rawUnit / listPrice) * 100) : 0,
-      avgCostAtSale: avgCost, lineProfit: round2((effUnit - avgCost) * qty),
-      total: round2(rawUnit * qty), netTotal: round2(effUnit * qty),
+      avgCostAtSale: avgCost, lineProfit: round2(netTotal - avgCost * qty),
+      total: round2(rawUnit * qty), netTotal,
     });
     if (v) {
       const after = round2(num(v.stockQty) - qty);
