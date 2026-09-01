@@ -4,7 +4,7 @@ import { C, TABLES } from '../../lib/constants.js';
 import { fmtCur, fmtNum, num, round2 } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
 import { PageHeader, Card, Btn, Field, Input, Select, Modal, Badge } from '../../ui/components.jsx';
-import { customerStats, supplierDebt, customersWithLoans, outstandingLoans } from '../../lib/engine.js';
+import { customerStats, supplierDebt, customersWithLoans, outstandingLoans, recordSupplierPayment, writeOffSupplierDebt } from '../../lib/engine.js';
 
 // Net of a personal debt: +lend (they owe me) − collect (I owe / they repaid). > 0 they owe
 // me, < 0 I owe them. Recording "I owe X" with no prior loan = a single collect entry.
@@ -46,6 +46,7 @@ export default function Debts() {
   const peopleIOwe = people.map((p) => ({ p, net: netOf(p) })).filter((x) => x.net < -0.005).sort((a, b) => a.net - b.net);
 
   // ── Supplier debts (I owe) ──
+  const [supPay, setSupPay] = useState(null);   // { row, mode: 'pay'|'writeOff', amount, date, paidFrom, note }
   const supDebts = supplierDebt(app).filter((r) => r.balance > 0.005).sort((a, b) => b.balance - a.balance);
 
   // ── Totals (in AED base) ──
@@ -68,6 +69,25 @@ export default function Debts() {
     });
     setAddP(null); showToast(t('saved'), 'success');
   };
+  // A supplier PAYMENT moves money out of the drawer or bank and reduces the payable.
+  // A WRITE-OFF reduces the payable only, with no account touched. Keeping the two apart
+  // is what stops a waived balance from silently draining cash that never left.
+  const saveSupPay = async () => {
+    const amt = num(supPay.amount);
+    if (!(amt > 0)) return;
+    if (amt > num(supPay.row.balance) + 0.005) { showToast('⚠', 'error'); return; }
+    const supplierId = supPay.row.supplier.id;
+    if (supPay.mode === 'writeOff') {
+      await writeOffSupplierDebt(app, { supplierId, amount: amt, date: supPay.date, note: supPay.note });
+    } else {
+      await recordSupplierPayment(app, {
+        supplierId, amount: amt, date: supPay.date, note: supPay.note,
+        paidFrom: supPay.paidFrom, method: supPay.paidFrom === 'bank' ? 'transfer' : 'cash',
+      });
+    }
+    setSupPay(null); showToast(t('saved'), 'success');
+  };
+
   const addTxn = async () => {
     const { person: p, kind } = txn; const amt = num(txn.amount);
     if (!(amt > 0)) return;
@@ -160,13 +180,20 @@ export default function Debts() {
           {oweTab === 'suppliers' ? (
             <Section title={`🚚 ${t('suppliers')}`} count={supDebts.length} total={fmtCur(supTotal, displayCurrency, usdRate)} color={C.danger}>
               {supDebts.length === 0 ? <EmptyHint text={t('noDebts')} /> : supDebts.map((r) => (
-                <Card key={r.supplier.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ fontSize: 18 }}>🚚</span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 800, color: C.text, fontSize: 13.5 }}>{r.supplier.name || r.supplier.nameEn || '—'}</div>
-                    <div style={{ fontSize: 11, color: C.textMuted }}>{t('purchases')}: {fmtCur(r.purchased, displayCurrency, usdRate)} · {t('paid') || 'مدفوع'}: {fmtCur(r.paid, displayCurrency, usdRate)}</div>
+                <Card key={r.supplier.id} style={{ display: 'grid', gap: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 18 }}>🚚</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 800, color: C.text, fontSize: 13.5 }}>{r.supplier.name || r.supplier.nameEn || '—'}</div>
+                      <div style={{ fontSize: 11, color: C.textMuted }}>{t('purchases')}: {fmtCur(r.purchased, displayCurrency, usdRate)} · {t('paid') || 'مدفوع'}: {fmtCur(r.paid, displayCurrency, usdRate)}</div>
+                    </div>
+                    <div style={{ fontWeight: 900, color: C.danger, fontSize: 15 }}>{fmtCur(r.balance, displayCurrency, usdRate)}</div>
                   </div>
-                  <div style={{ fontWeight: 900, color: C.danger, fontSize: 15 }}>{fmtCur(r.balance, displayCurrency, usdRate)}</div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <Btn size="sm" onClick={() => setSupPay({ row: r, mode: 'pay', amount: String(r.balance), date: todayISO(), paidFrom: 'drawer', note: '' })}>💵 {t('payment')}</Btn>
+                    <Btn size="sm" variant="ghost" style={{ color: C.textMid }}
+                      onClick={() => setSupPay({ row: r, mode: 'writeOff', amount: String(r.balance), date: todayISO(), paidFrom: 'drawer', note: '' })}>✂️ {t('writeOff')}</Btn>
+                  </div>
                 </Card>
               ))}
             </Section>
@@ -261,6 +288,32 @@ export default function Debts() {
           </div>
         )}
       </Modal>
+
+      {supPay && (
+        <Modal open title={supPay.mode === 'writeOff' ? `✂️ ${t('writeOff')}` : `💵 ${t('paySupplier')}`}
+          onClose={() => setSupPay(null)} width={420}
+          footer={<><Btn variant="ghost" onClick={() => setSupPay(null)}>{t('cancel')}</Btn><Btn onClick={saveSupPay}>{t('save')}</Btn></>}>
+          <div style={{ display: 'grid', gap: 10 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 800, color: C.text }}>{supPay.row.supplier.name || '—'}</div>
+            <div style={{ fontSize: 12, color: C.textMuted }}>
+              {t('remaining') || 'المتبقّي'}: <b style={{ color: C.danger }}>{fmtCur(supPay.row.balance, displayCurrency, usdRate)}</b>
+            </div>
+            <Field label={t('amount')} required><Input type="number" value={supPay.amount} onChange={(v) => setSupPay((r) => ({ ...r, amount: v }))} inputMode="decimal" /></Field>
+            <Field label={t('date')}><Input type="date" value={supPay.date} onChange={(v) => setSupPay((r) => ({ ...r, date: v }))} /></Field>
+            {supPay.mode === 'pay' ? (
+              <Field label={t('fromAccount') || 'من أي حساب يخرج المال؟'}>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => setSupPay((r) => ({ ...r, paidFrom: 'drawer' }))} style={dirBtn(supPay.paidFrom === 'drawer', C.primary)}>🗄️ {t('payFromDrawer')}</button>
+                  <button onClick={() => setSupPay((r) => ({ ...r, paidFrom: 'bank' }))} style={dirBtn(supPay.paidFrom === 'bank', C.primary)}>🏦 {t('payFromBank')}</button>
+                </div>
+              </Field>
+            ) : (
+              <div style={{ fontSize: 11.5, color: C.textMuted, lineHeight: 1.6 }}>{t('writeOffHint')}</div>
+            )}
+            <Field label={t('notes')}><Input value={supPay.note} onChange={(v) => setSupPay((r) => ({ ...r, note: v }))} /></Field>
+          </div>
+        </Modal>
+      )}
 
       {/* Doctor drill — invoices + materials (the "why") */}
       <Modal open={!!doctor} onClose={() => setDoctor(null)} title={doctor?.c?.name} width={600}>

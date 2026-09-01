@@ -39,11 +39,17 @@ export default function Expenses() {
     const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     if (p === 'all') return { from: '0000-01-01', to: '9999-12-31', pf: '0000-01-01', pt: '0000-01-01' };
     if (p === 'day') { const y = new Date(now); y.setDate(now.getDate() - 1); return { from: iso(now), to: iso(now), pf: iso(y), pt: iso(y) }; }
-    if (p === 'year') { const yr = now.getFullYear(); return { from: `${yr}-01-01`, to: iso(now), pf: `${yr - 1}-01-01`, pt: `${yr - 1}-12-31` }; }
+    // Everything dated after today, so a planned expense is never invisible.
+    if (p === 'upcoming') { const t2 = new Date(now); t2.setDate(now.getDate() + 1); return { from: iso(t2), to: '9999-12-31', pf: '0000-01-01', pt: '0000-01-01' }; }
+    // Periods run to the END of the month/year, not to today. Stopping at today hid an
+    // expense dated later this month from this list while the dashboard still counted it,
+    // so the two screens disagreed about the same month.
+    if (p === 'year') { const yr = now.getFullYear(); return { from: `${yr}-01-01`, to: `${yr}-12-31`, pf: `${yr - 1}-01-01`, pt: `${yr - 1}-12-31` }; }
     const ms = new Date(now.getFullYear(), now.getMonth(), 1);
+    const me = new Date(now.getFullYear(), now.getMonth() + 1, 0);
     const pms = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const pme = new Date(now.getFullYear(), now.getMonth(), 0);
-    return { from: iso(ms), to: iso(now), pf: iso(pms), pt: iso(pme) };
+    return { from: iso(ms), to: iso(me), pf: iso(pms), pt: iso(pme) };
   };
 
   // Everything the screen shows for the chosen period + scope (type → group), in AED base:
@@ -135,7 +141,7 @@ export default function Expenses() {
         <>
           {/* Single time control */}
           <div style={{ display: 'flex', gap: 6, marginBottom: 12, background: C.surfaceAlt, padding: 4, borderRadius: 12 }}>
-            {[['day', `📅 ${t('daily')}`], ['month', `🗓️ ${t('thisMonth')}`], ['year', `📆 ${t('thisYear')}`], ['all', `∞ ${t('all')}`]].map(([k, label]) => (
+            {[['day', `📅 ${t('daily')}`], ['month', `🗓️ ${t('thisMonth')}`], ['year', `📆 ${t('thisYear')}`], ['upcoming', `⏭️ ${t('upcoming')}`], ['all', `∞ ${t('all')}`]].map(([k, label]) => (
               <button key={k} type="button" onClick={() => setPeriod(k)}
                 style={{ flex: 1, padding: '9px 6px', borderRadius: 9, border: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: 800,
                   background: period === k ? '#fff' : 'transparent', color: period === k ? C.primary : C.textMid,
@@ -146,7 +152,7 @@ export default function Expenses() {
           {/* Hero summary: total for the period + trend vs previous + type split */}
           {(() => {
             const a = analysis;
-            const pLabel = period === 'day' ? t('daily') : period === 'year' ? t('thisYear') : period === 'all' ? t('all') : t('thisMonth');
+            const pLabel = period === 'day' ? t('daily') : period === 'year' ? t('thisYear') : period === 'all' ? t('all') : period === 'upcoming' ? t('upcoming') : t('thisMonth');
             const prevLabel = period === 'day' ? t('yesterday') : period === 'year' ? t('lastYear') : t('lastMonth');
             const up = a.changePct != null && a.changePct > 0;
             const types = [['business', C.primary, `🏢 ${t('business')}`], ['personal', C.warning, `👤 ${t('personal')}`], ['home', C.success, `🏠 ${t('home')}`]];
@@ -155,7 +161,7 @@ export default function Expenses() {
                 <div style={{ fontSize: 12, fontWeight: 700, opacity: .85, marginBottom: 2 }}>{t('totalExpenses')} · {pLabel}</div>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 26, fontWeight: 900, letterSpacing: '-.5px' }}>{fmtCur(a.total, displayCurrency, usdRate)}</span>
-                  {a.changePct != null && period !== 'all' && (
+                  {a.changePct != null && period !== 'all' && period !== 'upcoming' && (
                     <span style={{ fontSize: 12, fontWeight: 800, color: up ? '#ffb4b4' : '#9be6c0' }}>
                       {up ? '▲' : '▼'} {Math.abs(Math.round(a.changePct))}% <span style={{ opacity: .7, fontWeight: 600 }}>{t('vsPrevious')} {prevLabel}</span>
                     </span>
@@ -223,12 +229,13 @@ export default function Expenses() {
             <div style={{ display: 'grid', gap: 8 }}>
               {analysis.list.map((e) => {
                 const g = groupById(e.groupId);
+                const isFuture = (e.date || '') > todayISO();
                 return (
-                  <Card key={e.id} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', borderInlineStart: `3px solid ${g?.color || C.border}` }}
+                  <Card key={e.id} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', borderInlineStart: `3px solid ${g?.color || C.border}`, ...(isFuture ? { borderTop: `1px dashed ${C.warning}`, borderBottom: `1px dashed ${C.warning}` } : {}) }}
                     onClick={() => { setFormType(typeOfGroup(e.groupId)); setEditExpense({ ...e, amount: String(e.amount) }); }}>
                     <div style={{ fontSize: 18 }}>{g?.icon || '🧾'}</div>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 700, color: C.text, fontSize: 13 }}>{groupName(g)} {g && <Badge tone={g.type === 'personal' ? 'warning' : g.type === 'home' ? 'success' : 'info'}>{t(g.type)}</Badge>}</div>
+                      <div style={{ fontWeight: 700, color: C.text, fontSize: 13 }}>{groupName(g)} {g && <Badge tone={g.type === 'personal' ? 'warning' : g.type === 'home' ? 'success' : 'info'}>{t(g.type)}</Badge>}{isFuture && <Badge tone="warning">⏭️ {t('futureExpense')}</Badge>}</div>
                       <div style={{ fontSize: 11, color: C.textMuted }}>{fmtDate(e.date, lang)}{e.note ? ` · ${e.note}` : ''}</div>
                     </div>
                     <div style={{ fontWeight: 800, color: C.text }}>{`${e.currency === 'USD' ? 'USD' : 'AED'} ${num(e.amount).toFixed(2)}`}</div>

@@ -10,6 +10,11 @@ import FinancialPanel from './dashboard/FinancialPanel.jsx';
 import { Badge, Card, EmptyState, Modal, PageHeader } from '../ui/components.jsx';
 
 const monthStart = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`; };
+// The period must be CLOSED at both ends. With no upper bound, "this month" swallowed
+// every future-dated record — an expense booked for next year counted against this month,
+// and the expenses list (which stops at today) then disagreed with the dashboard.
+const monthEnd = () => { const d = new Date(); const last = new Date(d.getFullYear(), d.getMonth() + 1, 0); return `${last.getFullYear()}-${String(last.getMonth() + 1).padStart(2, '0')}-${String(last.getDate()).padStart(2, '0')}`; };
+const yearEnd = () => `${new Date().getFullYear()}-12-31`;
 const yearStart = () => `${new Date().getFullYear()}-01-01`;
 
 export default function Dashboard() {
@@ -20,7 +25,7 @@ export default function Dashboard() {
   const [showSold, setShowSold] = useState(false);
 
   const bounds = range === 'day' ? { from: todayISO(), to: todayISO() }
-    : range === 'year' ? { from: yearStart() } : { from: monthStart() };
+    : range === 'year' ? { from: yearStart(), to: yearEnd() } : { from: monthStart(), to: monthEnd() };
   // Spelled out everywhere a period figure is shown, so no number is ever ambiguous
   // about whether it covers today, this month or this year.
   const rangeLabel = range === 'day' ? t('today') : range === 'year' ? t('thisYear') : t('thisMonth');

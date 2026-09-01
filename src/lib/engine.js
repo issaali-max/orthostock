@@ -111,6 +111,9 @@ export function accountLedger(appOrData) {
   }
   for (const sp of (data[TABLES.supplierPayments] || [])) {
     if (sp.isActive === false) continue;
+    // A write-off settles a payable on paper; no money left an account, so it must not
+    // appear here or it would drain the drawer for a payment that never happened.
+    if (sp.writeOff || sp.method === 'none') continue;
     const account = sp.paidFrom || PAYMENT_ACCOUNT[sp.method || 'cash'] || 'drawer';
     moves.push({ account, date: sp.date, direction: 'out', amount: num(sp.amount), currency: 'AED', type: 'purchase', supplierId: sp.supplierId, supplierName: supName(sp.supplierId), reason: sp.note || '' });
   }
@@ -1659,14 +1662,35 @@ export async function logAudit(app, action, entity, ref, note = '') {
 // Record a payment made to a supplier AFTER (or separately from) a purchase. The
 // amount paid at purchase time lives on the purchase itself; these are the later
 // (full or partial) settlements.
-export async function recordSupplierPayment(app, { supplierId, amount, date, method = 'cash', note = '' }) {
+export async function recordSupplierPayment(app, { supplierId, amount, date, method = 'cash', paidFrom, note = '' }) {
   const amt = round2(num(amount));
   if (!supplierId || amt <= 0) return null;
+  // Which account the money physically leaves. accountLedger already honours paidFrom and
+  // only falls back to the method when it is missing, so recording it explicitly is what
+  // lets you pay a supplier from the bank while the method is still 'cash'.
+  const account = paidFrom === 'drawer' || paidFrom === 'bank' ? paidFrom
+    : (PAYMENT_ACCOUNT[method] || 'drawer');
   const row = await db.insert(TABLES.supplierPayments, {
-    supplierId, amount: amt, date: date || todayISO(), method, note,
+    supplierId, amount: amt, date: date || todayISO(), method, paidFrom: account, note,
   });
   await app.refresh(TABLES.supplierPayments);
   await logAudit(app, 'payment', 'supplier', supplierId, `${amt}`);
+  nudgeSync();
+  return row;
+}
+
+// Clears a supplier balance WITHOUT any money leaving an account — a credit note, a
+// waived amount, an old balance that was never really owed. Recorded as a payment marked
+// writeOff so the payable is settled while the drawer and bank are untouched, and so the
+// reason stays visible instead of the balance quietly disappearing.
+export async function writeOffSupplierDebt(app, { supplierId, amount, date, note = '' }) {
+  const amt = round2(num(amount));
+  if (!supplierId || amt <= 0) return null;
+  const row = await db.insert(TABLES.supplierPayments, {
+    supplierId, amount: amt, date: date || todayISO(), method: 'none', writeOff: true, note,
+  });
+  await app.refresh(TABLES.supplierPayments);
+  await logAudit(app, 'writeoff', 'supplier', supplierId, `${amt}`);
   nudgeSync();
   return row;
 }
