@@ -229,6 +229,41 @@ console.log('\n─── 13. An unknown material is rejected on CREATE too ─�
   ok('nothing was written', !(await activePOs()).some((p) => p.purchaseNumber === 'PO-X'));
 }
 
+
+console.log('\n─── 14. OPENING must never be replayed as if it happened between purchases ───');
+{
+  // Recreates the exact inversion found while building the user-facing walkthrough:
+  // an 'opening' movement's insertion time can fall, by wall-clock accident, between
+  // two purchases whose BUSINESS dates straddle it. It must still be treated as
+  // pre-baseline, not replayed into the middle of the purchase history.
+  await db.insert(TABLES.variants, { id: 'v9', nameEn: 'Test Wire', sku: 'TW-1', stockQty: 100, purchasePriceAvg: 4, purchasePriceLatest: 4, purchasePriceMin: 4, purchasePriceMax: 4, isActive: true });
+  // Inserted "now" — whatever the sandbox's real clock says — deliberately with no
+  // relation to the purchase dates below, which is exactly the real-world case: a
+  // material's opening entry is created whenever it is added to the catalogue, with
+  // no guaranteed relationship to purchases entered before or after that moment.
+  await db.insert(TABLES.stockMovements, { variantId: 'v9', type: 'opening', qtyChange: 100, qtyAfter: 100, refType: 'opening', refId: 'seed9' });
+  await refreshAll();
+
+  await commitPurchase(app, { ...base, purchaseNumber: 'PO-9A', date: '2020-01-01', totalOriginal: 600, totalAED: 600, paidAmount: 0, paidFrom: 'bank' }, [{ variantId: 'v9', qty: 20, unitCost: 3 }]);
+  await refreshAll();
+  const afterFirst = await V('v9');
+  ok('opening does not inflate qty before any edit', afterFirst.stockQty === 120, `${afterFirst.stockQty}`);
+  ok('average after the first purchase is correct', afterFirst.purchasePriceAvg === round2((100 * 4 + 20 * 3) / 120), `${afterFirst.purchasePriceAvg}`);
+
+  const po9a = (await activePOs()).find((p) => p.purchaseNumber === 'PO-9A');
+  await commitPurchase(app, { ...base, purchaseNumber: 'PO-9B', date: '2099-01-01', totalOriginal: 500, totalAED: 500, paidAmount: 0, paidFrom: 'bank' }, [{ variantId: 'v9', qty: 50, unitCost: 10 }]);
+  await refreshAll();
+
+  // Edit the FIRST purchase — this is what triggers a replay, and is where opening's
+  // position previously mattered.
+  await editPurchase(po9a.id, { ...base, date: '2020-01-01', totalOriginal: 700, totalAED: 700, paidAmount: 0, paidFrom: 'bank' }, [{ variantId: 'v9', qty: 20, unitCost: 3.5 }]);
+  const v9 = await V('v9');
+  const correctAvg = round2((100 * 4 + 20 * 3.5 + 50 * 10) / 170);
+  ok('opening is not double-counted after editing an earlier purchase', v9.stockQty === 170, `${v9.stockQty}`);
+  ok('average matches a hand calculation that never re-adds the opening', v9.purchasePriceAvg === correctAvg, `engine=${v9.purchasePriceAvg} hand=${correctAvg}`);
+  ok('cached stock still equals the sum of movements', v9.stockQty === await stockFromMoves('v9'));
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${pass + fail} checks · ${fail} finding(s)`);
 findings.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));

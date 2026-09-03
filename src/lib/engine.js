@@ -519,8 +519,22 @@ export function replayVariantCost(variantId, { purchases, invoices, purchaseItem
   // Order = the DOCUMENT's date, then the document's own creation time, then the row.
   // Using the movement row's timestamp would reorder an edited purchase to "now", since an
   // edit re-inserts its rows; the document's creation time survives the edit.
+  //
+  // Movements with NO document (opening, manual adjustment, a sale) have no business
+  // date to anchor on. 'opening' is special-cased to always sort FIRST — it represents
+  // stock that existed before any tracked purchase, by definition, so it must never be
+  // replayed as if it happened after the baseline. Getting this wrong is exactly how a
+  // material's opening stock got counted twice and skewed its average: an opening
+  // movement inserted "today" fell, by wall-clock accident, between two purchases dated
+  // in the past and the future, and got replayed into the middle of the walk.
+  // Everything else undocumented (adjustment, sale) keeps the insertion-time fallback,
+  // since those genuinely are "as of when they were recorded" events.
   const doc = (m) => (m.refType === 'purchase' ? poById.get(m.refId) : m.refType === 'invoice' ? invById.get(m.refId) : null);
-  const pos = (m) => { const d = doc(m); return `${d?.date || (m.createdAt || '').slice(0, 10)}|${d?.createdAt || m.createdAt || ''}|${m.createdAt || ''}|${m.id || ''}`; };
+  const pos = (m) => {
+    if (m.type === 'opening') return `0000-00-00|0|0|${m.id || ''}`;
+    const d = doc(m);
+    return `${d?.date || (m.createdAt || '').slice(0, 10)}|${d?.createdAt || m.createdAt || ''}|${m.createdAt || ''}|${m.id || ''}`;
+  };
   const mine = (stockMovements || []).filter((m) => m.variantId === variantId);
   const withSnap = mine.filter((m) => m.refType === 'purchase' && m.costBefore).sort((a, b) => pos(a).localeCompare(pos(b)));
   if (!withSnap.length) return null;
