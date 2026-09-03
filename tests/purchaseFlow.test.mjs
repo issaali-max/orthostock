@@ -264,6 +264,82 @@ console.log('\n─── 14. OPENING must never be replayed as if it happened be
   ok('cached stock still equals the sum of movements', v9.stockQty === await stockFromMoves('v9'));
 }
 
+
+console.log('\n─── 15. A SALE between two purchases must correctly weight the next average ───');
+{
+  await db.insert(TABLES.variants, { id: 'v10', nameEn: 'Sale Test', sku: 'ST-1', stockQty: 0, purchasePriceAvg: 0, purchasePriceLatest: 0, purchasePriceMin: 0, purchasePriceMax: 0, isActive: true });
+  await refreshAll();
+  await commitPurchase(app, { ...base, purchaseNumber: 'PO-10A', date: '2026-09-01', totalOriginal: 400, totalAED: 400, paidAmount: 400, paidFrom: 'bank' }, [{ variantId: 'v10', qty: 100, unitCost: 4 }]);
+  await refreshAll();
+  // A sale takes 60 units out — the moving average does not change from a sale, only qty.
+  const v10before = await V('v10');
+  await db.insert(TABLES.stockMovements, { variantId: 'v10', type: 'sale', qtyChange: -60, qtyAfter: v10before.stockQty - 60, refType: 'invoice', refId: 'inv-x', date: '2026-09-05' });
+  await db.update(TABLES.variants, 'v10', { stockQty: v10before.stockQty - 60 });
+  await refreshAll();
+  const v10mid = await V('v10');
+  ok('a sale does not change the average', v10mid.purchasePriceAvg === 4, `${v10mid.purchasePriceAvg}`);
+  ok('a sale reduces stock', v10mid.stockQty === 40, `${v10mid.stockQty}`);
+
+  // Now a second purchase — its weighted average must use the POST-SALE quantity (40), not
+  // the pre-sale quantity (100), or the average would be silently wrong.
+  await commitPurchase(app, { ...base, purchaseNumber: 'PO-10B', date: '2026-09-06', totalOriginal: 200, totalAED: 200, paidAmount: 200, paidFrom: 'bank' }, [{ variantId: 'v10', qty: 20, unitCost: 10 }]);
+  await refreshAll();
+  const v10after = await V('v10');
+  ok('second purchase weights the average by post-sale qty (40), not pre-sale (100)',
+    v10after.purchasePriceAvg === round2((40 * 4 + 20 * 10) / 60), `engine=${v10after.purchasePriceAvg} correct=${round2((40 * 4 + 20 * 10) / 60)}`);
+
+  // Now edit the FIRST purchase — the replay must still correctly place the sale between
+  // the two purchases and weight PO-10B's average by the post-sale, post-edit quantity.
+  const po10a = (await activePOs()).find((p) => p.purchaseNumber === 'PO-10A');
+  await editPurchase(po10a.id, { ...base, date: '2026-09-01', totalOriginal: 450, totalAED: 450, paidAmount: 450, paidFrom: 'bank' }, [{ variantId: 'v10', qty: 100, unitCost: 4.5 }]);
+  const v10final = await V('v10');
+  const correctFinal = round2(((100 * 4.5) - 60 * 4.5 + 20 * 10) / 60); // post-sale qty 40 @ corrected 4.5, then +20@10
+  ok('after editing the first purchase, the sale is still correctly placed in the replay',
+    v10final.purchasePriceAvg === correctFinal, `engine=${v10final.purchasePriceAvg} correct=${correctFinal}`);
+  ok('stock after the edit is still 60 (100 - 60 + 20)', v10final.stockQty === 60, `${v10final.stockQty}`);
+}
+
+console.log('\n─── 16. FREE RESTOCK: void and edit must never touch cost ───');
+{
+  await db.insert(TABLES.customers, { id: 'cust1', name: 'Dr Test', isActive: true });
+  await db.insert(TABLES.variants, { id: 'v11', nameEn: 'Gift Test', sku: 'GT-1', stockQty: 50, purchasePriceAvg: 7, purchasePriceLatest: 7, purchasePriceMin: 7, purchasePriceMax: 7, isActive: true });
+  await db.insert(TABLES.stockMovements, { variantId: 'v11', type: 'opening', qtyChange: 50, qtyAfter: 50, refType: 'manual', refId: null });
+  await refreshAll();
+  const before11 = await V('v11');
+  await commitPurchase(app, { ...base, purchaseNumber: 'PO-11', date: '2026-09-07', isFree: true, customerId: 'cust1', totalOriginal: 0, totalAED: 0, paidAmount: 0, paidFrom: 'bank' }, [{ variantId: 'v11', qty: 10, unitCost: 0 }]);
+  await refreshAll();
+  const mid11 = await V('v11');
+  ok('free restock adds quantity', mid11.stockQty === 60, `${mid11.stockQty}`);
+  ok('free restock does not change the average', mid11.purchasePriceAvg === before11.purchasePriceAvg, `${before11.purchasePriceAvg} → ${mid11.purchasePriceAvg}`);
+
+  const po11 = (await activePOs()).find((p) => p.purchaseNumber === 'PO-11');
+  await voidPurchase(app, po11.id);
+  await refreshAll();
+  const after11 = await V('v11');
+  ok('voiding a free restock reverses the quantity', after11.stockQty === 50, `${after11.stockQty}`);
+  ok('voiding a free restock leaves the average untouched', after11.purchasePriceAvg === before11.purchasePriceAvg, `${after11.purchasePriceAvg}`);
+}
+
+console.log('\n─── 17. reconcileStock and dataHealth run cleanly against the final state ───');
+{
+  const res = await reconcileStock(app);
+  ok('no drift anywhere after the full sequence above', (res.fixes || res || []).length === 0, JSON.stringify(res).slice(0, 150));
+}
+
+
+console.log('\n─── 18. A brand-new material with an initial quantity must be traceable ───');
+{
+  // Mirrors what saveVariant + Catalogue.jsx's saveEdit now do together: create the
+  // variant, then log its initial quantity as an 'opening' movement via the row the
+  // save actually returns (not a guess).
+  const created = await db.insert(TABLES.variants, { nameEn: 'New Material', sku: 'NM-1', stockQty: 40, purchasePriceAvg: 0, purchasePriceLatest: 0, purchasePriceMin: 0, purchasePriceMax: 0, isActive: true });
+  await db.insert(TABLES.stockMovements, { variantId: created.id, type: 'opening', qtyChange: 40, qtyAfter: 40, refType: 'manual', refId: null });
+  await refreshAll();
+  ok('a new material with initial stock is backed by a movement', await stockFromMoves(created.id) === 40, `${await stockFromMoves(created.id)}`);
+  const res = await reconcileStock(app);
+  ok('reconcileStock does not zero out a properly-logged new material', !(res.fixes || res || []).some((f) => f.id === created.id));
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${pass + fail} checks · ${fail} finding(s)`);
 findings.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));

@@ -147,8 +147,21 @@ export default function Catalogue() {
     if (edit.table === TABLES.products && !edit.rec.nameEn?.trim()) return app.showToast(t('nameRequired'), 'error');
     if (edit.table === TABLES.categories && !edit.rec.nameAr?.trim() && !edit.rec.nameEn?.trim()) return app.showToast(t('nameRequired'), 'error');
     try {
-      if (await fn(app, edit.rec)) {
-        if (isVariant) { const after = num(edit.rec.stockQty); if (after !== before) await logStockMovement(app, edit.rec.id, before, after, 'adjustment'); }
+      const saved = await fn(app, edit.rec);
+      if (saved) {
+        if (isVariant) {
+          // Editing an EXISTING material's stock is logged as an adjustment. A NEW
+          // material with an initial quantity typed on creation was writing stockQty
+          // directly with no movement behind it — invisible to reconcileStock (which
+          // would zero it out, since it can only trust the sum of movements) and to
+          // any cost replay that walks a material's history.
+          const after = num(edit.rec.stockQty);
+          if (after !== before) await logStockMovement(app, edit.rec.id, before, after, 'adjustment');
+        } else if (edit.table === TABLES.variants && num(edit.rec.stockQty) > 0 && saved.id) {
+          // A brand-new material: the whole initial quantity is logged as 'opening' —
+          // never 'adjustment', since it did not adjust anything that existed yet.
+          await logStockMovement(app, saved.id, 0, num(edit.rec.stockQty), 'opening');
+        }
         app.showToast(t('saved'), 'success');
         setEdit(null);
       } else app.showToast(t('checkFields'), 'error');

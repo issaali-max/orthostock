@@ -151,8 +151,9 @@ export async function saveVariant(app, rec) {
     purchasePriceMin: num(rec.purchasePriceMin), purchasePriceMax: num(rec.purchasePriceMax),
     stockQty: num(rec.stockQty),
   };
-  if (rec.id) await app.updateRow(TABLES.variants, rec.id, payload);
-  else await app.createRow(TABLES.variants, payload);
+  let savedRow;
+  if (rec.id) savedRow = await app.updateRow(TABLES.variants, rec.id, payload);
+  else savedRow = await app.createRow(TABLES.variants, payload);
   // For a standalone material (not placed in a group), keep its hidden product shell's
   // name identical to the material's English name, so the card, search and flat view
   // always show exactly the name typed on the material — nothing else.
@@ -179,7 +180,7 @@ export async function saveVariant(app, rec) {
     const prevProd = (app.data[TABLES.products] || []).find((p) => p.id === prevProductId);
     if (left.length === 0 && prevProd?.isGroup !== true) await app.deleteRow(TABLES.products, prevProductId);
   }
-  return true;
+  return savedRow || true;
 }
 
 // Add a new attribute option to a category on the fly.
