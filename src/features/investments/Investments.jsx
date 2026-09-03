@@ -16,7 +16,7 @@ function MiniStat({ label, value, color }) {
   );
 }
 const blankSec = () => ({ symbol: '', name: '', market: '', currency: 'USD', currentPrice: '', qty: '', notes: '', isActive: true });
-const blankTrade = (securityId, mode) => ({ securityId, mode, date: todayISO(), qty: '', pricePerShare: '', fees: '' });
+const blankTrade = (securityId, mode) => ({ securityId, mode, date: todayISO(), qty: '', pricePerShare: '', fees: '', fundFrom: 'investment' });
 const blankDiv = (securityId) => ({ securityId, date: todayISO(), amount: '' });
 
 export default function Investments() {
@@ -161,7 +161,7 @@ export default function Investments() {
     if (!(num(r.qty) > 0) || !(num(r.pricePerShare) >= 0)) return;
     try {
       const args = { securityId: r.securityId, qty: num(r.qty), pricePerShare: num(r.pricePerShare), fees: num(r.fees) };
-      if (r.mode === 'buy') await commitBuy(app, { ...args, buyDate: r.date });
+      if (r.mode === 'buy') await commitBuy(app, { ...args, buyDate: r.date, fundFrom: r.fundFrom, rate: num(usdRate) || 3.6725 });
       else await commitSell(app, { ...args, sellDate: r.date });
       showToast(t('saved'), 'success'); setTrade(null);
     } catch (e) { console.error(e); showToast('Error', 'error'); }
@@ -246,6 +246,28 @@ export default function Investments() {
               <Field label={t('pricePerShare')} required><Input type="number" value={trade.pricePerShare} onChange={(v) => setTrade((r) => ({ ...r, pricePerShare: v }))} /></Field>
             </div>
             <Field label={t('fees')}><Input type="number" value={trade.fees} onChange={(v) => setTrade((r) => ({ ...r, fees: v }))} /></Field>
+            {trade.mode === 'buy' && (() => {
+              const cost = round2(num(trade.qty) * num(trade.pricePerShare) + num(trade.fees));
+              const short = cost > stats.cash + 0.005;
+              return (
+                <Field label={t('fundFrom')} hint={short && trade.fundFrom === 'investment' ? t('fundShortHint') : undefined}>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {[['investment', `📈 ${t('investmentCash')} (${cur(stats.cash)})`], ['bank', `🏦 ${t('bank')}`], ['drawer', `🗄️ ${t('drawer')}`]].map(([k, label]) => (
+                      <button key={k} onClick={() => setTrade((r) => ({ ...r, fundFrom: k }))} style={{
+                        flex: 1, border: `1.5px solid ${trade.fundFrom === k ? C.primary : C.border}`, borderRadius: 9, padding: '7px 6px',
+                        fontSize: 11, fontWeight: 700, cursor: 'pointer', background: trade.fundFrom === k ? C.primary : '#fff',
+                        color: trade.fundFrom === k ? '#fff' : C.textMid,
+                      }}>{label}</button>
+                    ))}
+                  </div>
+                  {trade.fundFrom !== 'investment' && cost > 0 && (
+                    <div style={{ fontSize: 11, color: C.textMuted, marginTop: 5 }}>
+                      {t('willTransfer')}: <b>{round2(cost * (num(usdRate) || 3.6725)).toFixed(2)} AED</b> → <b>{cost.toFixed(2)} USD</b>
+                    </div>
+                  )}
+                </Field>
+              );
+            })()}
           </div>
         )}
       </Modal>

@@ -9,7 +9,7 @@ import { customerStats, supplierDebt, customersWithLoans, outstandingLoans, reco
 // Net of a personal debt: +lend (they owe me) − collect (I owe / they repaid). > 0 they owe
 // me, < 0 I owe them. Recording "I owe X" with no prior loan = a single collect entry.
 const netOf = (p) => (p.txns || []).reduce((s, x) => s + (x.type === 'collect' ? -num(x.amount) : num(x.amount)), 0);
-const blankPerson = () => ({ personName: '', currency: 'AED', dir: 'owesMe', amount: '', note: '' });
+const blankPerson = () => ({ personName: '', currency: 'AED', dir: 'owesMe', amount: '', note: '', kind: 'person', supplierId: '' });
 
 export default function Debts() {
   const app = useApp();
@@ -47,7 +47,9 @@ export default function Debts() {
 
   // ── Supplier debts (I owe) ──
   const [supPay, setSupPay] = useState(null);   // { row, mode: 'pay'|'writeOff', amount, date, paidFrom, note }
+  const [convert, setConvert] = useState(null); // { person, supplierId } — move a personal debt onto a supplier
   const supDebts = supplierDebt(app).filter((r) => r.balance > 0.005).sort((a, b) => b.balance - a.balance);
+  const supplierOptions = (data[TABLES.suppliers] || []).filter((x) => x.isActive !== false).slice().sort((a, b) => (a.name || '').localeCompare(b.name || '')).map((x) => ({ value: x.id, label: x.name }));
 
   // ── Totals (in AED base) ──
   const docTotal = doctorDebts.reduce((s, x) => s + x.s.debt, 0);
@@ -60,7 +62,19 @@ export default function Debts() {
 
   // ── Actions ──
   const savePerson = async () => {
-    const r = addP; if (!r.personName.trim() || !(num(r.amount) > 0)) return;
+    const r = addP;
+    // A debt to a SUPPLIER is a payable, not a personal loan. It goes on the supplier
+    // record as an opening balance, so it lands in the supplier list, feeds supplierDebt,
+    // and is settled with the same payment / write-off actions as a purchase.
+    if (r.kind === 'supplier') {
+      if (!r.supplierId || !(num(r.amount) > 0)) return;
+      const sup = (data[TABLES.suppliers] || []).find((x) => x.id === r.supplierId);
+      const opening = round2(num(sup?.openingDebt) + num(r.amount));
+      await app.updateRow(TABLES.suppliers, r.supplierId, { openingDebt: opening, openingDebtNote: r.note || sup?.openingDebtNote || '' });
+      setAddP(null); showToast(t('saved'), 'success'); setSide('owe'); setOweTab('suppliers');
+      return;
+    }
+    if (!r.personName.trim() || !(num(r.amount) > 0)) return;
     // owesMe → lend (+net); iOwe → collect (−net)
     const type = r.dir === 'iOwe' ? 'collect' : 'lend';
     await createRow(TABLES.externalDebts, {
@@ -86,6 +100,22 @@ export default function Debts() {
       });
     }
     setSupPay(null); showToast(t('saved'), 'success');
+  };
+
+  // Moves a personal "I owe" record onto a supplier as an opening balance and retires the
+  // personal record. The amount is preserved exactly; only its classification changes.
+  const doConvert = async () => {
+    if (!convert?.supplierId) return;
+    const p = convert.person;
+    const owed = round2(-netOf(p));
+    if (!(owed > 0)) return;
+    const sup = (data[TABLES.suppliers] || []).find((x) => x.id === convert.supplierId);
+    await app.updateRow(TABLES.suppliers, convert.supplierId, {
+      openingDebt: round2(num(sup?.openingDebt) + owed),
+      openingDebtNote: [sup?.openingDebtNote, `moved from personal debt: ${p.personName}`].filter(Boolean).join(' · '),
+    });
+    await app.updateRow(TABLES.externalDebts, p.id, { isActive: false, movedToSupplierId: convert.supplierId });
+    setConvert(null); setPerson(null); setOweTab('suppliers'); showToast(t('saved'), 'success');
   };
 
   const addTxn = async () => {
@@ -212,6 +242,21 @@ export default function Debts() {
         footer={<><Btn variant="ghost" onClick={() => setAddP(null)}>{t('cancel')}</Btn><Btn onClick={savePerson}>{t('save')}</Btn></>}>
         {addP && (
           <div style={{ display: 'grid', gap: 10 }}>
+            {/* Who is this? A supplier debt is a payable on the supplier record; a person is a loan. */}
+            <Field label={t('debtKind')} required>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => setAddP((r) => ({ ...r, kind: 'person' }))} style={dirBtn(addP.kind !== 'supplier', C.primary)}>🤝 {t('personalDebt')}</button>
+                <button onClick={() => setAddP((r) => ({ ...r, kind: 'supplier', dir: 'iOwe' }))} style={dirBtn(addP.kind === 'supplier', C.danger)}>🚚 {t('supplierDebt')}</button>
+              </div>
+            </Field>
+            {addP.kind === 'supplier' ? (
+              <>
+                <Field label={t('supplier')} required><Select value={addP.supplierId} onChange={(v) => setAddP((r) => ({ ...r, supplierId: v }))} options={[{ value: '', label: '—' }, ...supplierOptions]} /></Field>
+                <Field label={t('amount')} required><Input type="number" value={addP.amount} onChange={(v) => setAddP((r) => ({ ...r, amount: v }))} /></Field>
+                <div style={{ fontSize: 11.5, color: C.textMuted, lineHeight: 1.6 }}>{t('supplierDebtHint')}</div>
+                <Field label={t('notes')}><Input value={addP.note} onChange={(v) => setAddP((r) => ({ ...r, note: v }))} /></Field>
+              </>
+            ) : (<>
             <Field label={t('person')} required><Input value={addP.personName} onChange={(v) => setAddP((r) => ({ ...r, personName: v }))} /></Field>
             <Field label={t('reason') || 'الاتجاه'} required>
               <div style={{ display: 'flex', gap: 8 }}>
@@ -231,14 +276,30 @@ export default function Debts() {
               </div>
             </Field>
             <Field label={t('notes')}><Input value={addP.note} onChange={(v) => setAddP((r) => ({ ...r, note: v }))} /></Field>
+            </>)}
           </div>
         )}
       </Modal>
+
+      {/* Move a personal "I owe" record onto a supplier */}
+      {convert && (
+        <Modal open title={`🚚 ${t('debtToSupplier')}`} onClose={() => setConvert(null)} width={400}
+          footer={<><Btn variant="ghost" onClick={() => setConvert(null)}>{t('cancel')}</Btn><Btn onClick={doConvert} disabled={!convert.supplierId}>{t('save')}</Btn></>}>
+          <div style={{ display: 'grid', gap: 10 }}>
+            <div style={{ fontSize: 12.5, color: C.text }}><b>{convert.person.personName}</b> · <span style={{ color: C.danger, fontWeight: 800 }}>{ccy(-netOf(convert.person), convert.person.currency)}</span></div>
+            <Field label={t('supplier')} required><Select value={convert.supplierId} onChange={(v) => setConvert((r) => ({ ...r, supplierId: v }))} options={[{ value: '', label: '—' }, ...supplierOptions]} /></Field>
+            <div style={{ fontSize: 11.5, color: C.textMuted, lineHeight: 1.6 }}>{t('moveToSupplierHint')}</div>
+          </div>
+        </Modal>
+      )}
 
       {/* Person detail */}
       <Modal open={!!person} onClose={() => setPerson(null)} title={person?.personName}
         footer={person && <>
           <Btn variant="ghost" onClick={() => deletePerson(person)} style={{ color: C.danger }}>🗑 {t('delete')}</Btn>
+          {person && netOf(person) < 0 && (
+            <Btn variant="ghost" onClick={() => setConvert({ person, supplierId: '' })} style={{ color: C.textMid }}>🚚 {t('debtToSupplier')}</Btn>
+          )}
           <div style={{ flex: 1 }} />
           <Btn variant="outline" onClick={() => setTxn({ person, kind: 'increase', amount: '', date: todayISO(), note: '' })}>➕ {t('increaseDebt')}</Btn>
           <Btn onClick={() => setTxn({ person, kind: 'payment', amount: '', date: todayISO(), note: '' })}>💵 {t('payment')}</Btn>

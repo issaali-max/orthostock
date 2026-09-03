@@ -172,22 +172,25 @@ export const ACCOUNT_CURRENCY = { bank: 'AED', drawer: 'AED', investment: 'USD' 
 // investment always ends in USD; bank/drawer receive the same currency as sent — unless
 // `convertToAED` is set for incoming USD (e.g. broker withdrawal landing as dirhams).
 // Conversion happens ONLY here, explicitly, at the given rate.
-export function transferLegs({ from, to, amount, currency, rate, convertToAED = false }) {
+export function transferLegs({ from, to, amount, currency, rate, convertToAED = false, toAmount }) {
   const a = num(amount); const r = num(rate) || 3.6725;
   const cFrom = currency || ACCOUNT_CURRENCY[from] || 'AED';
   const cTo = to === 'investment' ? 'USD' : (cFrom === 'USD' && convertToAED ? 'AED' : cFrom);
-  const target = cFrom === cTo ? round2(a) : (cFrom === 'USD' ? round2(a * r) : round2(a / r));
+  // `toAmount` pins the destination leg exactly (e.g. the USD cost of a buy) so the pot
+  // being funded receives precisely what it needs rather than a rate-rounded neighbour.
+  const target = toAmount != null ? round2(num(toAmount))
+    : (cFrom === cTo ? round2(a) : (cFrom === 'USD' ? round2(a * r) : round2(a / r)));
   return [
     { account: from, type: from === 'investment' ? 'withdraw' : 'transferOut', amount: round2(a), currency: cFrom, toAccount: to },
     { account: to, type: to === 'investment' ? 'deposit' : 'transferIn', amount: target, currency: cTo, fromAccount: from },
   ];
 }
 
-export async function transferBetweenAccounts(app, { from, to, amount, date, reason, rate }) {
+export async function transferBetweenAccounts(app, { from, to, amount, date, reason, rate, currency, toAmount }) {
   const a = num(amount); if (!(a > 0) || from === to) return null;
   const transferId = crypto.randomUUID();
   const base = { date: date || todayISO(), reason: reason || '', transferId };
-  for (const leg of transferLegs({ from, to, amount: a, rate })) {
+  for (const leg of transferLegs({ from, to, amount: a, rate, currency, toAmount })) {
     await db.insert(TABLES.cashFlows, { ...base, ...leg });
   }
   await app.refresh(TABLES.cashFlows);
@@ -550,7 +553,13 @@ export async function commitPurchase(app, purchaseData, lines) {
         stockQty: round2(newQty), purchasePriceLatest: unitCost,
         purchasePriceAvg: round2(newAvg), purchasePriceMin: round2(min), purchasePriceMax: round2(max),
       } });
-      specs.push({ op: 'insert', table: TABLES.stockMovements, row: { variantId: v.id, type: 'purchase', qtyChange: qty, qtyAfter: round2(newQty), refType: 'purchase', refId: poId } });
+      // The movement carries the cost figures as they were BEFORE this purchase. Voiding
+      // the purchase later restores them from here; reversing only the quantity left the
+      // moving average polluted by a purchase that no longer existed.
+      specs.push({ op: 'insert', table: TABLES.stockMovements, row: {
+        variantId: v.id, type: 'purchase', qtyChange: qty, qtyAfter: round2(newQty), refType: 'purchase', refId: poId,
+        costBefore: { avg: oldAvg, latest: num(v.purchasePriceLatest), min: num(v.purchasePriceMin), max: num(v.purchasePriceMax) },
+      } });
     }
   }
   const res = await db.atomicMutations(specs);
@@ -1267,11 +1276,27 @@ export function topCustomers(data, n = 10, { type, emirate, bounds, sortBy = 'pr
 //   • currentPrice entered manually drives unrealized P/L
 // Cash flows (deposit/withdraw/dividend/fee/interest) track capital.
 // ─────────────────────────────────────────────────────────────
-export async function commitBuy(app, { securityId, buyDate, qty, pricePerShare, fees }) {
+export async function commitBuy(app, { securityId, buyDate, qty, pricePerShare, fees, fundFrom, rate }) {
   const q = num(qty), price = num(pricePerShare), f = num(fees);
+  const cost = round2(q * price + f);
+  // Where the money comes from. The investment account is a separate pot: a buy spends
+  // its cash. If that cash was never deposited, the buy simply pushed the pot negative
+  // while the bank kept the money — which read as "I bought shares and my cash didn't
+  // move". Funding from bank or drawer records the transfer in the SAME operation, so
+  // the money leaves the account it really left.
+  if (fundFrom === 'bank' || fundFrom === 'drawer') {
+    const r = num(rate) || 3.6725;
+    await transferBetweenAccounts(app, {
+      from: fundFrom, to: 'investment',
+      amount: round2(cost * r), currency: 'AED',     // what leaves the AED account
+      toAmount: cost,                                 // exactly the USD the buy needs
+      date: buyDate, reason: `buy ${q} @ ${price}`, rate: r,
+    });
+  }
   await db.insert(TABLES.tradeLots, {
     securityId, buyDate, qtyBought: q, qtyRemaining: q,
-    buyPricePerShare: price, buyFees: f, costBasis: round2(q * price + f), currency: 'USD', notes: '', // investment account = USD
+    buyPricePerShare: price, buyFees: f, costBasis: cost, currency: 'USD', notes: '', // investment account = USD
+    fundedFrom: fundFrom || 'investment',
   });
   await app.refresh(TABLES.tradeLots);
 }
@@ -1627,7 +1652,10 @@ export async function voidPurchase(app, purchaseId) {
     db.getAll(TABLES.variants), db.getAll(TABLES.purchaseItems), db.getAll(TABLES.stockMovements),
   ]);
   const vById = new Map(variants.map((v) => [v.id, v]));
-  const items = allItems.filter((x) => x.purchaseId === purchaseId);
+  // Only LIVE rows. Editing a purchase voids it and recreates it, leaving the old rows
+  // soft-deleted under the same purchase id. Without this filter a second edit reversed
+  // the first purchase's stock again — the "materials doubled" report, in reverse.
+  const items = allItems.filter((x) => x.purchaseId === purchaseId && x.isActive !== false);
   const moves = allMoves.filter((x) => x.refType === 'purchase' && x.refId === purchaseId && x.isActive !== false);
   const stock = new Map();
   const ensure = (id) => { if (!stock.has(id)) stock.set(id, num(vById.get(id)?.stockQty)); return stock.get(id); };
@@ -1635,7 +1663,20 @@ export async function voidPurchase(app, purchaseId) {
   for (const it of items) if (vById.has(it.variantId)) stock.set(it.variantId, round2(ensure(it.variantId) - num(it.qty))); // remove what was added
   for (const m of moves) specs.push({ op: 'update', table: TABLES.stockMovements, id: m.id, patch: { isActive: false } });
   for (const it of items) specs.push({ op: 'update', table: TABLES.purchaseItems, id: it.id, patch: { isActive: false } });
-  for (const [vid, finalQty] of stock) specs.push({ op: 'update', table: TABLES.variants, id: vid, patch: { stockQty: round2(finalQty) } });
+  for (const [vid, finalQty] of stock) {
+    const patch = { stockQty: round2(finalQty) };
+    // Restore the cost figures the purchase changed. A purchase's movement carries the
+    // pre-purchase snapshot; reversing the quantity alone left the moving average
+    // polluted, and the recreate then averaged FROM the polluted figure.
+    const mv = moves.find((m) => m.variantId === vid && m.costBefore);
+    if (mv) {
+      patch.purchasePriceAvg = round2(num(mv.costBefore.avg));
+      patch.purchasePriceLatest = round2(num(mv.costBefore.latest));
+      patch.purchasePriceMin = round2(num(mv.costBefore.min));
+      patch.purchasePriceMax = round2(num(mv.costBefore.max));
+    }
+    specs.push({ op: 'update', table: TABLES.variants, id: vid, patch });
+  }
   specs.push({ op: 'update', table: TABLES.purchases, id: purchaseId, patch: { isActive: false, deletedAt: nextTimestamp() } });
   await db.atomicMutations(specs);
   await Promise.all([app.refresh(TABLES.purchases), app.refresh(TABLES.purchaseItems), app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements)]);

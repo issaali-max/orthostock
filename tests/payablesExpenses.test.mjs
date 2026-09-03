@@ -2,7 +2,7 @@
 // Two rules under test: paying a supplier must move money out of the chosen account and
 // reduce the payable; writing off must reduce the payable and touch NO account. And a
 // period must be closed at both ends so the dashboard and the expenses list agree.
-import { supplierDebt, accountLedger, pnl } from '../src/lib/engine.js';
+import { supplierDebt, accountLedger, pnl, portfolioStats, transferLegs } from '../src/lib/engine.js';
 import { TABLES } from '../src/lib/constants.js';
 
 let pass = 0, fail = 0;
@@ -104,6 +104,51 @@ console.log('\n─── Future-dated expenses and closed periods ───');
   ok('upcoming excludes what has already landed', !upcoming.some((e) => e.id === 'e1'));
   ok('a future expense is a normal record, editable and deletable',
     d[TABLES.expenses].every((e) => !!e.id && !!e.groupId));
+}
+
+
+console.log('\n─── Supplier OPENING balance: a debt not tied to any purchase ───');
+{
+  const d = base();
+  d[TABLES.suppliers] = [{ id: 's1', name: 'Firoz', isActive: true, openingDebt: 268.5 }];
+  d[TABLES.purchases] = [];
+  const row = supplierDebt(app(d))[0];
+  ok('an opening balance alone creates a payable', row && row.balance === 268.5, JSON.stringify(row));
+  ok('it is a supplier debt, not a personal one', row.supplier.id === 's1');
+  ok('recording it moves no cash', accountLedger(d).balances.drawer.AED === 0 && accountLedger(d).balances.bank.AED === 0);
+  d[TABLES.supplierPayments] = [{ id: 'sp1', supplierId: 's1', amount: 268.5, date: '2026-09-03', method: 'cash', paidFrom: 'drawer' }];
+  ok('paying it settles the payable', supplierDebt(app(d)).length === 0 || supplierDebt(app(d))[0].balance === 0);
+  ok('paying it leaves the drawer', accountLedger(d).balances.drawer.AED === -268.5);
+}
+
+console.log('\n─── Buying a stock: money must leave the account it really left ───');
+{
+  const r = 3.6725;
+  const cost = 500;                                       // USD
+  const legs = transferLegs({ from: 'bank', to: 'investment', amount: cost * r, currency: 'AED', rate: r, toAmount: cost });
+  ok('bank leg is in AED', legs[0].currency === 'AED' && legs[0].account === 'bank');
+  ok('investment leg is exactly the USD cost', legs[1].currency === 'USD' && legs[1].amount === 500, `${legs[1].amount}`);
+  ok('bank is charged the AED equivalent', legs[0].amount === 1836.25, `${legs[0].amount}`);
+
+  // Funded from the bank: both accounts move, and the investment pot ends where it started.
+  const d = {
+    [TABLES.securities]: [{ id: 'cbrs', symbol: 'CBRS', currency: 'USD', currentPrice: 50, isActive: true }],
+    [TABLES.tradeLots]: [{ id: 'l1', securityId: 'cbrs', qtyBought: 10, qtyRemaining: 10, buyPricePerShare: 50, buyFees: 0, costBasis: 500, currency: 'USD', fundedFrom: 'bank' }],
+    [TABLES.tradeSells]: [],
+    [TABLES.cashFlows]: legs.map((l, i) => ({ id: `f${i}`, date: '2026-09-02', transferId: 'x', ...l })),
+    [TABLES.projects]: [], [TABLES.invoices]: [], [TABLES.customers]: [], [TABLES.expenses]: [], [TABLES.expenseGroups]: [],
+    [TABLES.purchases]: [], [TABLES.supplierPayments]: [], [TABLES.externalDebts]: [],
+  };
+  const ps = portfolioStats(d);
+  ok('investment cash nets to zero after a self-funded buy', ps.cash === 0, `cash=${ps.cash}`);
+  ok('the shares are held', ps.holdingsValue === 500);
+  ok('the bank paid for it', accountLedger(d).balances.bank.AED === -1836.25, `bank=${accountLedger(d).balances.bank.AED}`);
+
+  // NOT funded: the old failure — the pot goes negative and the bank keeps the money.
+  const d2 = { ...d, [TABLES.cashFlows]: [] };
+  const ps2 = portfolioStats(d2);
+  ok('an unfunded buy pushes investment cash negative (the reported symptom)', ps2.cash === -500);
+  ok('and leaves the bank untouched (why cash "did not move")', accountLedger(d2).balances.bank.AED === 0);
 }
 
 console.log('\n═══════════════════════════════════════');

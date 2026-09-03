@@ -5,13 +5,19 @@ import { fmtCur, num } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, Select, Textarea } from '../../ui/components.jsx';
 
+const prevYM = (ym) => { const [y, m] = ym.split('-').map(Number); const d = new Date(y, m - 2, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+const nextYM = (ym) => { const [y, m] = ym.split('-').map(Number); const d = new Date(y, m, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+const monthLabel = (ym) => { const [y, m] = ym.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }); };
 const blankExpense = () => ({ date: todayISO(), amount: '', groupId: '', note: '', currency: 'AED', paidFrom: 'bank' });
 const blankGroup = () => ({ nameAr: '', nameEn: '', type: 'business', icon: '🧾', color: CATEGORY_COLORS[0], isActive: true });
 
 export default function Expenses() {
   const { t, lang, data, displayCurrency, usdRate, createRow, updateRow, deleteRow } = useApp();
   const [tab, setTab] = useState('list');           // list | groups
-  const [period, setPeriod] = useState('month');    // day | month | year — the single time control
+  const [period, setPeriod] = useState('month');    // day | month | year | upcoming | all | pick
+  // A specific past month to inspect and compare. 'pick' scopes everything below to it.
+  const nowYM = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; })();
+  const [pickYM, setPickYM] = useState(nowYM);
   const [filterGroup, setFilterGroup] = useState('');
   const [typeFilter, setTypeFilter] = useState('all'); // all | business | personal | home
   const [editExpense, setEditExpense] = useState(null);
@@ -39,6 +45,12 @@ export default function Expenses() {
     const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     if (p === 'all') return { from: '0000-01-01', to: '9999-12-31', pf: '0000-01-01', pt: '0000-01-01' };
     if (p === 'day') { const y = new Date(now); y.setDate(now.getDate() - 1); return { from: iso(now), to: iso(now), pf: iso(y), pt: iso(y) }; }
+    // A chosen month: its full span, compared against the month before it.
+    if (p === 'pick') {
+      const [y, m] = pickYM.split('-').map(Number);
+      const ms = new Date(y, m - 1, 1), me = new Date(y, m, 0), pms = new Date(y, m - 2, 1), pme = new Date(y, m - 1, 0);
+      return { from: iso(ms), to: iso(me), pf: iso(pms), pt: iso(pme) };
+    }
     // Everything dated after today, so a planned expense is never invisible.
     if (p === 'upcoming') { const t2 = new Date(now); t2.setDate(now.getDate() + 1); return { from: iso(t2), to: '9999-12-31', pf: '0000-01-01', pt: '0000-01-01' }; }
     // Periods run to the END of the month/year, not to today. Stopping at today hid an
@@ -90,7 +102,7 @@ export default function Expenses() {
     const compMax = Math.max(1, ...comp.map((c) => c.value));
     const list = scoped.slice().sort((a, b2) => (b2.date || '').localeCompare(a.date || ''));
     return { total, prevTotal, changePct, byType, comp, compMax, list };
-  }, [data, groups, usdRate, period, typeFilter, filterGroup]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [data, groups, usdRate, period, pickYM, typeFilter, filterGroup]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveExpense = async () => {
     const r = editExpense;
@@ -141,7 +153,7 @@ export default function Expenses() {
         <>
           {/* Single time control */}
           <div style={{ display: 'flex', gap: 6, marginBottom: 12, background: C.surfaceAlt, padding: 4, borderRadius: 12 }}>
-            {[['day', `📅 ${t('daily')}`], ['month', `🗓️ ${t('thisMonth')}`], ['year', `📆 ${t('thisYear')}`], ['upcoming', `⏭️ ${t('upcoming')}`], ['all', `∞ ${t('all')}`]].map(([k, label]) => (
+            {[['day', `📅 ${t('daily')}`], ['month', `🗓️ ${t('thisMonth')}`], ['pick', `🔎 ${t('pickMonth')}`], ['year', `📆 ${t('thisYear')}`], ['upcoming', `⏭️ ${t('upcoming')}`], ['all', `∞ ${t('all')}`]].map(([k, label]) => (
               <button key={k} type="button" onClick={() => setPeriod(k)}
                 style={{ flex: 1, padding: '9px 6px', borderRadius: 9, border: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: 800,
                   background: period === k ? '#fff' : 'transparent', color: period === k ? C.primary : C.textMid,
@@ -149,11 +161,21 @@ export default function Expenses() {
             ))}
           </div>
 
+          {/* Month stepper — only when inspecting a specific month */}
+          {period === 'pick' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+              <button onClick={() => setPickYM(prevYM(pickYM))} style={{ border: `1px solid ${C.border}`, background: '#fff', borderRadius: 9, padding: '6px 12px', fontWeight: 800, cursor: 'pointer' }}>‹</button>
+              <input type="month" value={pickYM} onChange={(e) => e.target.value && setPickYM(e.target.value)}
+                style={{ flex: 1, padding: '7px 10px', fontSize: 16, border: `1px solid ${C.border}`, borderRadius: 9, background: '#fff', color: C.text, textAlign: 'center', fontWeight: 800 }} />
+              <button onClick={() => setPickYM(nextYM(pickYM))} disabled={pickYM >= nowYM} style={{ border: `1px solid ${C.border}`, background: '#fff', borderRadius: 9, padding: '6px 12px', fontWeight: 800, cursor: pickYM >= nowYM ? 'default' : 'pointer', opacity: pickYM >= nowYM ? 0.4 : 1 }}>›</button>
+            </div>
+          )}
+
           {/* Hero summary: total for the period + trend vs previous + type split */}
           {(() => {
             const a = analysis;
-            const pLabel = period === 'day' ? t('daily') : period === 'year' ? t('thisYear') : period === 'all' ? t('all') : period === 'upcoming' ? t('upcoming') : t('thisMonth');
-            const prevLabel = period === 'day' ? t('yesterday') : period === 'year' ? t('lastYear') : t('lastMonth');
+            const pLabel = period === 'day' ? t('daily') : period === 'year' ? t('thisYear') : period === 'all' ? t('all') : period === 'upcoming' ? t('upcoming') : period === 'pick' ? monthLabel(pickYM) : t('thisMonth');
+            const prevLabel = period === 'day' ? t('yesterday') : period === 'year' ? t('lastYear') : period === 'pick' ? monthLabel(prevYM(pickYM)) : t('lastMonth');
             const up = a.changePct != null && a.changePct > 0;
             const types = [['business', C.primary, `🏢 ${t('business')}`], ['personal', C.warning, `👤 ${t('personal')}`], ['home', C.success, `🏠 ${t('home')}`]];
             return (
@@ -206,14 +228,20 @@ export default function Expenses() {
           {/* Composition chart: where the money goes for this period + scope */}
           {analysis.comp.length > 0 && (
             <Card style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 13, fontWeight: 800, color: C.text, marginBottom: 10 }}>
-                📊 {t('whereMoneyGoes')} · <span style={{ color: C.primary }}>{filterGroup ? groupName(groupById(filterGroup)) : (typeFilter === 'all' ? t('allExpenses') : t(typeFilter))}</span>
+              <div style={{ fontSize: 13, fontWeight: 800, color: C.text, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ flex: 1, minWidth: 0 }}>📊 {t('whereMoneyGoes')} · <span style={{ color: C.primary }}>{filterGroup ? groupName(groupById(filterGroup)) : (typeFilter === 'all' ? t('allExpenses') : t(typeFilter))}</span></span>
+                {filterGroup && (
+                  <button onClick={() => setFilterGroup('')} style={{ border: `1px solid ${C.border}`, background: '#fff', borderRadius: 8, padding: '3px 10px', fontSize: 11, fontWeight: 700, color: C.primary, cursor: 'pointer' }}>‹ {t('allGroups')}</button>
+                )}
               </div>
               <div style={{ display: 'grid', gap: 9 }}>
                 {analysis.comp.map((c) => (
-                  <div key={c.key}>
+                  // Tap a group to drill into its individual expenses for this period. When a
+                  // group is already selected the rows are single expenses, so no deeper drill.
+                  <div key={c.key} onClick={() => { if (!filterGroup && c.key !== 'none') setFilterGroup(c.key); }}
+                    style={{ cursor: !filterGroup && c.key !== 'none' ? 'pointer' : 'default' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '60%' }}>{c.label}</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '60%' }}>{c.label}{!filterGroup && c.key !== 'none' && <span style={{ color: C.textMuted, fontWeight: 600 }}> ›</span>}</span>
                       <span style={{ fontSize: 12, fontWeight: 800, color: C.text }}>{fmtCur(c.value, displayCurrency, usdRate)} <span style={{ color: C.textMuted, fontWeight: 600, fontSize: 10.5 }}>· {Math.round((c.value / analysis.total) * 100) || 0}%</span></span>
                     </div>
                     <div style={{ height: 12, background: C.surfaceAlt, borderRadius: 6, overflow: 'hidden' }}>
