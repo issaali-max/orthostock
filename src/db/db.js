@@ -30,10 +30,18 @@ const TIMESTAMPED = new Set([TABLES.purchases, TABLES.invoices, TABLES.stockMove
 
 function dupError(key, val) { const e = new Error(`Duplicate ${key}: ${val}`); e.code = 'DUPLICATE'; return e; }
 
-async function assertUnique(table, rec, ignoreId) {
+async function assertUnique(table, rec, ignoreId, staged = null) {
   const key = UNIQUE[table];
   if (!key || rec[key] === undefined || rec[key] === null || rec[key] === '') return;
-  const all = await L.idbGetAll(table);
+  let all = await L.idbGetAll(table);
+  // Within an atomic batch, rows already staged in THIS batch must be seen as they will
+  // be after commit — otherwise deactivating a purchase and re-inserting one with the
+  // same number in one transaction trips on the old row the store still shows as live.
+  if (staged && staged.size) {
+    const byId = new Map(all.map((r) => [r.id, r]));
+    for (const [id, r] of staged) byId.set(id, r);
+    all = [...byId.values()];
+  }
   // Ignore soft-deleted rows: a deleted invoice/customer/material must not block
   // reusing its number/phone/sku. (Document numbers are also generated from the
   // full set including deleted rows, so a restored record never silently clashes.)
@@ -107,21 +115,27 @@ export async function remove(table, id) {
 export async function atomicMutations(specs) {
   await ensureSeed();
   const ops = []; const outbox = []; const result = [];
+  // Rows staged so far in this batch, per table, so later specs see earlier ones.
+  const staged = new Map();
+  const stage = (table, rec) => { if (!staged.has(table)) staged.set(table, new Map()); staged.get(table).set(rec.id, rec); };
+  const current = async (table, id) => (staged.get(table)?.get(id)) ?? await L.idbGet(table, id);
   for (const s of specs) {
     if (s.op === 'insert') {
       const rec = { id: s.row.id || newId(), ...s.row };
       if (TIMESTAMPED.has(s.table)) rec.createdAt = rec.createdAt || nowISO();
       rec.updatedAt = nextTimestamp();
-      await assertUnique(s.table, rec, rec.id);
-      ops.push({ store: s.table, type: 'put', value: rec });
+      await assertUnique(s.table, rec, rec.id, staged.get(s.table));
+      ops.push({ store: s.table, type: 'put', value: rec }); stage(s.table, rec);
       outbox.push({ type: 'insert', table: s.table, id: rec.id, row: rec });
       result.push(rec);
     } else if (s.op === 'update') {
-      const cur = await L.idbGet(s.table, s.id);
+      // Read through the batch: two updates to the same row in one batch must compose,
+      // not each start from the stored original.
+      const cur = await current(s.table, s.id);
       if (!cur) { const e = new Error('NOT_FOUND'); e.code = 'NOT_FOUND'; throw e; }
       const rec = { ...cur, ...s.patch, id: s.id, updatedAt: nextTimestamp() };
-      await assertUnique(s.table, rec, s.id);
-      ops.push({ store: s.table, type: 'put', value: rec });
+      await assertUnique(s.table, rec, s.id, staged.get(s.table));
+      ops.push({ store: s.table, type: 'put', value: rec }); stage(s.table, rec);
       outbox.push({ type: 'update', table: s.table, id: s.id, row: rec });
       result.push(rec);
     } else if (s.op === 'remove') {

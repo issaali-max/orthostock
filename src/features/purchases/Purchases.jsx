@@ -6,7 +6,7 @@ import { isGridWorthy } from '../../lib/bandGrid.js';
 import { C, TABLES } from '../../lib/constants.js';
 import { fmtCur, fmtNum, num, round2 } from '../../lib/money.js';
 import { fmtDate, todayISO } from '../../lib/dates.js';
-import { commitPurchase, voidPurchase, nextNumber } from '../../lib/engine.js';
+import { commitPurchase, voidPurchase, editPurchaseAtomic, nextNumber } from '../../lib/engine.js';
 import { sortVariants, sortByName } from '../../lib/materialSort.js';
 import { Btn, Card, EmptyState, Field, Input, Modal, PageHeader, SearchBar, Select, ProductChips } from '../../ui/components.jsx';
 
@@ -104,16 +104,8 @@ export default function Purchases() {
     if (isFree && !freeInvoiceId) { showToast(t('pickInvoiceFirst'), 'error'); return; }
     setBusy(true);
     try {
-      let number;
-      if (editingId) {
-        const old = (data[TABLES.purchases] || []).find((x) => x.id === editingId);
-        number = old?.purchaseNumber || await nextNumber(TABLES.purchases, 'PO', 'purchaseNumber');
-        await voidPurchase(app, editingId); // reverse old stock, then re-apply the edited values
-      } else {
-        number = await nextNumber(TABLES.purchases, 'PO', 'purchaseNumber');
-      }
-      await commitPurchase(app, {
-        purchaseNumber: number, supplierId: supplierId || null, date, currency: 'AED', exchangeRate: 1,
+      const purchaseData = {
+        supplierId: supplierId || null, date, currency: 'AED', exchangeRate: 1,
         totalOriginal: isFree ? 0 : total, totalAED: isFree ? 0 : total,
         paidAmount: isFree ? 0 : (paid === '' ? total : num(paid)),
         paidFrom,
@@ -121,7 +113,18 @@ export default function Purchases() {
         invoiceId: isFree ? (freeInvoiceId || null) : null,
         customerId: isFree ? ((data[TABLES.invoices] || []).find((i) => i.id === freeInvoiceId)?.customerId || null) : null,
         invoiceRef: '', notes: '',
-      }, valid.map((l) => ({ variantId: l.variantId, qty: num(l.qty), unitCost: isFree ? 0 : num(l.unitCost) })));
+      };
+      // One transaction either way. An edit voids the old rows and writes the new ones
+      // together, so a failure cannot leave the purchase voided and gone.
+      const lineRows = valid.map((l) => ({ variantId: l.variantId, qty: num(l.qty), unitCost: isFree ? 0 : num(l.unitCost) }));
+      let number;
+      if (editingId) {
+        number = (data[TABLES.purchases] || []).find((x) => x.id === editingId)?.purchaseNumber;
+        await editPurchaseAtomic(app, editingId, purchaseData, lineRows);
+      } else {
+        number = await nextNumber(TABLES.purchases, 'PO', 'purchaseNumber');
+        await commitPurchase(app, { purchaseNumber: number, ...purchaseData }, lineRows);
+      }
       showToast(`${number} ✓`, 'success');
       setOpen(false); setEditingId(null);
     } finally { setBusy(false); }

@@ -11,7 +11,7 @@ import { num, round2, safeDiv, prettyName } from './money.js';
 import { newId, nextDocNumber } from './ids.js';
 import { uploadDataUrl } from './storage.js';
 import { nudgeSync } from '../db/sync.js';
-import { todayISO } from './dates.js';
+import { todayISO, nowISO } from './dates.js';
 
 // Record a payment against an invoice: appends to its payment history,
 // updates paidAmount (capped at total) and recomputes paymentStatus.
@@ -500,19 +500,78 @@ export async function migrateImagesToStorage(app, onProgress) {
   return { done, total, failed };
 }
 
-export async function commitPurchase(app, purchaseData, lines) {
-  const variants = app.data[TABLES.variants] || [];
-  const vById = (id) => variants.find((x) => x.id === id);
-  // A "free restock" (استرجاع مجاني) is stock that comes back to me at NO cost (e.g.
-  // pieces a doctor was billed for but didn't take). It must NOT drag the moving-average
-  // cost down, so we add the quantity but keep purchasePriceAvg untouched, and record the
-  // value at the CURRENT average cost for the historical report. customerId links it to
-  // the doctor it relates to.
+// ── Cost figures replayed from history ───────────────────────────────────────
+// A material's moving average is path-dependent: it depends on every purchase and
+// every sale in the order they happened. Restoring a snapshot when a purchase is voided
+// (the previous approach) is only right if that purchase was the LAST one — editing an
+// earlier purchase wiped every later purchase out of the average. The only correct way
+// is the one reconcileStock already uses for quantity: replay the live history.
+//
+// Baseline: the state recorded on the earliest purchase movement (live or voided) for
+// this material — captured as costBefore the first time a purchase ever touched it.
+// From there, every LIVE movement is replayed in document order: purchases fold their
+// unit cost into the average, everything else moves quantity only.
+// Returns null when no baseline exists (a material whose purchases all predate the
+// snapshot), in which case the caller leaves the cost figures as they are.
+export function replayVariantCost(variantId, { purchases, invoices, purchaseItems, stockMovements }) {
+  const poById = new Map((purchases || []).map((p) => [p.id, p]));
+  const invById = new Map((invoices || []).map((i) => [i.id, i]));
+  // Order = the DOCUMENT's date, then the document's own creation time, then the row.
+  // Using the movement row's timestamp would reorder an edited purchase to "now", since an
+  // edit re-inserts its rows; the document's creation time survives the edit.
+  const doc = (m) => (m.refType === 'purchase' ? poById.get(m.refId) : m.refType === 'invoice' ? invById.get(m.refId) : null);
+  const pos = (m) => { const d = doc(m); return `${d?.date || (m.createdAt || '').slice(0, 10)}|${d?.createdAt || m.createdAt || ''}|${m.createdAt || ''}|${m.id || ''}`; };
+  const mine = (stockMovements || []).filter((m) => m.variantId === variantId);
+  const withSnap = mine.filter((m) => m.refType === 'purchase' && m.costBefore).sort((a, b) => pos(a).localeCompare(pos(b)));
+  if (!withSnap.length) return null;
+  const first = withSnap[0];
+  const start = pos(first);
+  const base = first.costBefore;
+  let qty = num(base.qty), avg = num(base.avg), latest = num(base.latest), min = num(base.min), max = num(base.max);
+  const live = mine.filter((m) => m.isActive !== false && pos(m) >= start).sort((a, b) => pos(a).localeCompare(pos(b)));
+  const items = (purchaseItems || []).filter((it) => it.variantId === variantId && it.isActive !== false);
+  for (const m of live) {
+    if (m.refType === 'purchase' && m.type === 'purchase') {
+      const po = poById.get(m.refId);
+      if (!po || po.isActive === false) continue;
+      // Unit cost travels on the movement; older rows fall back to the matching item.
+      const unitCost = m.unitCost != null ? num(m.unitCost)
+        : num(items.find((it) => it.purchaseId === m.refId && it.qty === m.qtyChange)?.unitCost ?? items.find((it) => it.purchaseId === m.refId)?.unitCost);
+      const q = num(m.qtyChange);
+      if (q > 0) {
+        avg = qty > 0 ? safeDiv(qty * avg + q * unitCost, qty + q, unitCost) : unitCost;
+        latest = unitCost;
+        min = min > 0 ? Math.min(min, unitCost) : unitCost;
+        max = Math.max(max, unitCost);
+      }
+      qty = round2(qty + q);
+    } else {
+      qty = round2(qty + num(m.qtyChange));     // sales, adjustments, free restock: quantity only
+    }
+  }
+  return { purchasePriceAvg: round2(avg), purchasePriceLatest: round2(latest), purchasePriceMin: round2(min), purchasePriceMax: round2(max) };
+}
+
+// Reads the tables a purchase write depends on, fresh from the database.
+async function readPurchaseCtx() {
+  const [variants, purchases, invoices, purchaseItems, stockMovements] = await Promise.all([
+    db.getAll(TABLES.variants), db.getAll(TABLES.purchases), db.getAll(TABLES.invoices),
+    db.getAll(TABLES.purchaseItems), db.getAll(TABLES.stockMovements),
+  ]);
+  return { variants, purchases, invoices, purchaseItems, stockMovements };
+}
+
+// Builds every write for a new purchase against `fresh`, without touching the database.
+// Validates first: every line must name a live material with a positive quantity, so a
+// bad line is rejected up front instead of leaving an item with no stock behind it.
+function buildPurchaseSpecs(app, purchaseData, lines, fresh) {
+  const { variants, purchases: allPOs, invoices: allInvoices, purchaseItems: allItems, stockMovements: allMoves } = fresh;
+  const vById = (id) => variants.find((x) => x.id === id && x.isActive !== false);
+  for (const l of lines) {
+    if (!vById(l.variantId)) throw new Error(`purchase line names an unknown material: ${l.variantId}`);
+    if (!(num(l.qty) > 0)) throw new Error('purchase line has no quantity');
+  }
   const isFree = !!purchaseData.isFree;
-  // For a free restock, the value of each returned piece is taken from the cost the
-  // LINKED INVOICE actually used at sale time (avgCostAtSale) — so the gift value exactly
-  // cancels the COGS that was charged for the undelivered pieces. Falls back to the
-  // material's current average if the invoice line can't be found.
   const invItems = app.data[TABLES.invoiceItems] || [];
   const saleCost = (variantId) => {
     if (isFree && purchaseData.invoiceId) {
@@ -521,47 +580,59 @@ export async function commitPurchase(app, purchaseData, lines) {
     }
     return 0;
   };
-  // Build every write first, then commit in ONE atomic transaction so a purchase,
-  // its items, the stock movements and the per-variant cost/stock updates are
-  // all-or-nothing — never half written if something fails mid-way.
   const poId = newId();
-  const specs = [{ op: 'insert', table: TABLES.purchases, row: { ...purchaseData, id: poId } }];
+  const stamp = nowISO();
+  const poRow = { ...purchaseData, id: poId, createdAt: purchaseData.createdAt || stamp };
+  const specs = [{ op: 'insert', table: TABLES.purchases, row: poRow }];
+  // Running state per material WITHIN this purchase, so two lines of the same material
+  // build on each other instead of both starting from the stored state and the second
+  // overwriting the first.
+  const state = new Map();
+  const cur = (v) => { if (!state.has(v.id)) state.set(v.id, { stockQty: num(v.stockQty), avg: num(v.purchasePriceAvg), latest: num(v.purchasePriceLatest), min: num(v.purchasePriceMin), max: num(v.purchasePriceMax) }); return state.get(v.id); };
+  const newItems = [], newMoves = [];
   for (const l of lines) {
     const v = vById(l.variantId);
     const qty = num(l.qty);
     if (isFree) {
-      const unitCost = saleCost(l.variantId) || (v ? num(v.purchasePriceAvg) : 0); // sale-time cost, else current avg
+      const unitCost = saleCost(l.variantId) || cur(v).avg;
       const valueAtCost = round2(qty * unitCost);
-      specs.push({ op: 'insert', table: TABLES.purchaseItems, row: { purchaseId: poId, variantId: l.variantId, qty, unitCost: 0, total: 0, free: true, unitCostAtRestock: round2(unitCost), valueAtCost } });
-      if (v) {
-        const newQty = round2(num(v.stockQty) + qty);
-        specs.push({ op: 'update', table: TABLES.variants, id: v.id, patch: { stockQty: newQty } }); // qty only — avg untouched
-        specs.push({ op: 'insert', table: TABLES.stockMovements, row: { variantId: v.id, type: 'freeRestock', qtyChange: qty, qtyAfter: newQty, refType: 'purchase', refId: poId } });
-      }
+      const item = { purchaseId: poId, variantId: l.variantId, qty, unitCost: 0, total: 0, free: true, unitCostAtRestock: round2(unitCost), valueAtCost };
+      specs.push({ op: 'insert', table: TABLES.purchaseItems, row: item }); newItems.push(item);
+      const st = cur(v); st.stockQty = round2(st.stockQty + qty);   // qty only — avg untouched
+      const mv = { variantId: v.id, type: 'freeRestock', qtyChange: qty, qtyAfter: st.stockQty, refType: 'purchase', refId: poId, createdAt: stamp };
+      specs.push({ op: 'insert', table: TABLES.stockMovements, row: mv }); newMoves.push(mv);
       continue;
     }
     const unitCost = num(l.unitCost);
-    specs.push({ op: 'insert', table: TABLES.purchaseItems, row: { purchaseId: poId, variantId: l.variantId, qty, unitCost, total: round2(qty * unitCost) } });
-    if (v) {
-      const oldQty = num(v.stockQty); const newQty = oldQty + qty;
-      const oldAvg = num(v.purchasePriceAvg);
-      const newAvg = oldQty > 0 ? safeDiv(oldQty * oldAvg + qty * unitCost, newQty, unitCost) : unitCost;
-      const existing = [v.purchasePriceMin, v.purchasePriceMax].map(num).filter((x) => x > 0);
-      const min = existing.length ? Math.min(...existing, unitCost) : unitCost;
-      const max = Math.max(num(v.purchasePriceMax), unitCost);
-      specs.push({ op: 'update', table: TABLES.variants, id: v.id, patch: {
-        stockQty: round2(newQty), purchasePriceLatest: unitCost,
-        purchasePriceAvg: round2(newAvg), purchasePriceMin: round2(min), purchasePriceMax: round2(max),
-      } });
-      // The movement carries the cost figures as they were BEFORE this purchase. Voiding
-      // the purchase later restores them from here; reversing only the quantity left the
-      // moving average polluted by a purchase that no longer existed.
-      specs.push({ op: 'insert', table: TABLES.stockMovements, row: {
-        variantId: v.id, type: 'purchase', qtyChange: qty, qtyAfter: round2(newQty), refType: 'purchase', refId: poId,
-        costBefore: { avg: oldAvg, latest: num(v.purchasePriceLatest), min: num(v.purchasePriceMin), max: num(v.purchasePriceMax) },
-      } });
-    }
+    const item = { purchaseId: poId, variantId: l.variantId, qty, unitCost, total: round2(qty * unitCost) };
+    specs.push({ op: 'insert', table: TABLES.purchaseItems, row: item }); newItems.push(item);
+    const st = cur(v);
+    const costBefore = { qty: st.stockQty, avg: st.avg, latest: st.latest, min: st.min, max: st.max };
+    const oldQty = st.stockQty; const newQty = round2(oldQty + qty);
+    st.avg = oldQty > 0 ? round2(safeDiv(oldQty * st.avg + qty * unitCost, newQty, unitCost)) : unitCost;
+    st.latest = unitCost;
+    st.min = st.min > 0 ? Math.min(st.min, unitCost) : unitCost;
+    st.max = Math.max(st.max, unitCost);
+    st.stockQty = newQty;
+    const mv = { variantId: v.id, type: 'purchase', qtyChange: qty, qtyAfter: newQty, refType: 'purchase', refId: poId, unitCost, costBefore, createdAt: stamp };
+    specs.push({ op: 'insert', table: TABLES.stockMovements, row: mv }); newMoves.push(mv);
   }
+  const ctx = { purchases: [...allPOs, poRow], invoices: allInvoices, purchaseItems: [...allItems, ...newItems], stockMovements: [...allMoves, ...newMoves] };
+  for (const [vid, st] of state) {
+    const patch = { stockQty: round2(st.stockQty) };
+    if (!isFree) {
+      Object.assign(patch, { purchasePriceLatest: round2(st.latest), purchasePriceAvg: round2(st.avg), purchasePriceMin: round2(st.min), purchasePriceMax: round2(st.max) });
+      const replayed = replayVariantCost(vid, ctx);
+      if (replayed) Object.assign(patch, replayed);
+    }
+    specs.push({ op: 'update', table: TABLES.variants, id: vid, patch });
+  }
+  return { specs, poId, isFree };
+}
+
+export async function commitPurchase(app, purchaseData, lines) {
+  const fresh = await readPurchaseCtx();
+  const { specs, poId, isFree } = buildPurchaseSpecs(app, purchaseData, lines, fresh);
   const res = await db.atomicMutations(specs);
   await Promise.all([app.refresh(TABLES.purchases), app.refresh(TABLES.purchaseItems), app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements)]);
   nudgeSync();
@@ -1647,42 +1718,72 @@ export async function applyStockTake(app, counts) {
 // inactive (ledger stays consistent with reconcile), and flag the purchase + its
 // items isActive=false. Hidden everywhere via loadAll's filter; recoverable in the
 // DB. Cost averages are left as-is (approximate; the next purchase refreshes them).
-export async function voidPurchase(app, purchaseId) {
-  const [variants, allItems, allMoves] = await Promise.all([
-    db.getAll(TABLES.variants), db.getAll(TABLES.purchaseItems), db.getAll(TABLES.stockMovements),
-  ]);
+// Builds every write that reverses a purchase, against `fresh`, without touching the
+// database. Also returns the context AS IT WILL BE after the void, so a recreate can be
+// built on top of it inside the same transaction.
+function buildVoidSpecs(purchaseId, fresh) {
+  const { variants, purchases: allPOs, invoices: allInvoices, purchaseItems: allItems, stockMovements: allMoves } = fresh;
   const vById = new Map(variants.map((v) => [v.id, v]));
-  // Only LIVE rows. Editing a purchase voids it and recreates it, leaving the old rows
-  // soft-deleted under the same purchase id. Without this filter a second edit reversed
-  // the first purchase's stock again — the "materials doubled" report, in reverse.
+  // Only LIVE rows. Editing voids and recreates, leaving the old rows soft-deleted under
+  // the same purchase id; without this filter a second edit reversed the first purchase
+  // twice — the "materials doubled" report, in reverse.
   const items = allItems.filter((x) => x.purchaseId === purchaseId && x.isActive !== false);
   const moves = allMoves.filter((x) => x.refType === 'purchase' && x.refId === purchaseId && x.isActive !== false);
   const stock = new Map();
   const ensure = (id) => { if (!stock.has(id)) stock.set(id, num(vById.get(id)?.stockQty)); return stock.get(id); };
   const specs = [];
-  for (const it of items) if (vById.has(it.variantId)) stock.set(it.variantId, round2(ensure(it.variantId) - num(it.qty))); // remove what was added
+  for (const it of items) if (vById.has(it.variantId)) stock.set(it.variantId, round2(ensure(it.variantId) - num(it.qty)));
   for (const m of moves) specs.push({ op: 'update', table: TABLES.stockMovements, id: m.id, patch: { isActive: false } });
   for (const it of items) specs.push({ op: 'update', table: TABLES.purchaseItems, id: it.id, patch: { isActive: false } });
+  const voidedMoveIds = new Set(moves.map((m) => m.id));
+  const voidedItemIds = new Set(items.map((it) => it.id));
+  const after = {
+    variants: variants.map((v) => ({ ...v })),
+    purchases: allPOs.map((p) => (p.id === purchaseId ? { ...p, isActive: false } : p)),
+    invoices: allInvoices,
+    purchaseItems: allItems.map((it) => (voidedItemIds.has(it.id) ? { ...it, isActive: false } : it)),
+    stockMovements: allMoves.map((m) => (voidedMoveIds.has(m.id) ? { ...m, isActive: false } : m)),
+  };
+  // Cost figures are REPLAYED from the remaining history, not restored from a snapshot —
+  // a snapshot is only right when the voided purchase was the last one.
   for (const [vid, finalQty] of stock) {
     const patch = { stockQty: round2(finalQty) };
-    // Restore the cost figures the purchase changed. A purchase's movement carries the
-    // pre-purchase snapshot; reversing the quantity alone left the moving average
-    // polluted, and the recreate then averaged FROM the polluted figure.
-    const mv = moves.find((m) => m.variantId === vid && m.costBefore);
-    if (mv) {
-      patch.purchasePriceAvg = round2(num(mv.costBefore.avg));
-      patch.purchasePriceLatest = round2(num(mv.costBefore.latest));
-      patch.purchasePriceMin = round2(num(mv.costBefore.min));
-      patch.purchasePriceMax = round2(num(mv.costBefore.max));
-    }
+    const replayed = replayVariantCost(vid, after);
+    if (replayed) Object.assign(patch, replayed);
     specs.push({ op: 'update', table: TABLES.variants, id: vid, patch });
+    const av = after.variants.find((v) => v.id === vid); if (av) Object.assign(av, patch);
   }
   specs.push({ op: 'update', table: TABLES.purchases, id: purchaseId, patch: { isActive: false, deletedAt: nextTimestamp() } });
+  return { specs, after };
+}
+
+export async function voidPurchase(app, purchaseId) {
+  const fresh = await readPurchaseCtx();
+  const { specs } = buildVoidSpecs(purchaseId, fresh);
   await db.atomicMutations(specs);
   await Promise.all([app.refresh(TABLES.purchases), app.refresh(TABLES.purchaseItems), app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements)]);
   nudgeSync();
   await logAudit(app, 'delete', 'purchase', (await db.findBy(TABLES.purchases, 'id', purchaseId))?.purchaseNumber || purchaseId);
   return true;
+}
+
+// Edits a purchase as ONE transaction: the void of the old rows and the creation of the
+// new ones commit together or not at all. Doing them as two calls meant a failure in the
+// second left the purchase voided and gone, with its stock already reversed.
+export async function editPurchaseAtomic(app, purchaseId, purchaseData, lines) {
+  const fresh = await readPurchaseCtx();
+  const old = fresh.purchases.find((p) => p.id === purchaseId);
+  if (!old || old.isActive === false) throw new Error('purchase not found');
+  const { specs: voidSpecs, after } = buildVoidSpecs(purchaseId, fresh);
+  // Validation inside buildPurchaseSpecs throws BEFORE anything is written.
+  const { specs: createSpecs, poId, isFree } = buildPurchaseSpecs(app, {
+    ...purchaseData, purchaseNumber: old.purchaseNumber, createdAt: old.createdAt,   // contents change; identity and place in time do not
+  }, lines, after);
+  const res = await db.atomicMutations([...voidSpecs, ...createSpecs]);
+  await Promise.all([app.refresh(TABLES.purchases), app.refresh(TABLES.purchaseItems), app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements)]);
+  nudgeSync();
+  await logAudit(app, 'edit', isFree ? 'freeRestock' : 'purchase', old.purchaseNumber || poId);
+  return res.find((r) => r && r.id === poId) || { id: poId };
 }
 
 // ── Audit log ───────────────────────────────────────────────────────────────
