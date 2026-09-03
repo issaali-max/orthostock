@@ -837,6 +837,90 @@ export function clinicRating(allCustomers, invoices, items, customerId) {
 }
 
 // ── Supplier lifetime stats ──
+// Every purchase invoice from one supplier, with its materials and what is still owed
+// on it — the supplier-side mirror of a customer's statement.
+//
+// A supplier balance has two parts: what was paid ON each invoice at purchase time
+// (recorded on the purchase itself), and later payments made to the supplier as a whole
+// (supplierPayments), which are not tied to any one invoice. Those later payments are
+// allocated OLDEST INVOICE FIRST — the normal way a running account is settled, and the
+// only allocation that is stable: any other rule would reshuffle which invoice looks
+// paid whenever an unrelated payment is added.
+//
+// Write-offs settle a balance without money moving, so they allocate exactly like a
+// payment here (the debt really is gone) while accountLedger still keeps them out of cash.
+// Free restocks are excluded — they cost nothing and have their own section.
+export function supplierPurchaseLedger(app, supplierId) {
+  const data = app.data || app;
+  const variants = data[TABLES.variants] || [];
+  const vById = (id) => variants.find((v) => v.id === id);
+  const allItems = (data[TABLES.purchaseItems] || []).filter((it) => it.isActive !== false);
+
+  const mine = (data[TABLES.purchases] || [])
+    .filter((p) => p.supplierId === supplierId && p.isActive !== false && !p.isFree)
+    .sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.createdAt || '').localeCompare(b.createdAt || ''));
+
+  // Later payments to this supplier, oldest first, as one pool to spread over invoices.
+  const payments = (data[TABLES.supplierPayments] || [])
+    .filter((p) => p.supplierId === supplierId && p.isActive !== false)
+    .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  let pool = round2(payments.reduce((s, p) => s + num(p.amount), 0));
+
+  const opening = round2(num((data[TABLES.suppliers] || []).find((s) => s.id === supplierId)?.openingDebt));
+  // An opening balance is the oldest debt of all, so it absorbs payments before any invoice.
+  const openingPaid = Math.min(pool, opening);
+  pool = round2(pool - openingPaid);
+
+  const rows = mine.map((p) => {
+    const total = round2(num(p.totalAED));
+    const paidAtPurchase = round2(p.paidAmount == null ? total : num(p.paidAmount));
+    const owedAfterPurchase = round2(Math.max(0, total - paidAtPurchase));
+    const allocated = round2(Math.min(pool, owedAfterPurchase));
+    pool = round2(pool - allocated);
+    const paid = round2(paidAtPurchase + allocated);
+    const items = allItems.filter((it) => it.purchaseId === p.id).map((it) => {
+      const v = vById(it.variantId);
+      return {
+        variantId: it.variantId, name: v ? (v.nameEn || v.sku) : '—', sku: v?.sku || '',
+        qty: num(it.qty), unitCost: round2(num(it.unitCost)), total: round2(num(it.total)),
+      };
+    });
+    return {
+      id: p.id, number: p.purchaseNumber || '', date: p.date || '', invoiceRef: p.invoiceRef || '',
+      paidFrom: p.paidFrom || 'bank', notes: p.notes || '',
+      total, paidAtPurchase, paid, balance: round2(Math.max(0, total - paid)),
+      status: total - paid <= 0.005 ? 'paid' : paid > 0 ? 'partial' : 'unpaid',
+      items, itemCount: items.length, qtyTotal: round2(items.reduce((s, it) => s + it.qty, 0)),
+    };
+  }).reverse();   // newest first for display
+
+  const totalBilled = round2(mine.reduce((s, p) => s + num(p.totalAED), 0) + opening);
+  const totalPaid = round2(rows.reduce((s, r) => s + r.paid, 0) + openingPaid);
+  // Anything left in the pool is an overpayment — money given beyond what was billed.
+  const credit = round2(pool);
+
+  // What was bought from this supplier, per material, across every live invoice.
+  const byMaterial = new Map();
+  for (const r of rows) {
+    for (const it of r.items) {
+      const m = byMaterial.get(it.variantId) || { variantId: it.variantId, name: it.name, sku: it.sku, qty: 0, spent: 0, lastCost: it.unitCost, lastDate: r.date, invoices: 0 };
+      m.qty = round2(m.qty + it.qty); m.spent = round2(m.spent + it.total); m.invoices += 1;
+      if ((r.date || '') >= (m.lastDate || '')) { m.lastDate = r.date; m.lastCost = it.unitCost; }
+      byMaterial.set(it.variantId, m);
+    }
+  }
+  const materials = [...byMaterial.values()]
+    .map((m) => ({ ...m, avgCost: m.qty > 0 ? round2(m.spent / m.qty) : 0 }))
+    .sort((a, b) => b.spent - a.spent);
+
+  return {
+    rows, materials, opening, openingPaid,
+    openingBalance: round2(Math.max(0, opening - openingPaid)),
+    totalBilled, totalPaid, balance: round2(Math.max(0, totalBilled - totalPaid)), credit,
+    invoiceCount: rows.length,
+  };
+}
+
 export function supplierStats(purchases, supplierId) {
   // Free restocks have their own section and a zero cost, so they're excluded here to
   // keep "total spent", the balance and the normal purchase history clean.

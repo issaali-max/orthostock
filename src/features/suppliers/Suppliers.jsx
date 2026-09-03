@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
 import { useApp } from '../../app/AppProvider.jsx';
 import { C, emirateOptions, emirateLabel, TABLES } from '../../lib/constants.js';
-import { fmtCur, num, round2 } from '../../lib/money.js';
+import { fmtCur, fmtNum, num, round2 } from '../../lib/money.js';
 import { fmtDate } from '../../lib/dates.js';
-import { supplierStats, supplierDebt, recordSupplierPayment, freeRestocks } from '../../lib/engine.js';
+import { supplierStats, supplierDebt, recordSupplierPayment, freeRestocks, supplierPurchaseLedger } from '../../lib/engine.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, SearchBar, Select, Textarea } from '../../ui/components.jsx';
 
 const blank = () => ({ name: '', phone: '', whatsapp: '', city: '', currency: 'AED', openingDebt: '', notes: '', isActive: true });
@@ -114,9 +114,11 @@ export default function Suppliers() {
 
 function SupplierProfile({ supplier, onBack, onEdit, data, t, displayCurrency, usdRate, purchases, debt, onPay }) {
   const st = supplierStats(purchases, supplier.id);
-  const items = data[TABLES.purchaseItems] || [];
-  const variants = data[TABLES.variants] || [];
-  const skuOf = (id) => variants.find((v) => v.id === id)?.sku || '—';
+  // Per-invoice view of everything bought from this supplier, with later payments
+  // allocated oldest-invoice-first. Same engine the Debts screen reads, so the two
+  // can never disagree about what is owed.
+  const led = supplierPurchaseLedger({ data }, supplier.id);
+  const [expanded, setExpanded] = useState(null);
   // Accurate figures (include later supplier payments) come from `debt`; fall back
   // to purchase-time stats if not provided.
   const paid = debt ? debt.paid : st.totalPaid;
@@ -196,36 +198,106 @@ function SupplierProfile({ supplier, onBack, onEdit, data, t, displayCurrency, u
         );
       })()}
 
-      <div style={{ fontSize: 13, fontWeight: 800, color: C.text, marginBottom: 8 }}>{t('history')}</div>
-      {st.purchases.length === 0 ? <EmptyState icon="📥" text={t('noPurchases')} /> : (
+      {/* ── Purchase invoices: what was bought, what was paid, what is still owed ── */}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
+        <span style={{ fontSize: 13, fontWeight: 800, color: C.text }}>🧾 {t('purchaseInvoices')}</span>
+        <span style={{ fontSize: 11.5, color: C.textMuted }}>{led.invoiceCount}</span>
+        {led.credit > 0 && <Badge tone="success">{t('creditBalance')}: {fmtCur(led.credit, displayCurrency, usdRate)}</Badge>}
+      </div>
+      {led.openingBalance > 0 && (
+        <Card style={{ marginBottom: 8, borderInlineStart: `4px solid ${C.danger}`, padding: '9px 12px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: 12.5, fontWeight: 700, color: C.text }}>{t('supplierOpeningDebt')}</span>
+            <b style={{ color: C.danger }}>{fmtCur(led.openingBalance, displayCurrency, usdRate)}</b>
+          </div>
+        </Card>
+      )}
+      {led.rows.length === 0 ? <EmptyState icon="📥" text={t('noPurchases')} /> : (
         <div style={{ display: 'grid', gap: 8 }}>
-          {st.purchases.slice().reverse().map((po) => {
-            const lines = items.filter((it) => it.purchaseId === po.id);
+          {led.rows.map((r) => {
+            const open = expanded === r.id;
+            const tone = r.status === 'paid' ? C.success : r.status === 'partial' ? C.warning : C.danger;
             return (
-              <Card key={po.id}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <strong style={{ color: C.text }}>{po.purchaseNumber}</strong>
-                  <span style={{ fontWeight: 700, color: C.primary }}>{fmtCur(po.totalAED, displayCurrency, usdRate)}</span>
-                </div>
-                {(() => { const bal = round2(num(po.totalAED) - (po.paidAmount == null ? num(po.totalAED) : num(po.paidAmount))); return (
-                  <div style={{ fontSize: 11, color: C.textMuted, margin: '2px 0 6px', display: 'flex', justifyContent: 'space-between' }}>
-                    <span>{fmtDate(po.date)}</span>
-                    {bal > 0 ? <Badge tone="danger">{t('balanceDue')}: {fmtCur(bal, displayCurrency, usdRate)}</Badge> : <Badge tone="success">{t('paid')}</Badge>}
-                  </div>
-                ); })()}
-                <div style={{ display: 'grid', gap: 2 }}>
-                  {lines.map((l) => (
-                    <div key={l.id} style={{ fontSize: 12, color: C.textMid, display: 'flex', justifyContent: 'space-between' }}>
-                      <span>{skuOf(l.variantId)} × {l.qty}</span>
-                      <span>{fmtCur(l.unitCost, displayCurrency, usdRate)}</span>
+              <Card key={r.id} style={{ padding: 0, overflow: 'hidden', borderInlineStart: `4px solid ${tone}` }}>
+                <div onClick={() => setExpanded(open ? null : r.id)} style={{ padding: '10px 12px', cursor: 'pointer' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 900, color: C.text }}>
+                        {r.number}{r.invoiceRef ? <span style={{ fontWeight: 600, color: C.textMuted }}> · {r.invoiceRef}</span> : null}
+                      </div>
+                      <div style={{ fontSize: 10.5, color: C.textMuted }}>
+                        {fmtDate(r.date)} · {r.itemCount} {t('materials')} · {fmtNum(r.qtyTotal)} {t('pieces')}
+                      </div>
                     </div>
-                  ))}
+                    <div style={{ textAlign: 'end' }}>
+                      <div style={{ fontSize: 14, fontWeight: 900, color: C.text }}>{fmtCur(r.total, displayCurrency, usdRate)}</div>
+                      <div style={{ fontSize: 10.5, fontWeight: 800, color: tone }}>
+                        {r.balance > 0 ? `${t('balanceDue')}: ${fmtCur(r.balance, displayCurrency, usdRate)}` : t('paid')}
+                      </div>
+                    </div>
+                    <span style={{ color: C.textMuted, fontSize: 15 }}>{open ? '⌄' : '›'}</span>
+                  </div>
+                  {r.paid > 0 && r.balance > 0 && (
+                    <div style={{ height: 5, background: C.surfaceAlt, borderRadius: 3, overflow: 'hidden', marginTop: 7 }}>
+                      <div style={{ width: `${(r.paid / r.total) * 100}%`, height: '100%', background: C.success }} />
+                    </div>
+                  )}
                 </div>
+                {open && (
+                  <div style={{ borderTop: `1px solid ${C.border}`, background: C.surfaceAlt, padding: '8px 12px' }}>
+                    <div style={{ display: 'grid', gap: 4 }}>
+                      {r.items.map((it, i) => (
+                        <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 12 }}>
+                          <span style={{ flex: 1, minWidth: 0, color: C.text, overflowWrap: 'anywhere' }}>{it.name}</span>
+                          <span style={{ color: C.textMuted, whiteSpace: 'nowrap' }}>{fmtNum(it.qty)} × {fmtCur(it.unitCost, displayCurrency, usdRate)}</span>
+                          <span style={{ fontWeight: 800, color: C.text, minWidth: 64, textAlign: 'end', whiteSpace: 'nowrap' }}>{fmtCur(it.total, displayCurrency, usdRate)}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ borderTop: `1px dashed ${C.border}`, marginTop: 7, paddingTop: 7, display: 'grid', gap: 3, fontSize: 11.5 }}>
+                      <Row2 label={t('paidAtPurchase')} value={fmtCur(r.paidAtPurchase, displayCurrency, usdRate)} />
+                      {r.paid !== r.paidAtPurchase && <Row2 label={t('laterPayments')} value={fmtCur(round2(r.paid - r.paidAtPurchase), displayCurrency, usdRate)} />}
+                      <Row2 label={t('balanceDue')} value={fmtCur(r.balance, displayCurrency, usdRate)} strong tone={r.balance > 0 ? C.danger : C.success} />
+                    </div>
+                  </div>
+                )}
               </Card>
             );
           })}
         </div>
       )}
+
+      {/* ── What was bought from this supplier, per material ── */}
+      {led.materials.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: C.text, marginBottom: 8 }}>📦 {t('boughtFromSupplier')}</div>
+          <div style={{ display: 'grid', gap: 6 }}>
+            {led.materials.map((m) => (
+              <Card key={m.variantId} style={{ padding: '9px 12px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text, overflowWrap: 'anywhere' }}>{m.name}</div>
+                  <div style={{ fontSize: 10.5, color: C.textMuted }}>
+                    {fmtNum(m.qty)} {t('pieces')} · {m.invoices} {t('purchaseInvoices')} · {t('lastCost')} {fmtCur(m.lastCost, displayCurrency, usdRate)}
+                  </div>
+                </div>
+                <div style={{ textAlign: 'end' }}>
+                  <div style={{ fontSize: 13, fontWeight: 900, color: C.text }}>{fmtCur(m.spent, displayCurrency, usdRate)}</div>
+                  <div style={{ fontSize: 10.5, color: C.textMuted }}>{t('avgCost')} {fmtCur(m.avgCost, displayCurrency, usdRate)}</div>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Row2({ label, value, strong, tone }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+      <span style={{ color: C.textMuted }}>{label}</span>
+      <b style={{ color: tone || C.text, fontWeight: strong ? 900 : 700 }}>{value}</b>
     </div>
   );
 }
