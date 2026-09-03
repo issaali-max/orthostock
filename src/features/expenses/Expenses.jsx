@@ -1,117 +1,130 @@
 import { useMemo, useState } from 'react';
 import { useApp } from '../../app/AppProvider.jsx';
 import { C, TABLES, EXPENSE_ICONS, CATEGORY_COLORS } from '../../lib/constants.js';
-import { fmtCur, num } from '../../lib/money.js';
-import { fmtDate, todayISO } from '../../lib/dates.js';
+import { fmtCur, num, round2 } from '../../lib/money.js';
+import { todayISO } from '../../lib/dates.js';
 import { Badge, Btn, Card, EmptyState, Field, Input, Modal, PageHeader, Select, Textarea } from '../../ui/components.jsx';
 
-const prevYM = (ym) => { const [y, m] = ym.split('-').map(Number); const d = new Date(y, m - 2, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
-const nextYM = (ym) => { const [y, m] = ym.split('-').map(Number); const d = new Date(y, m, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
-const monthLabel = (ym) => { const [y, m] = ym.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }); };
-const blankExpense = () => ({ date: todayISO(), amount: '', groupId: '', note: '', currency: 'AED', paidFrom: 'bank' });
+// ─────────────────────────────────────────────────────────────────────────────
+// EXPENSES
+//
+// The screen answers one question: "where did the money go this month?"
+//   1. ONE time control — a month strip with ‹ ›. Year / all / upcoming are secondary.
+//   2. A hero with the total, the change against the previous period, and the
+//      business / personal / home split. Tapping a split pill filters by type.
+//   3. Groups ranked by amount. Tapping a group drills into its expenses.
+//   4. ONE add button. The type and group are chosen inside the form.
+// Everything below derives from a single period, closed at both ends, so the numbers
+// here always agree with the dashboard.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const ym = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+const iso = (d) => `${ym(d)}-${String(d.getDate()).padStart(2, '0')}`;
+const shiftYM = (s, by) => { const [y, m] = s.split('-').map(Number); return ym(new Date(y, m - 1 + by, 1)); };
+const monthName = (s, lang) => { const [y, m] = s.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleDateString(lang === 'ar' ? 'ar-EG' : 'en-GB', { month: 'long', year: 'numeric' }); };
+const shortMonth = (s, lang) => { const [y, m] = s.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleDateString(lang === 'ar' ? 'ar-EG' : 'en-GB', { month: 'short' }); };
+
+const TYPE_META = {
+  business: { icon: '🏢', color: C.primary },
+  personal: { icon: '👤', color: C.warning },
+  home: { icon: '🏠', color: C.success },
+};
+const typeOf = (g) => (g?.type === 'personal' ? 'personal' : g?.type === 'home' ? 'home' : 'business');
+
+const blankExpense = () => ({ date: todayISO(), amount: '', groupId: '', note: '', currency: 'AED', paidFrom: 'bank', type: 'business' });
 const blankGroup = () => ({ nameAr: '', nameEn: '', type: 'business', icon: '🧾', color: CATEGORY_COLORS[0], isActive: true });
+
+const stepBtn = { border: `1px solid ${C.border}`, background: '#fff', borderRadius: 9, width: 38, height: 34, fontWeight: 900, fontSize: 16, color: C.primary, cursor: 'pointer', flexShrink: 0 };
 
 export default function Expenses() {
   const { t, lang, data, displayCurrency, usdRate, createRow, updateRow, deleteRow } = useApp();
-  const [tab, setTab] = useState('list');           // list | groups
-  const [period, setPeriod] = useState('month');    // day | month | year | upcoming | all | pick
-  // A specific past month to inspect and compare. 'pick' scopes everything below to it.
-  const nowYM = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; })();
-  const [pickYM, setPickYM] = useState(nowYM);
-  const [filterGroup, setFilterGroup] = useState('');
-  const [typeFilter, setTypeFilter] = useState('all'); // all | business | personal | home
+  const cur = (v) => fmtCur(v, displayCurrency, usdRate);
+
+  // ── State: ONE period, ONE optional drill, ONE optional type filter ──
+  const [mode, setMode] = useState('month');            // month | year | all | upcoming
+  const [month, setMonth] = useState(ym(new Date()));    // the month strip position
+  const [typeFilter, setTypeFilter] = useState('');      // '' | business | personal | home
+  const [drillGroup, setDrillGroup] = useState('');      // groupId ('none' for ungrouped) when drilled in
   const [editExpense, setEditExpense] = useState(null);
-  const [formType, setFormType] = useState(null); // which type the add form is scoped to
   const [editGroup, setEditGroup] = useState(null);
-  // Open the add form scoped to one type (work / personal / home). Preselect the group if the
-  // type has exactly one — so a tap usually leaves just the amount to type.
-  const openAdd = (type) => {
-    const gs = (data[TABLES.expenseGroups] || []).filter((g) => g.isActive !== false && (g.type || 'business') === type);
-    setFormType(type);
-    setEditExpense({ ...blankExpense(), groupId: gs.length === 1 ? gs[0].id : '' });
-  };
-  const closeExpense = () => { setEditExpense(null); setFormType(null); };
+  const [groupsOpen, setGroupsOpen] = useState(false);
 
   const groups = useMemo(() => (data[TABLES.expenseGroups] || []).filter((g) => g.isActive !== false), [data]);
   const groupById = (id) => groups.find((g) => g.id === id);
   const groupName = (g) => (lang === 'ar' ? g?.nameAr : g?.nameEn) || g?.nameEn || g?.nameAr || '—';
+  const typeOfId = (id) => typeOf(groupById(id));
+  const thisYM = ym(new Date());
+  const today = todayISO();
 
-  const typeOfGroup = (id) => { const g = groupById(id); return g?.type === 'personal' ? 'personal' : g?.type === 'home' ? 'home' : 'business'; };
-
-  // ONE time control (day / month / year). Everything below derives from it, so there is
-  // a single, clear notion of "period" instead of three competing time widgets.
-  const periodBounds = (p) => {
+  // ── Period bounds, closed at both ends, plus the previous period for the delta ──
+  const bounds = useMemo(() => {
     const now = new Date();
-    const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    if (p === 'all') return { from: '0000-01-01', to: '9999-12-31', pf: '0000-01-01', pt: '0000-01-01' };
-    if (p === 'day') { const y = new Date(now); y.setDate(now.getDate() - 1); return { from: iso(now), to: iso(now), pf: iso(y), pt: iso(y) }; }
-    // A chosen month: its full span, compared against the month before it.
-    if (p === 'pick') {
-      const [y, m] = pickYM.split('-').map(Number);
-      const ms = new Date(y, m - 1, 1), me = new Date(y, m, 0), pms = new Date(y, m - 2, 1), pme = new Date(y, m - 1, 0);
-      return { from: iso(ms), to: iso(me), pf: iso(pms), pt: iso(pme) };
+    if (mode === 'all') return { from: '0000-01-01', to: '9999-12-31', pf: '', pt: '', label: t('all'), prevLabel: '' };
+    if (mode === 'upcoming') {
+      const t2 = new Date(now); t2.setDate(now.getDate() + 1);
+      return { from: iso(t2), to: '9999-12-31', pf: '', pt: '', label: t('upcoming'), prevLabel: '' };
     }
-    // Everything dated after today, so a planned expense is never invisible.
-    if (p === 'upcoming') { const t2 = new Date(now); t2.setDate(now.getDate() + 1); return { from: iso(t2), to: '9999-12-31', pf: '0000-01-01', pt: '0000-01-01' }; }
-    // Periods run to the END of the month/year, not to today. Stopping at today hid an
-    // expense dated later this month from this list while the dashboard still counted it,
-    // so the two screens disagreed about the same month.
-    if (p === 'year') { const yr = now.getFullYear(); return { from: `${yr}-01-01`, to: `${yr}-12-31`, pf: `${yr - 1}-01-01`, pt: `${yr - 1}-12-31` }; }
-    const ms = new Date(now.getFullYear(), now.getMonth(), 1);
-    const me = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    const pms = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const pme = new Date(now.getFullYear(), now.getMonth(), 0);
-    return { from: iso(ms), to: iso(me), pf: iso(pms), pt: iso(pme) };
-  };
+    if (mode === 'year') {
+      const y = now.getFullYear();
+      return { from: `${y}-01-01`, to: `${y}-12-31`, pf: `${y - 1}-01-01`, pt: `${y - 1}-12-31`, label: String(y), prevLabel: String(y - 1) };
+    }
+    const [y, m] = month.split('-').map(Number);
+    const ms = new Date(y, m - 1, 1), me = new Date(y, m, 0), pms = new Date(y, m - 2, 1), pme = new Date(y, m - 1, 0);
+    return { from: iso(ms), to: iso(me), pf: iso(pms), pt: iso(pme), label: monthName(month, lang), prevLabel: monthName(shiftYM(month, -1), lang) };
+  }, [mode, month, lang, t]);
 
-  // Everything the screen shows for the chosen period + scope (type → group), in AED base:
-  // total, change vs the previous period, the type split (for the hero), the composition
-  // of "where the money goes", and the detail list.
-  const analysis = useMemo(() => {
-    const b = periodBounds(period);
-    const aedOf = (e) => (e.currency === 'USD' ? num(e.amount) * num(usdRate) : num(e.amount));
+  // ── Everything the screen shows, from one pass over the expenses ──
+  const A = useMemo(() => {
+    const aed = (e) => (e.currency === 'USD' ? num(e.amount) * num(usdRate) : num(e.amount));
     const all = (data[TABLES.expenses] || []).filter((e) => e.isActive !== false);
-    const inCur = (e) => (e.date || '') >= b.from && (e.date || '') <= b.to;
-    const inPrev = (e) => (e.date || '') >= b.pf && (e.date || '') <= b.pt;
+    const inCur = (e) => (e.date || '') >= bounds.from && (e.date || '') <= bounds.to;
+    const inPrev = (e) => !!bounds.pf && (e.date || '') >= bounds.pf && (e.date || '') <= bounds.pt;
 
     const byType = { business: 0, personal: 0, home: 0 };
-    let total = 0, prevTotal = 0;
+    const byGroup = new Map();       // groupId → { cur, prev, count }
+    let total = 0, prevTotal = 0, upcomingCount = 0, upcomingTotal = 0;
     for (const e of all) {
-      const a = aedOf(e);
-      if (inCur(e)) { total += a; byType[typeOfGroup(e.groupId)] += a; }
-      if (inPrev(e)) prevTotal += a;
+      const a = aed(e);
+      const gt = typeOfId(e.groupId);
+      const passType = !typeFilter || gt === typeFilter;
+      const key = e.groupId || 'none';
+      if (inCur(e) && passType) {
+        total += a; byType[gt] += a;
+        const r = byGroup.get(key) || { cur: 0, prev: 0, count: 0 };
+        r.cur += a; r.count += 1; byGroup.set(key, r);
+      }
+      if (inPrev(e) && passType) {
+        prevTotal += a;
+        const r = byGroup.get(key) || { cur: 0, prev: 0, count: 0 };
+        r.prev += a; byGroup.set(key, r);
+      }
+      if ((e.date || '') > today) { upcomingCount += 1; upcomingTotal += a; }
     }
-    const changePct = prevTotal > 0 ? ((total - prevTotal) / prevTotal) * 100 : (total > 0 ? null : 0);
+    const pct = (c, p) => (p > 0 ? ((c - p) / p) * 100 : null);
 
-    const scoped = all.filter((e) => inCur(e)
-      && (typeFilter === 'all' || typeOfGroup(e.groupId) === typeFilter)
-      && (!filterGroup || e.groupId === filterGroup));
+    const rows = [...byGroup.entries()]
+      .filter(([, r]) => r.cur > 0)
+      .map(([id, r], i) => {
+        const g = id === 'none' ? null : groupById(id);
+        return { id, g, label: g ? groupName(g) : t('other'), icon: g?.icon || '🧾', color: g?.color || CATEGORY_COLORS[i % CATEGORY_COLORS.length], type: typeOf(g), cur: round2(r.cur), prev: round2(r.prev), count: r.count, delta: pct(r.cur, r.prev) };
+      })
+      .sort((a, b) => b.cur - a.cur);
+    const max = Math.max(1, ...rows.map((r) => r.cur));
 
-    const pal = CATEGORY_COLORS;
-    let comp;
-    if (filterGroup) {
-      comp = scoped.slice().sort((a, b2) => aedOf(b2) - aedOf(a)).map((e, i) => ({ key: e.id, label: (e.note || '').trim() || fmtDate(e.date) || `#${i + 1}`, color: pal[i % pal.length], value: aedOf(e) }));
-    } else if (typeFilter !== 'all') {
-      const m = new Map();
-      for (const e of scoped) { const g = groupById(e.groupId); const k = e.groupId || 'none'; const r = m.get(k) || { key: k, label: g ? groupName(g) : t('other'), color: g?.color, value: 0 }; r.value += aedOf(e); m.set(k, r); }
-      comp = [...m.values()].sort((a, b2) => b2.value - a.value).map((r, i) => ({ ...r, color: r.color || pal[i % pal.length] }));
-    } else {
-      comp = [['business', C.primary, t('business')], ['personal', C.warning, t('personal')], ['home', C.success, t('home')]]
-        .map(([k, color, label]) => ({ key: k, label, color, value: byType[k] })).filter((x) => x.value > 0);
-    }
-    const compMax = Math.max(1, ...comp.map((c) => c.value));
-    const list = scoped.slice().sort((a, b2) => (b2.date || '').localeCompare(a.date || ''));
-    return { total, prevTotal, changePct, byType, comp, compMax, list };
-  }, [data, groups, usdRate, period, pickYM, typeFilter, filterGroup]); // eslint-disable-line react-hooks/exhaustive-deps
+    const list = all.filter((e) => inCur(e) && (!typeFilter || typeOfId(e.groupId) === typeFilter) && (!drillGroup || (e.groupId || 'none') === drillGroup))
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 
+    return { total: round2(total), prevTotal: round2(prevTotal), delta: pct(total, prevTotal), byType, rows, max, list, upcomingCount, upcomingTotal: round2(upcomingTotal) };
+  }, [data, groups, usdRate, bounds, typeFilter, drillGroup, today]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Data operations (semantics unchanged) ──
   const saveExpense = async () => {
     const r = editExpense;
     if (!(num(r.amount) > 0) || !r.groupId) return;
     const payload = { date: r.date || todayISO(), amount: num(r.amount), groupId: r.groupId, note: r.note || '', currency: r.currency === 'USD' ? 'USD' : 'AED', paidFrom: r.paidFrom === 'drawer' ? 'drawer' : 'bank' };
     if (r.id) await updateRow(TABLES.expenses, r.id, payload); else await createRow(TABLES.expenses, payload);
-    setEditExpense(null); setFormType(null);
+    setEditExpense(null);
   };
-
   const saveGroup = async () => {
     const r = editGroup;
     if (!r.nameAr?.trim() && !r.nameEn?.trim()) return;
@@ -119,219 +132,263 @@ export default function Expenses() {
     if (r.id) await updateRow(TABLES.expenseGroups, r.id, payload); else await createRow(TABLES.expenseGroups, payload);
     setEditGroup(null);
   };
+  const openEdit = (e) => setEditExpense({ ...e, amount: String(e.amount), type: typeOfId(e.groupId) });
+  const openAdd = () => {
+    // Adding from inside a group preselects it, so the amount is usually the only field.
+    const g = drillGroup && drillGroup !== 'none' ? groupById(drillGroup) : null;
+    setEditExpense({ ...blankExpense(), type: g ? typeOf(g) : (typeFilter || 'business'), groupId: g?.id || '' });
+  };
+
+  const Delta = ({ v, small }) => (v == null ? null : (
+    <span style={{ fontSize: small ? 10.5 : 12, fontWeight: 800, color: v > 0 ? C.danger : v < 0 ? C.success : C.textMuted }}>
+      {v > 0 ? '▲' : v < 0 ? '▼' : '='} {Math.abs(Math.round(v))}%
+    </span>
+  ));
+
+  const drilledRow = drillGroup ? A.rows.find((r) => r.id === drillGroup) : null;
+  const atThisMonth = mode === 'month' && month >= thisYM;
 
   return (
-    <div>
+    <div style={{ paddingBottom: 84 }}>
       <PageHeader title={t('expenses')} action={
-        tab === 'groups'
-          ? <Btn onClick={() => setEditGroup(blankGroup())}>＋ {t('addGroup')}</Btn>
-          : null
+        <button onClick={() => setGroupsOpen(true)} title={t('expenseGroups')}
+          style={{ border: `1px solid ${C.border}`, background: '#fff', borderRadius: 10, padding: '7px 11px', fontSize: 14, cursor: 'pointer' }}>⚙️</button>
       } />
 
-      {tab === 'list' && (
-        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-          {[['business', C.primary, '🏢'], ['personal', C.warning, '👤'], ['home', C.success, '🏠']].map(([type, color, icon]) => (
-            <button key={type} onClick={() => openAdd(type)} style={{
-              flex: 1, border: 'none', background: color, color: '#fff', borderRadius: 12,
-              padding: '11px 6px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer',
-              boxShadow: `0 2px 8px ${color}55`, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
-            }}>
-              <span style={{ fontSize: 17 }}>{icon}</span>
-              <span>＋ {t(type)}</span>
-            </button>
+      {/* ── Time: the month strip, with year / all / upcoming as quiet alternatives ── */}
+      <Card style={{ padding: 10, marginBottom: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button onClick={() => { setMode('month'); setMonth(shiftYM(mode === 'month' ? month : thisYM, -1)); setDrillGroup(''); }} style={stepBtn}>‹</button>
+          <label style={{ flex: 1, position: 'relative', textAlign: 'center', cursor: 'pointer' }}>
+            <div style={{ fontSize: 15, fontWeight: 900, color: C.text }}>{bounds.label}</div>
+            {mode === 'month' && !atThisMonth && <div style={{ fontSize: 10, color: C.primary, fontWeight: 700 }}>{t('tapForThisMonth')}</div>}
+            <input type="month" value={month} max={thisYM}
+              onChange={(e) => { if (e.target.value) { setMonth(e.target.value); setMode('month'); setDrillGroup(''); } }}
+              onClick={(e) => { if (mode === 'month' && !atThisMonth) { e.preventDefault(); setMonth(thisYM); } }}
+              style={{ position: 'absolute', inset: 0, opacity: 0, width: '100%', cursor: 'pointer' }} />
+          </label>
+          <button onClick={() => { setMode('month'); setMonth(shiftYM(month, 1)); setDrillGroup(''); }} disabled={atThisMonth}
+            style={{ ...stepBtn, opacity: atThisMonth ? 0.35 : 1 }}>›</button>
+        </div>
+        <div style={{ display: 'flex', gap: 5, marginTop: 8 }}>
+          {[['month', t('monthly')], ['year', t('thisYear')], ['all', t('all')], ['upcoming', `⏭️ ${t('upcoming')}`]].map(([k, label]) => (
+            <button key={k} onClick={() => { setMode(k); setDrillGroup(''); }} style={{
+              flex: 1, border: 'none', borderRadius: 8, padding: '6px 4px', fontSize: 11, fontWeight: 800, cursor: 'pointer',
+              background: mode === k ? C.primary : C.surfaceAlt, color: mode === k ? '#fff' : C.textMid,
+            }}>{label}</button>
           ))}
         </div>
-      )}
+      </Card>
 
-      {/* Tabs */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-        <TabBtn active={tab === 'list'} onClick={() => setTab('list')}>🧾 {t('expenses')}</TabBtn>
-        <TabBtn active={tab === 'groups'} onClick={() => setTab('groups')}>🏷️ {t('expenseGroups')}</TabBtn>
-      </div>
-
-      {tab === 'list' ? (
+      {drilledRow ? (
         <>
-          {/* Single time control */}
-          <div style={{ display: 'flex', gap: 6, marginBottom: 12, background: C.surfaceAlt, padding: 4, borderRadius: 12 }}>
-            {[['day', `📅 ${t('daily')}`], ['month', `🗓️ ${t('thisMonth')}`], ['pick', `🔎 ${t('pickMonth')}`], ['year', `📆 ${t('thisYear')}`], ['upcoming', `⏭️ ${t('upcoming')}`], ['all', `∞ ${t('all')}`]].map(([k, label]) => (
-              <button key={k} type="button" onClick={() => setPeriod(k)}
-                style={{ flex: 1, padding: '9px 6px', borderRadius: 9, border: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: 800,
-                  background: period === k ? '#fff' : 'transparent', color: period === k ? C.primary : C.textMid,
-                  boxShadow: period === k ? '0 1px 4px rgba(0,0,0,.12)' : 'none', transition: 'all .15s' }}>{label}</button>
-            ))}
+          {/* ── Drilled into one group ── */}
+          <Card style={{ marginBottom: 12, borderInlineStart: `4px solid ${drilledRow.color}` }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button onClick={() => setDrillGroup('')} style={{ ...stepBtn, width: 34 }}>‹</button>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 15, fontWeight: 900, color: C.text }}>{drilledRow.icon} {drilledRow.label}</div>
+                <div style={{ fontSize: 11, color: C.textMuted }}>{bounds.label} · {drilledRow.count} {t('expenses')}</div>
+              </div>
+              <div style={{ textAlign: 'end' }}>
+                <div style={{ fontSize: 17, fontWeight: 900, color: C.text }}>{cur(drilledRow.cur)}</div>
+                {drilledRow.delta != null && bounds.prevLabel && (
+                  <div style={{ fontSize: 10.5, color: C.textMuted }}><Delta v={drilledRow.delta} small /> {t('vsPrevious')} {bounds.prevLabel} ({cur(drilledRow.prev)})</div>
+                )}
+              </div>
+            </div>
+          </Card>
+          <ExpenseList list={A.list} groupById={groupById} groupName={groupName} onOpen={openEdit} t={t} lang={lang} today={today} cur={cur} showGroup={false} />
+        </>
+      ) : (
+        <>
+          {/* ── Hero: total, delta, type split ── */}
+          <div style={{ background: `linear-gradient(135deg, ${C.primary}, ${C.primaryMid || C.primary})`, color: '#fff', borderRadius: 16, padding: '14px 16px', marginBottom: 12 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, opacity: 0.9 }}>{t('totalExpenses')} · {bounds.label}</div>
+            <div style={{ fontSize: 28, fontWeight: 900, letterSpacing: -0.5, margin: '2px 0 4px' }}>{cur(A.total)}</div>
+            {bounds.prevLabel && (
+              <div style={{ fontSize: 11.5, opacity: 0.92, minHeight: 16 }}>
+                {A.delta == null
+                  ? (A.total > 0 ? `${t('vsPrevious')} ${bounds.prevLabel}: ${cur(0)}` : '')
+                  : <><Delta v={A.delta} /> {t('vsPrevious')} {bounds.prevLabel} ({cur(A.prevTotal)})</>}
+              </div>
+            )}
+            {A.total > 0 && (
+              <div style={{ display: 'flex', height: 10, borderRadius: 5, overflow: 'hidden', background: 'rgba(255,255,255,.2)', margin: '10px 0 8px' }}>
+                {['business', 'personal', 'home'].map((k) => A.byType[k] > 0 && (
+                  <div key={k} style={{ width: `${(A.byType[k] / A.total) * 100}%`, background: TYPE_META[k].color, opacity: typeFilter && typeFilter !== k ? 0.35 : 1 }} />
+                ))}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+              {['business', 'personal', 'home'].map((k) => {
+                const on = typeFilter === k;
+                return (
+                  <button key={k} onClick={() => { setTypeFilter(on ? '' : k); setDrillGroup(''); }} style={{
+                    border: `1px solid ${on ? '#fff' : 'rgba(255,255,255,.35)'}`, background: on ? 'rgba(255,255,255,.22)' : 'transparent',
+                    color: '#fff', borderRadius: 999, padding: '4px 10px', fontSize: 11, fontWeight: 800, cursor: 'pointer',
+                  }}>{TYPE_META[k].icon} {t(k)} <span style={{ opacity: 0.85 }}>{cur(A.byType[k])}</span></button>
+                );
+              })}
+              {typeFilter && <button onClick={() => setTypeFilter('')} style={{ border: 'none', background: 'transparent', color: '#fff', fontSize: 11, fontWeight: 800, cursor: 'pointer' }}>✕</button>}
+            </div>
           </div>
 
-          {/* Month stepper — only when inspecting a specific month */}
-          {period === 'pick' && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-              <button onClick={() => setPickYM(prevYM(pickYM))} style={{ border: `1px solid ${C.border}`, background: '#fff', borderRadius: 9, padding: '6px 12px', fontWeight: 800, cursor: 'pointer' }}>‹</button>
-              <input type="month" value={pickYM} onChange={(e) => e.target.value && setPickYM(e.target.value)}
-                style={{ flex: 1, padding: '7px 10px', fontSize: 16, border: `1px solid ${C.border}`, borderRadius: 9, background: '#fff', color: C.text, textAlign: 'center', fontWeight: 800 }} />
-              <button onClick={() => setPickYM(nextYM(pickYM))} disabled={pickYM >= nowYM} style={{ border: `1px solid ${C.border}`, background: '#fff', borderRadius: 9, padding: '6px 12px', fontWeight: 800, cursor: pickYM >= nowYM ? 'default' : 'pointer', opacity: pickYM >= nowYM ? 0.4 : 1 }}>›</button>
+          {/* ── Upcoming strip: a planned expense is never invisible ── */}
+          {mode !== 'upcoming' && A.upcomingCount > 0 && (
+            <button onClick={() => { setMode('upcoming'); setDrillGroup(''); }} style={{
+              width: '100%', textAlign: 'start', border: `1px dashed ${C.warning}`, background: C.warning + '12', borderRadius: 12,
+              padding: '9px 12px', marginBottom: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8,
+            }}>
+              <span>⏭️</span>
+              <span style={{ flex: 1, fontSize: 12, fontWeight: 700, color: C.text }}>{A.upcomingCount} {t('upcomingExpenses')}</span>
+              <span style={{ fontSize: 12.5, fontWeight: 900, color: C.warning }}>{cur(A.upcomingTotal)}</span>
+              <span style={{ color: C.textMuted }}>›</span>
+            </button>
+          )}
+
+          {/* ── Where the money went: groups ranked, each tappable ── */}
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
+            <div style={{ fontSize: 14, fontWeight: 900, color: C.text }}>📊 {t('whereMoneyGoes')}</div>
+            <div style={{ fontSize: 11, color: C.textMuted }}>{A.rows.length} {t('groups')}</div>
+          </div>
+          {A.rows.length === 0 ? (
+            <EmptyState icon="🧾" text={mode === 'upcoming' ? t('noUpcoming') : t('noExpensesPeriod')} />
+          ) : (
+            <div style={{ display: 'grid', gap: 8 }}>
+              {A.rows.map((r) => (
+                <Card key={r.id} onClick={() => setDrillGroup(r.id)} style={{ padding: '10px 12px', cursor: 'pointer', borderInlineStart: `4px solid ${r.color}` }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 22, width: 30, textAlign: 'center' }}>{r.icon}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 800, color: C.text, overflowWrap: 'anywhere' }}>{r.label} <span style={{ fontSize: 10.5, color: TYPE_META[r.type].color }}>{TYPE_META[r.type].icon}</span></div>
+                      <div style={{ fontSize: 10.5, color: C.textMuted }}>{r.count} {t('expenses')}{r.delta != null && bounds.prevLabel ? <> · <Delta v={r.delta} small /></> : null}</div>
+                    </div>
+                    <div style={{ textAlign: 'end' }}>
+                      <div style={{ fontSize: 15, fontWeight: 900, color: C.text }}>{cur(r.cur)}</div>
+                      <div style={{ fontSize: 10.5, color: C.textMuted }}>{Math.round((r.cur / A.total) * 100)}%</div>
+                    </div>
+                    <span style={{ color: C.textMuted, fontSize: 16 }}>›</span>
+                  </div>
+                  <div style={{ height: 6, background: C.surfaceAlt, borderRadius: 3, overflow: 'hidden', marginTop: 8 }}>
+                    <div style={{ width: `${(r.cur / A.max) * 100}%`, height: '100%', background: r.color, borderRadius: 3 }} />
+                  </div>
+                </Card>
+              ))}
             </div>
           )}
 
-          {/* Hero summary: total for the period + trend vs previous + type split */}
-          {(() => {
-            const a = analysis;
-            const pLabel = period === 'day' ? t('daily') : period === 'year' ? t('thisYear') : period === 'all' ? t('all') : period === 'upcoming' ? t('upcoming') : period === 'pick' ? monthLabel(pickYM) : t('thisMonth');
-            const prevLabel = period === 'day' ? t('yesterday') : period === 'year' ? t('lastYear') : period === 'pick' ? monthLabel(prevYM(pickYM)) : t('lastMonth');
-            const up = a.changePct != null && a.changePct > 0;
-            const types = [['business', C.primary, `🏢 ${t('business')}`], ['personal', C.warning, `👤 ${t('personal')}`], ['home', C.success, `🏠 ${t('home')}`]];
-            return (
-              <Card style={{ marginBottom: 12, background: `linear-gradient(135deg, ${C.primary} 0%, #2a4a73 100%)`, color: '#fff', border: 'none' }}>
-                <div style={{ fontSize: 12, fontWeight: 700, opacity: .85, marginBottom: 2 }}>{t('totalExpenses')} · {pLabel}</div>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 26, fontWeight: 900, letterSpacing: '-.5px' }}>{fmtCur(a.total, displayCurrency, usdRate)}</span>
-                  {a.changePct != null && period !== 'all' && period !== 'upcoming' && (
-                    <span style={{ fontSize: 12, fontWeight: 800, color: up ? '#ffb4b4' : '#9be6c0' }}>
-                      {up ? '▲' : '▼'} {Math.abs(Math.round(a.changePct))}% <span style={{ opacity: .7, fontWeight: 600 }}>{t('vsPrevious')} {prevLabel}</span>
-                    </span>
-                  )}
-                </div>
-                {/* type split bar */}
-                {a.total > 0 && (
-                  <>
-                    <div style={{ display: 'flex', height: 8, borderRadius: 5, overflow: 'hidden', marginTop: 12, background: 'rgba(255,255,255,.15)' }}>
-                      {types.map(([k, color]) => a.byType[k] > 0 && (
-                        <div key={k} style={{ width: `${(a.byType[k] / a.total) * 100}%`, background: color }} />
-                      ))}
-                    </div>
-                    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 8 }}>
-                      {types.map(([k, color, label]) => a.byType[k] > 0 && (
-                        <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 700 }}>
-                          <span style={{ width: 9, height: 9, borderRadius: 3, background: color }} />
-                          {label} · {Math.round((a.byType[k] / a.total) * 100)}%
-                        </span>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </Card>
-            );
-          })()}
-
-          {/* Type filter — drives the composition chart + list */}
-          <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
-            {[['all', `📋 ${t('allExpenses')}`], ['business', `🏢 ${t('business')}`], ['personal', `👤 ${t('personal')}`], ['home', `🏠 ${t('home')}`]].map(([k, label]) => (
-              <TabBtn key={k} active={typeFilter === k} onClick={() => { setTypeFilter(k); setFilterGroup(''); }} small>{label}</TabBtn>
-            ))}
-          </div>
-
-          {/* Group filter — scoped to the chosen type */}
-          <div style={{ marginBottom: 12 }}>
-            <Select value={filterGroup} onChange={setFilterGroup} placeholder={`— ${t('expenseGroup')} —`}
-              options={[{ value: '', label: typeFilter === 'all' ? t('allExpenses') : `${t(typeFilter)} (${t('allExpenses')})` },
-                ...groups.filter((g) => typeFilter === 'all' || typeOfGroup(g.id) === typeFilter).map((g) => ({ value: g.id, label: `${g.icon} ${groupName(g)}` }))]} />
-          </div>
-
-          {/* Composition chart: where the money goes for this period + scope */}
-          {analysis.comp.length > 0 && (
-            <Card style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 13, fontWeight: 800, color: C.text, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ flex: 1, minWidth: 0 }}>📊 {t('whereMoneyGoes')} · <span style={{ color: C.primary }}>{filterGroup ? groupName(groupById(filterGroup)) : (typeFilter === 'all' ? t('allExpenses') : t(typeFilter))}</span></span>
-                {filterGroup && (
-                  <button onClick={() => setFilterGroup('')} style={{ border: `1px solid ${C.border}`, background: '#fff', borderRadius: 8, padding: '3px 10px', fontSize: 11, fontWeight: 700, color: C.primary, cursor: 'pointer' }}>‹ {t('allGroups')}</button>
-                )}
-              </div>
-              <div style={{ display: 'grid', gap: 9 }}>
-                {analysis.comp.map((c) => (
-                  // Tap a group to drill into its individual expenses for this period. When a
-                  // group is already selected the rows are single expenses, so no deeper drill.
-                  <div key={c.key} onClick={() => { if (!filterGroup && c.key !== 'none') setFilterGroup(c.key); }}
-                    style={{ cursor: !filterGroup && c.key !== 'none' ? 'pointer' : 'default' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '60%' }}>{c.label}{!filterGroup && c.key !== 'none' && <span style={{ color: C.textMuted, fontWeight: 600 }}> ›</span>}</span>
-                      <span style={{ fontSize: 12, fontWeight: 800, color: C.text }}>{fmtCur(c.value, displayCurrency, usdRate)} <span style={{ color: C.textMuted, fontWeight: 600, fontSize: 10.5 }}>· {Math.round((c.value / analysis.total) * 100) || 0}%</span></span>
-                    </div>
-                    <div style={{ height: 12, background: C.surfaceAlt, borderRadius: 6, overflow: 'hidden' }}>
-                      <div style={{ width: `${(c.value / analysis.compMax) * 100}%`, height: '100%', background: c.color, borderRadius: 6, transition: 'width .3s' }} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          )}
-
-          {analysis.list.length === 0 ? <EmptyState icon="🧾" text={t('noExpenses')} /> : (
-            <div style={{ display: 'grid', gap: 8 }}>
-              {analysis.list.map((e) => {
-                const g = groupById(e.groupId);
-                const isFuture = (e.date || '') > todayISO();
-                return (
-                  <Card key={e.id} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', borderInlineStart: `3px solid ${g?.color || C.border}`, ...(isFuture ? { borderTop: `1px dashed ${C.warning}`, borderBottom: `1px dashed ${C.warning}` } : {}) }}
-                    onClick={() => { setFormType(typeOfGroup(e.groupId)); setEditExpense({ ...e, amount: String(e.amount) }); }}>
-                    <div style={{ fontSize: 18 }}>{g?.icon || '🧾'}</div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 700, color: C.text, fontSize: 13 }}>{groupName(g)} {g && <Badge tone={g.type === 'personal' ? 'warning' : g.type === 'home' ? 'success' : 'info'}>{t(g.type)}</Badge>}{isFuture && <Badge tone="warning">⏭️ {t('futureExpense')}</Badge>}</div>
-                      <div style={{ fontSize: 11, color: C.textMuted }}>{fmtDate(e.date, lang)}{e.note ? ` · ${e.note}` : ''}</div>
-                    </div>
-                    <div style={{ fontWeight: 800, color: C.text }}>{`${e.currency === 'USD' ? 'USD' : 'AED'} ${num(e.amount).toFixed(2)}`}</div>
-                  </Card>
-                );
-              })}
+          {/* In "upcoming" and "all", the flat list itself is the useful view */}
+          {(mode === 'upcoming' || mode === 'all') && A.list.length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontSize: 13, fontWeight: 900, color: C.text, marginBottom: 8 }}>📋 {t('allExpenses')}</div>
+              <ExpenseList list={A.list} groupById={groupById} groupName={groupName} onOpen={openEdit} t={t} lang={lang} today={today} cur={cur} showGroup />
             </div>
           )}
         </>
-      ) : (
-        groups.length === 0 ? <EmptyState icon="🏷️" text={t('noData')} /> : (
-          <div style={{ display: 'grid', gap: 8 }}>
-            {groups.map((g) => (
-              <Card key={g.id} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', borderInlineStart: `3px solid ${g.color}` }}
-                onClick={() => setEditGroup({ ...g })}>
-                <div style={{ fontSize: 20 }}>{g.icon}</div>
-                <div style={{ flex: 1, fontWeight: 700, color: C.text }}>{groupName(g)}</div>
-                <Badge tone={g.type === 'personal' ? 'warning' : g.type === 'home' ? 'success' : 'info'}>{t(g.type)}</Badge>
-                <span style={{ color: C.textMuted }}>›</span>
-              </Card>
-            ))}
-          </div>
-        )
       )}
 
-      {/* Expense modal */}
-      <Modal open={!!editExpense} onClose={closeExpense}
-        title={editExpense?.id ? t('edit') : `＋ ${t(formType || 'business')}`}
-        footer={<><Btn variant="ghost" onClick={closeExpense}>{t('cancel')}</Btn><Btn onClick={saveExpense}>{t('save')}</Btn></>}>
-        {editExpense && (
-          <div>
-            {(() => {
-              const ftype = formType || typeOfGroup(editExpense.groupId);
-              const tcol = ftype === 'personal' ? C.warning : ftype === 'home' ? C.success : C.primary;
-              const ticon = ftype === 'personal' ? '👤' : ftype === 'home' ? '🏠' : '🏢';
-              return <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: tcol + '18', color: tcol, borderRadius: 999, padding: '4px 12px', fontSize: 12, fontWeight: 800, marginBottom: 10 }}>{ticon} {t(ftype)}</div>;
-            })()}
-            <div style={{ display: 'flex', gap: 8 }}>
-              <div style={{ flex: 2 }}><Field label={t('amount')} required><Input type="number" value={editExpense.amount} onChange={(v) => setEditExpense((r) => ({ ...r, amount: v }))} /></Field></div>
-              <div style={{ flex: 1 }}><Field label={t('currency')} required>
-                <Select value={editExpense.currency === 'USD' ? 'USD' : 'AED'} onChange={(v) => setEditExpense((r) => ({ ...r, currency: v }))}
-                  options={[{ value: 'AED', label: 'AED' }, { value: 'USD', label: 'USD' }]} />
-              </Field></div>
-            </div>
-            <Field label={t('expenseGroup')} required>
-              {(() => {
-                const ftype = formType || typeOfGroup(editExpense.groupId);
-                const opts = groups.filter((g) => (g.type || 'business') === ftype);
-                return <Select value={editExpense.groupId} onChange={(v) => setEditExpense((r) => ({ ...r, groupId: v }))} placeholder={opts.length ? '—' : t('noData')}
-                  options={opts.map((g) => ({ value: g.id, label: `${g.icon} ${groupName(g)}` }))} />;
-              })()}
-            </Field>
-            <Field label={t('date')}><Input type="date" value={editExpense.date} onChange={(v) => setEditExpense((r) => ({ ...r, date: v }))} /></Field>
-            <Field label={t('paidFrom')}>
+      {/* ── ONE add button, always reachable ── */}
+      <div style={{ position: 'fixed', insetInline: 0, bottom: 'calc(64px + env(safe-area-inset-bottom))', padding: '0 16px', zIndex: 20, pointerEvents: 'none' }}>
+        <button onClick={openAdd} style={{
+          pointerEvents: 'auto', width: '100%', maxWidth: 520, margin: '0 auto', display: 'block',
+          background: C.primary, color: '#fff', border: 'none', borderRadius: 14, padding: '13px', fontSize: 15, fontWeight: 900,
+          boxShadow: '0 6px 20px rgba(14,29,46,.28)', cursor: 'pointer',
+        }}>＋ {t('addExpense')}</button>
+      </div>
+
+      {/* ── Expense form: type → group → amount ── */}
+      <Modal open={!!editExpense} onClose={() => setEditExpense(null)} title={editExpense?.id ? `✎ ${t('edit')}` : `＋ ${t('addExpense')}`}
+        footer={<>
+          {editExpense?.id && <Btn variant="ghost" style={{ color: C.danger, marginInlineEnd: 'auto' }} onClick={() => { if (window.confirm(t('confirmDelete'))) { deleteRow(TABLES.expenses, editExpense.id); setEditExpense(null); } }}>🗑 {t('delete')}</Btn>}
+          <Btn variant="ghost" onClick={() => setEditExpense(null)}>{t('cancel')}</Btn>
+          <Btn onClick={saveExpense} disabled={!(num(editExpense?.amount) > 0) || !editExpense?.groupId}>{t('save')}</Btn>
+        </>}>
+        {editExpense && (() => {
+          const ex = editExpense;
+          const gs = groups.filter((g) => typeOf(g) === ex.type);
+          const set = (patch) => setEditExpense((r) => ({ ...r, ...patch }));
+          return (
+            <div style={{ display: 'grid', gap: 12 }}>
               <div style={{ display: 'flex', gap: 6 }}>
-                {[['bank', '🏦'], ['drawer', '🗄️']].map(([src, icon]) => {
-                  const on = (editExpense.paidFrom || 'bank') === src;
-                  return <button key={src} onClick={() => setEditExpense((r) => ({ ...r, paidFrom: src }))} style={{ flex: 1, border: `1.5px solid ${on ? C.primary : C.border}`, background: on ? C.primary : '#fff', color: on ? '#fff' : C.textMid, borderRadius: 10, padding: '8px 4px', fontSize: 12, fontWeight: 800, cursor: 'pointer' }}>{icon} {t(src === 'bank' ? 'bankAccount' : 'drawer')}</button>;
+                {['business', 'personal', 'home'].map((k) => {
+                  const on = ex.type === k; const m = TYPE_META[k];
+                  return (
+                    <button key={k} onClick={() => set({ type: k, groupId: '' })} style={{
+                      flex: 1, border: `1.5px solid ${on ? m.color : C.border}`, background: on ? m.color : '#fff', color: on ? '#fff' : C.textMid,
+                      borderRadius: 10, padding: '9px 4px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer',
+                    }}>{m.icon} {t(k)}</button>
+                  );
                 })}
               </div>
-            </Field>
-            <Field label={t('notes')}><Textarea value={editExpense.note} onChange={(v) => setEditExpense((r) => ({ ...r, note: v }))} rows={2} /></Field>
-            {editExpense.id && <Btn variant="outline" onClick={() => { if (window.confirm(t('confirmDelete'))) { deleteRow(TABLES.expenses, editExpense.id); closeExpense(); } }} style={{ color: C.danger }}>{t('delete')}</Btn>}
-          </div>
-        )}
+              <Field label={t('expenseGroup')} required>
+                {gs.length === 0 ? (
+                  <div style={{ fontSize: 12, color: C.textMuted }}>{t('noGroupsForType')} <button onClick={() => { setEditExpense(null); setEditGroup({ ...blankGroup(), type: ex.type }); }} style={{ border: 'none', background: 'none', color: C.primary, fontWeight: 800, cursor: 'pointer' }}>＋ {t('addGroup')}</button></div>
+                ) : (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {gs.map((g) => {
+                      const on = ex.groupId === g.id;
+                      return (
+                        <button key={g.id} onClick={() => set({ groupId: g.id })} style={{
+                          border: `1.5px solid ${on ? (g.color || C.primary) : C.border}`, background: on ? (g.color || C.primary) + '22' : '#fff',
+                          color: C.text, borderRadius: 999, padding: '6px 11px', fontSize: 12.5, fontWeight: on ? 900 : 700, cursor: 'pointer',
+                        }}>{g.icon} {groupName(g)}</button>
+                      );
+                    })}
+                  </div>
+                )}
+              </Field>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                <div style={{ flex: 2 }}><Field label={t('amount')} required>
+                  <Input type="number" inputMode="decimal" value={ex.amount} onChange={(v) => set({ amount: v })} placeholder="0.00" style={{ fontSize: 22, fontWeight: 900, padding: '10px 12px' }} />
+                </Field></div>
+                <div style={{ flex: 1 }}><Field label={t('currency')}>
+                  <Select value={ex.currency === 'USD' ? 'USD' : 'AED'} onChange={(v) => set({ currency: v })} options={[{ value: 'AED', label: 'AED' }, { value: 'USD', label: 'USD' }]} />
+                </Field></div>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ flex: 1 }}><Field label={t('date')}><Input type="date" value={ex.date} onChange={(v) => set({ date: v })} /></Field></div>
+                <div style={{ flex: 1 }}><Field label={t('paidFrom')}>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {[['bank', '🏦'], ['drawer', '🗄️']].map(([src, icon]) => {
+                      const on = (ex.paidFrom || 'bank') === src;
+                      return <button key={src} onClick={() => set({ paidFrom: src })} style={{ flex: 1, border: `1.5px solid ${on ? C.primary : C.border}`, background: on ? C.primary : '#fff', color: on ? '#fff' : C.textMid, borderRadius: 10, padding: '9px 4px', fontSize: 12, fontWeight: 800, cursor: 'pointer' }}>{icon} {t(src === 'bank' ? 'bankAccount' : 'drawer')}</button>;
+                    })}
+                  </div>
+                </Field></div>
+              </div>
+              {ex.date > today && <div style={{ fontSize: 11.5, color: C.warning, fontWeight: 700 }}>⏭️ {t('futureExpenseHint')}</div>}
+              <Field label={t('notes')}><Textarea value={ex.note} onChange={(v) => set({ note: v })} rows={2} placeholder={t('expenseNotePh')} /></Field>
+            </div>
+          );
+        })()}
       </Modal>
 
-      {/* Group modal */}
+      {/* ── Groups manager ── */}
+      <Modal open={groupsOpen} onClose={() => setGroupsOpen(false)} title={`⚙️ ${t('expenseGroups')}`}
+        footer={<><Btn variant="ghost" onClick={() => setGroupsOpen(false)}>{t('close')}</Btn><Btn onClick={() => setEditGroup(blankGroup())}>＋ {t('addGroup')}</Btn></>}>
+        {['business', 'personal', 'home'].map((k) => {
+          const gs = groups.filter((g) => typeOf(g) === k);
+          return (
+            <div key={k} style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 12, fontWeight: 900, color: TYPE_META[k].color, marginBottom: 6 }}>{TYPE_META[k].icon} {t(k)} <span style={{ color: C.textMuted, fontWeight: 600 }}>({gs.length})</span></div>
+              {gs.length === 0 ? <div style={{ fontSize: 11.5, color: C.textMuted }}>—</div> : (
+                <div style={{ display: 'grid', gap: 5 }}>
+                  {gs.map((g) => (
+                    <button key={g.id} onClick={() => setEditGroup({ ...g })} style={{ display: 'flex', alignItems: 'center', gap: 8, textAlign: 'start', border: `1px solid ${C.border}`, background: '#fff', borderRadius: 10, padding: '7px 10px', cursor: 'pointer', borderInlineStart: `4px solid ${g.color || C.border}` }}>
+                      <span style={{ fontSize: 16 }}>{g.icon}</span>
+                      <span style={{ flex: 1, fontSize: 12.5, fontWeight: 700, color: C.text }}>{groupName(g)}</span>
+                      <span style={{ color: C.textMuted, fontSize: 11 }}>✎</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </Modal>
+
+      {/* ── Group form (semantics unchanged) ── */}
       <Modal open={!!editGroup} onClose={() => setEditGroup(null)} title={editGroup?.id ? t('edit') : t('addGroup')}
         footer={<><Btn variant="ghost" onClick={() => setEditGroup(null)}>{t('cancel')}</Btn><Btn onClick={saveGroup}>{t('save')}</Btn></>}>
         {editGroup && (
@@ -341,8 +398,12 @@ export default function Expenses() {
               <Field label={`${t('groupName')} (EN)`}><Input value={editGroup.nameEn} onChange={(v) => setEditGroup((r) => ({ ...r, nameEn: v }))} /></Field>
             </div>
             <Field label={t('expenseType')} required>
-              <Select value={editGroup.type} onChange={(v) => setEditGroup((r) => ({ ...r, type: v }))}
-                options={[{ value: 'business', label: t('business') }, { value: 'personal', label: t('personal') }, { value: 'home', label: t('home') }]} />
+              <div style={{ display: 'flex', gap: 6 }}>
+                {['business', 'personal', 'home'].map((k) => {
+                  const on = editGroup.type === k; const m = TYPE_META[k];
+                  return <button key={k} onClick={() => setEditGroup((r) => ({ ...r, type: k }))} style={{ flex: 1, border: `1.5px solid ${on ? m.color : C.border}`, background: on ? m.color : '#fff', color: on ? '#fff' : C.textMid, borderRadius: 10, padding: '8px 4px', fontSize: 12, fontWeight: 800, cursor: 'pointer' }}>{m.icon} {t(k)}</button>;
+                })}
+              </div>
             </Field>
             <Field label={t('icon')}>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -356,7 +417,7 @@ export default function Expenses() {
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {CATEGORY_COLORS.map((col) => (
                   <button key={col} onClick={() => setEditGroup((r) => ({ ...r, color: col }))}
-                    style={{ width: 30, height: 30, borderRadius: 999, cursor: 'pointer', background: col, border: editGroup.color === col ? `3px solid ${C.text}` : `2px solid #fff`, boxShadow: '0 0 0 1px ' + C.border }} />
+                    style={{ width: 30, height: 30, borderRadius: 999, cursor: 'pointer', background: col, border: editGroup.color === col ? `3px solid ${C.text}` : '2px solid #fff', boxShadow: '0 0 0 1px ' + C.border }} />
                 ))}
               </div>
             </Field>
@@ -368,12 +429,36 @@ export default function Expenses() {
   );
 }
 
-function TabBtn({ active, onClick, children, small }) {
+// One expense row. Tapping opens the editor. Future-dated rows are marked so a planned
+// expense is never mistaken for one already paid.
+function ExpenseList({ list, groupById, groupName, onOpen, t, lang, today, cur, showGroup }) {
+  if (!list.length) return <EmptyState icon="🧾" text={t('noExpensesPeriod')} />;
   return (
-    <button onClick={onClick} style={{
-      padding: small ? '6px 12px' : '8px 14px', borderRadius: 10, fontWeight: 700, fontSize: small ? 12 : 13, cursor: 'pointer',
-      background: active ? C.primary : '#fff', color: active ? '#fff' : C.textMid, border: `1px solid ${active ? C.primary : C.border}`,
-    }}>{children}</button>
+    <div style={{ display: 'grid', gap: 6 }}>
+      {list.map((e) => {
+        const g = groupById(e.groupId);
+        const future = (e.date || '') > today;
+        const ty = typeOf(g);
+        return (
+          <Card key={e.id} onClick={() => onOpen(e)} style={{ padding: '9px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, ...(future ? { border: `1px dashed ${C.warning}` } : {}) }}>
+            <div style={{ fontSize: 11, color: C.textMuted, minWidth: 44, textAlign: 'center', lineHeight: 1.25 }}>
+              <div style={{ fontWeight: 900, color: C.text, fontSize: 15 }}>{(e.date || '').slice(8)}</div>
+              <div>{e.date ? shortMonth(e.date.slice(0, 7), lang) : '—'}</div>
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: C.text, overflowWrap: 'anywhere' }}>
+                {e.note?.trim() || (g ? groupName(g) : t('other'))} {future && <Badge tone="warning">⏭️</Badge>}
+              </div>
+              <div style={{ fontSize: 10.5, color: C.textMuted }}>
+                {showGroup && g ? `${g.icon} ${groupName(g)} · ` : ''}{TYPE_META[ty].icon} {t(ty)} · {e.paidFrom === 'drawer' ? '🗄️' : '🏦'} {t(e.paidFrom === 'drawer' ? 'drawer' : 'bankAccount')}
+              </div>
+            </div>
+            <div style={{ fontWeight: 900, color: C.text, fontSize: 14, whiteSpace: 'nowrap' }}>
+              {e.currency === 'USD' ? `$${num(e.amount).toFixed(2)}` : cur(num(e.amount))}
+            </div>
+          </Card>
+        );
+      })}
+    </div>
   );
 }
-

@@ -151,6 +151,39 @@ console.log('\n─── Buying a stock: money must leave the account it really 
   ok('and leaves the bank untouched (why cash "did not move")', accountLedger(d2).balances.bank.AED === 0);
 }
 
+
+console.log('\n─── Expenses screen period math must equal the dashboard ───');
+{
+  // The screen's own helpers, reproduced: a month runs 01 → last day, the previous
+  // month is the comparison, and a year is 01-01 → 12-31.
+  const ym = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  const iso = (d) => `${ym(d)}-${String(d.getDate()).padStart(2, '0')}`;
+  const monthBounds = (s) => { const [y, m] = s.split('-').map(Number); return { from: iso(new Date(y, m - 1, 1)), to: iso(new Date(y, m, 0)), pf: iso(new Date(y, m - 2, 1)), pt: iso(new Date(y, m - 1, 0)) }; };
+
+  const b = monthBounds('2026-09');
+  ok('September runs to the 30th, not to today', b.to === '2026-09-30');
+  ok('the comparison is the whole of August', b.pf === '2026-08-01' && b.pt === '2026-08-31');
+  const feb = monthBounds('2024-02');
+  ok('leap February ends on the 29th', feb.to === '2024-02-29');
+  const jan = monthBounds('2026-01');
+  ok('January compares against December of the previous year', jan.pf === '2025-12-01' && jan.pt === '2025-12-31');
+
+  // Same bounds fed to pnl() give the same month total the screen shows.
+  const d = base();
+  d[TABLES.expenseGroups] = [{ id: 'g1', type: 'personal' }, { id: 'g2', type: 'business' }];
+  d[TABLES.expenses] = [
+    { id: 'e1', date: '2026-09-01', amount: 3471, currency: 'AED', groupId: 'g1' },
+    { id: 'e2', date: '2026-09-28', amount: 500, currency: 'AED', groupId: 'g2' },   // later in the month, after "today"
+    { id: 'e3', date: '2026-08-15', amount: 34710, currency: 'AED', groupId: 'g1' },
+  ];
+  const p = pnl(d, { from: b.from, to: b.to });
+  ok('screen and dashboard agree on the month total', p.personalExp + p.businessExp === 3971, `${p.personalExp + p.businessExp}`);
+  ok('an expense later this month is included in this month', p.businessExp === 500);
+  const prev = pnl(d, { from: b.pf, to: b.pt });
+  ok('the previous-month figure used for the delta is the whole of August', prev.personalExp === 34710);
+  ok('delta computes as the screen shows it', Math.round(((3971 - 34710) / 34710) * 100) === -89);
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${pass + fail} checks · ${fail} failure(s)`);
 console.log(fail ? 'PAYABLES/EXPENSES: PROBLEMS FOUND' : 'PAYABLES/EXPENSES: CLEAN');
