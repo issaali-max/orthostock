@@ -38,22 +38,27 @@ const mv = investmentMovements(data);
 if (!mv.every((m) => m.currency === 'USD')) { console.error('✗ حركات الاستثمار ليست كلها USD'); process.exit(1); }
 console.log('✓ كل حركات الاستثمار USD');
 
-// ═══ اختيار عملة التحويل الصريح ═══
-// درج→بنك بالدولار: يبقى دولاراً 1:1 (محفظتان متعددتا العملات)
-legs = transferLegs({ from: 'drawer', to: 'bank', amount: 100, currency: 'USD', rate: 3.6725, convertToAED: false });
-eq([legs[0].currency, legs[1].amount, legs[1].currency], ['USD', 100, 'USD'], 'درج→بنك $100 يبقى $100');
-// درج (دولار)→بنك مع «استلام بالدرهم»: يتحول بالسعر
-legs = transferLegs({ from: 'drawer', to: 'bank', amount: 100, currency: 'USD', rate: 3.6725, convertToAED: true });
-eq([legs[1].amount, legs[1].currency], [367.25, 'AED'], 'درج$→بنك بالدرهم = 367.25');
-// درج (دولار)→استثمار: نفس الدولار بلا تحويل
-legs = transferLegs({ from: 'drawer', to: 'investment', amount: 100, currency: 'USD', rate: 3.6725 });
-eq([legs[1].amount, legs[1].currency], [100, 'USD'], 'درج$→استثمار $100 كما هو');
-// استثمار→بنك مع الاستلام بالدرهم (السحب المعتاد من الوسيط)
-legs = transferLegs({ from: 'investment', to: 'bank', amount: 100, currency: 'USD', rate: 3.6725, convertToAED: true });
-eq([legs[1].amount, legs[1].currency], [367.25, 'AED'], 'استثمار→بنك بالدرهم');
-// استثمار→بنك مع إبقاء الدولار
-legs = transferLegs({ from: 'investment', to: 'bank', amount: 100, currency: 'USD', rate: 3.6725, convertToAED: false });
-eq([legs[1].amount, legs[1].currency], [100, 'USD'], 'استثمار→بنك يبقى $');
+// ═══ اختيار عملة الإدخال ═══
+// `currency` يقول بأي عملة كتبتَ المبلغ — ولا يغيّر عملة الحساب. البنك والدرج بالدرهم
+// دائماً والاستثمار بالدولار (السطر ٦). الاختبارات السابقة هنا كانت تفترض أن الدرج قد
+// يحمل دولاراً، وهو الافتراض نفسه الذي جعل تحويل 1000$ يخصم 1000 درهم فقط من البنك
+// ويودع 1000$ في الاستثمار — أي اختراع ~2,672 درهماً من العدم.
+
+legs = transferLegs({ from: 'bank', to: 'investment', amount: 1000, currency: 'USD', rate: 3.6725 });
+eq([legs[0].amount, legs[0].currency, legs[1].amount, legs[1].currency], [3672.5, 'AED', 1000, 'USD'], 'بنك→استثمار: كتابة 1000$ تخصم 3672.5 درهماً');
+
+legs = transferLegs({ from: 'bank', to: 'investment', amount: 3672.5, currency: 'AED', rate: 3.6725 });
+eq([legs[0].amount, legs[0].currency, legs[1].amount, legs[1].currency], [3672.5, 'AED', 1000, 'USD'], 'بنك→استثمار: كتابته بالدرهم تعطي النتيجة ذاتها');
+
+legs = transferLegs({ from: 'drawer', to: 'bank', amount: 500, currency: 'AED', rate: 3.6725 });
+eq([legs[0].amount, legs[0].currency, legs[1].amount, legs[1].currency], [500, 'AED', 500, 'AED'], 'درج→بنك بلا تحويل');
+
+legs = transferLegs({ from: 'drawer', to: 'bank', amount: 100, currency: 'USD', rate: 3.6725 });
+eq([legs[0].amount, legs[0].currency, legs[1].amount, legs[1].currency], [367.25, 'AED', 367.25, 'AED'], 'درج→بنك: كتابة 100$ = 367.25 درهماً في حسابين بالدرهم');
+
+legs = transferLegs({ from: 'investment', to: 'bank', amount: 100, currency: 'USD', rate: 3.6725 });
+eq([legs[0].amount, legs[0].currency, legs[1].amount, legs[1].currency], [100, 'USD', 367.25, 'AED'], 'استثمار→بنك: 100$ = 367.25 درهماً');
+
 console.log('\nEXPLICIT-CURRENCY TRANSFER TESTS PASSED');
 
 console.log('\nALL CURRENCY TESTS PASSED');

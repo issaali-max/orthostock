@@ -174,14 +174,22 @@ export const ACCOUNT_CURRENCY = { bank: 'AED', drawer: 'AED', investment: 'USD' 
 // Conversion happens ONLY here, explicitly, at the given rate.
 export function transferLegs({ from, to, amount, currency, rate, convertToAED = false, toAmount }) {
   const a = num(amount); const r = num(rate) || 3.6725;
-  const cFrom = currency || ACCOUNT_CURRENCY[from] || 'AED';
-  const cTo = to === 'investment' ? 'USD' : (cFrom === 'USD' && convertToAED ? 'AED' : cFrom);
+  // An account holds ONE currency: bank and drawer are AED, investment is USD. `currency`
+  // says which currency the USER typed the amount in — it does NOT change what the source
+  // account holds. Treating it as the source currency meant typing 1000 USD debited the
+  // AED bank by 1000 AED while crediting investment 1000 USD, inventing roughly 2,672 AED
+  // out of nothing on every such transfer.
+  const cFrom = ACCOUNT_CURRENCY[from] || 'AED';
+  const cTo = ACCOUNT_CURRENCY[to] || (to === 'investment' ? 'USD' : (convertToAED ? 'AED' : cFrom));
+  const typed = currency === 'USD' ? 'USD' : (currency === 'AED' ? 'AED' : cFrom);
+  const conv = (v, fromCur, toCur) => (fromCur === toCur ? round2(v) : (fromCur === 'USD' ? round2(v * r) : round2(v / r)));
+  // What actually leaves the source, in the source's own currency.
+  const outAmount = conv(a, typed, cFrom);
   // `toAmount` pins the destination leg exactly (e.g. the USD cost of a buy) so the pot
   // being funded receives precisely what it needs rather than a rate-rounded neighbour.
-  const target = toAmount != null ? round2(num(toAmount))
-    : (cFrom === cTo ? round2(a) : (cFrom === 'USD' ? round2(a * r) : round2(a / r)));
+  const target = toAmount != null ? round2(num(toAmount)) : conv(a, typed, cTo);
   return [
-    { account: from, type: from === 'investment' ? 'withdraw' : 'transferOut', amount: round2(a), currency: cFrom, toAccount: to },
+    { account: from, type: from === 'investment' ? 'withdraw' : 'transferOut', amount: outAmount, currency: cFrom, toAccount: to },
     { account: to, type: to === 'investment' ? 'deposit' : 'transferIn', amount: target, currency: cTo, fromAccount: from },
   ];
 }

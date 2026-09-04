@@ -3,6 +3,7 @@
 // reduce the payable; writing off must reduce the payable and touch NO account. And a
 // period must be closed at both ends so the dashboard and the expenses list agree.
 import { supplierDebt, accountLedger, pnl, portfolioStats, transferLegs } from '../src/lib/engine.js';
+import { round2 } from '../src/lib/money.js';
 import { TABLES } from '../src/lib/constants.js';
 
 let pass = 0, fail = 0;
@@ -182,6 +183,38 @@ console.log('\n─── Expenses screen period math must equal the dashboard �
   const prev = pnl(d, { from: b.pf, to: b.pt });
   ok('the previous-month figure used for the delta is the whole of August', prev.personalExp === 34710);
   ok('delta computes as the screen shows it', Math.round(((3971 - 34710) / 34710) * 100) === -89);
+}
+
+
+console.log('\n─── An account can only be debited in ITS OWN currency ───');
+{
+  const r = 3.6725;
+  // Typing the amount in USD must convert what leaves the AED bank, not relabel it.
+  const usd = transferLegs({ from: 'bank', to: 'investment', amount: 1000, currency: 'USD', rate: r });
+  ok('the bank leg is in AED whatever currency was typed', usd[0].currency === 'AED');
+  ok('typing 1000 USD debits the bank its AED equivalent', usd[0].amount === 3672.5, `${usd[0].amount}`);
+  ok('the investment leg receives exactly the USD typed', usd[1].amount === 1000 && usd[1].currency === 'USD');
+  ok('no money is invented: both legs are worth the same', round2(usd[0].amount / r) === usd[1].amount, `${round2(usd[0].amount / r)} vs ${usd[1].amount}`);
+
+  // Typing in AED behaves as before.
+  const aed = transferLegs({ from: 'bank', to: 'investment', amount: 3672.5, currency: 'AED', rate: r });
+  ok('typing AED debits the bank that exact amount', aed[0].amount === 3672.5 && aed[0].currency === 'AED');
+  ok('the investment leg is the USD equivalent', aed[1].amount === 1000 && aed[1].currency === 'USD');
+
+  // Both entry styles must produce an identical pair of legs.
+  ok('the same transfer typed either way lands identically',
+    JSON.stringify(usd) === JSON.stringify(aed), `${JSON.stringify(usd)} vs ${JSON.stringify(aed)}`);
+
+  // Withdrawing back out.
+  const out = transferLegs({ from: 'investment', to: 'bank', amount: 500, currency: 'USD', rate: r });
+  ok('investment is debited in USD', out[0].currency === 'USD' && out[0].amount === 500);
+  ok('the bank receives AED', out[1].currency === 'AED' && out[1].amount === 1836.25, `${out[1].amount}`);
+  ok('a round trip conserves value', round2(out[1].amount / r) === out[0].amount);
+
+  // Drawer ↔ bank, both AED, must never convert.
+  const same = transferLegs({ from: 'drawer', to: 'bank', amount: 500, currency: 'AED', rate: r });
+  ok('an AED-to-AED transfer moves the same amount', same[0].amount === 500 && same[1].amount === 500);
+  ok('an AED-to-AED transfer never converts', same[0].currency === 'AED' && same[1].currency === 'AED');
 }
 
 console.log('\n═══════════════════════════════════════');
