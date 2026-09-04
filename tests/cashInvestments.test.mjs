@@ -92,34 +92,48 @@ ok('financialPosition exposes the split', fin.investmentSplit.stocks.USD === 300
 // Everything old trades did is already inside holdings and cash, so nothing needs
 // to be remembered about them.
 {
-  const need = (holdCost, realCash, capital) => r2(holdCost + realCash - capital);
+  // The engine's cash formula, written out:
+  //   cash = capital + adjustment − buysCost + sellsProceeds
+  // with buysCost = holdCost + costOfSold and sellsProceeds = costOfSold + realized, so
+  //   cash = capital + adjustment − holdCost + realized.
+  const cashAfter = (capital, adjustment, holdCost, realized) => r2(capital + adjustment - holdCost + realized);
+  // Solving that for the adjustment that makes cash equal the broker figure:
+  const need = (holdCost, realCash, capital, realized = 0) => r2(holdCost + realCash - capital - realized);
 
-  // Issa's real position: $100,000 in, holdings costing $115,163.06, ~$122 at the broker.
-  const adj = need(115163.06, 122, 100000);
-  ok('the adjustment is forced by the three known numbers', adj === 15285.06, `${adj}`);
-  ok('it differs from the blind deficit figure that was booked', adj !== 15812.06);
+  // Issa's real position: $100,000 in, holdings costing $115,163.06, $122.43 at the
+  // broker, and $9,120.64 of realized profit from sells recorded IN the app.
+  const adj = need(115163.06, 122.43, 100000, 9120.64);
+  ok('the adjustment subtracts realized profit already in cash', adj === 6164.85, `${adj}`);
+  ok('applying it reproduces broker cash exactly', cashAfter(100000, adj, 115163.06, 9120.64) === 122.43, `${cashAfter(100000, adj, 115163.06, 9120.64)}`);
 
-  // Feeding it back must reproduce the real cash exactly.
-  const cashAfter = (capital, adjustment, holdCost) => r2(capital + adjustment - holdCost);
-  ok('applying it makes app cash equal broker cash', cashAfter(100000, adj, 115163.06) === 122, `${cashAfter(100000, adj, 115163.06)}`);
-  ok('the old figure did NOT reproduce broker cash', cashAfter(100000, 15812.06, 115163.06) !== 122);
+  // The bug this replaces: ignoring realized profit left cash exactly `realized` too high.
+  const naive = r2(115163.06 + 122.43 - 100000);
+  ok('ignoring realized profit overstates the adjustment', naive === 15285.49, `${naive}`);
+  ok('and leaves cash high by exactly the realized profit',
+    r2(cashAfter(100000, naive, 115163.06, 9120.64) - 122.43) === 9120.64, `${r2(cashAfter(100000, naive, 115163.06, 9120.64) - 122.43)}`);
+  ok('the blind-deficit figure was wrong too', 15812.06 !== adj);
 
-  // Capital is never touched — the owner's real money in stays the owner's real money in.
+  // An account with no sells recorded: realized is zero and the simple form holds.
+  ok('with no recorded sells the realized term vanishes', need(115163.06, 122.43, 100000, 0) === 15285.49);
+
+  // Capital is never touched.
   ok('capital put in is unaffected by any adjustment', 100000 === 100000);
 
-  // A broker with zero cash (everything invested) is a normal case, not an error.
-  ok('zero broker cash works', need(115163.06, 0, 100000) === 15163.06);
+  // Fully invested, nothing at the broker.
+  ok('zero broker cash works', need(115163.06, 0, 100000, 0) === 15163.06);
 
-  // If the app already matches the broker, no adjustment is needed at all.
-  ok('a matching account needs no adjustment', need(100000, 0, 100000) === 0);
+  // Already matching — no adjustment at all.
+  ok('a matching account needs no adjustment', need(100000, 0, 100000, 0) === 0);
 
-  // Losses: holdings worth less than capital with little cash → a NEGATIVE adjustment.
-  ok('past losses produce a negative adjustment', need(60000, 100, 100000) === -39900);
+  // Past LOSSES produce a negative adjustment.
+  ok('past losses produce a negative adjustment', need(60000, 100, 100000, 0) === -39900);
 
-  // Re-running with the same inputs must not stack — it replaces.
-  const first = need(115163.06, 122, 100000);
-  const second = need(115163.06, 122, 100000);
-  ok('reconciling twice yields the same figure, not double', first === second);
+  // Realized LOSSES (negative realized) push the adjustment the other way.
+  ok('a realized loss increases the adjustment', need(115163.06, 122.43, 100000, -5000) === 20285.49);
+
+  // Idempotent: same inputs, same figure — it replaces rather than stacks.
+  ok('reconciling twice yields the same figure, not double',
+    need(115163.06, 122.43, 100000, 9120.64) === need(115163.06, 122.43, 100000, 9120.64));
 }
 
 console.log(fail === 0 ? '\nALL CASH & INVESTMENT TESTS PASSED' : `\n${fail} FAILED`);

@@ -419,7 +419,15 @@ export default function Investments() {
       {(() => {
         const holdCost = round2(stats.positions.reduce((a, p) => a + num(p.remainingCost), 0));
         const existing = round2(num(stats.pastProfit));
-        const needed = round2(holdCost + num(reconCash) - num(stats.netCapital));
+        // `cash` already contains the realized profit of every sell recorded IN the app:
+        //   cash = capital + pastProfit − buysCost + sellsProceeds
+        // and buysCost = holdCost + costOfSold, sellsProceeds = costOfSold + realized, so
+        //   cash = capital + pastProfit − holdCost + realized.
+        // Solving for the adjustment that makes cash equal the broker's figure therefore
+        // has to subtract that realized profit — otherwise it is counted twice and cash
+        // lands exactly `realized` above the real balance, which is what happened.
+        const realized = round2(num(stats.totalRealized));
+        const needed = round2(holdCost + num(reconCash) - num(stats.netCapital) - realized);
         const delta = round2(needed - existing);
         const off = Math.abs(round2(num(stats.cash) - num(reconCash)));
         if (!reconOpen) {
@@ -441,6 +449,7 @@ export default function Investments() {
               <Line label={t('depositedTotal')} value={fmtUSD(stats.netCapital)} />
               <Line label={t('holdingsCost')} value={fmtUSD(holdCost)} />
               <Line label={t('realBrokerCash')} value={fmtUSD(num(reconCash))} />
+              {Math.abs(realized) >= 0.01 && <Line label={t('realizedInApp')} value={fmtUSD(realized)} />}
               <div style={{ borderTop: `1px dashed ${C.border}`, marginTop: 4, paddingTop: 4 }} />
               <Line label={t('pastProfitNeeded')} value={fmtUSD(needed)} strong />
               <Line label={t('pastProfitNow')} value={fmtUSD(existing)} />
