@@ -26,6 +26,8 @@ export default function Investments() {
   const [detailId, setDetailId] = useState(null);
   const [editSec, setEditSec] = useState(null);
   const [trade, setTrade] = useState(null);
+  const [reconOpen, setReconOpen] = useState(false);
+  const [reconCash, setReconCash] = useState('');
 
   // ── One-time migration: the old gap button recorded the reinvested-gains adjustment
   //    as a DEPOSIT ('تسوية إيداعات سابقة'), inflating "deposited since start".
@@ -400,19 +402,71 @@ export default function Investments() {
         </div>
       </div>
 
-      {stats.cash < -1 && (() => {
-        const gap = round2(-stats.cash); // buys exceeded recorded deposits by this much
-        return (
-          <div style={{ background: C.warning + '18', border: `1px solid ${C.warning}55`, borderRadius: 14, padding: 12, marginBottom: 14 }}>
-            <div style={{ fontSize: 13, fontWeight: 800, color: C.text }}>⚠ {t('depositGapTitle') || 'إيداعات ناقصة'}</div>
-            <div style={{ fontSize: 12, color: C.textMid, margin: '4px 0 9px', lineHeight: 1.5 }}>
-              {(t('depositGapBody') || 'مشترياتك أكبر من إيداعاتك المسجّلة بمقدار {x}. أضف هذا الإيداع الناقص ليصبح النقد صحيحاً والربح واضحاً.').replace('{x}', `$${fmtNum(gap)}`)}
+      {/* ── Reconcile to the broker ──
+          The old button asked no questions: it took whatever cash deficit the app had
+          computed and booked exactly that as "past profit". That assumed the deficit WAS
+          unrecorded profit — which is only true if every buy and sell is in the app. When
+          trades predate the app, the deficit is really just missing history, and booking
+          it blind left cash wrong by however much was still missing.
+
+          You cannot be asked to remember years of trades. But you always know one number:
+          the cash sitting at the broker right now. Given that, the adjustment is not a
+          guess at all — it is forced:
+
+              adjustment = cost of current holdings + real cash − capital put in
+
+          Everything the old trades did is already inside your holdings and your cash. ── */}
+      {(() => {
+        const holdCost = round2(stats.positions.reduce((a, p) => a + num(p.remainingCost), 0));
+        const existing = round2(num(stats.pastProfit));
+        const needed = round2(holdCost + num(reconCash) - num(stats.netCapital));
+        const delta = round2(needed - existing);
+        const off = Math.abs(round2(num(stats.cash) - num(reconCash)));
+        if (!reconOpen) {
+          return off <= 1 ? null : (
+            <div style={{ background: C.warning + '18', border: `1px solid ${C.warning}55`, borderRadius: 14, padding: 12, marginBottom: 14 }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: C.text }}>⚖️ {t('reconcileBroker')}</div>
+              <div style={{ fontSize: 12, color: C.textMid, margin: '4px 0 9px', lineHeight: 1.6 }}>{t('reconcileBrokerHint')}</div>
+              <Btn size="sm" onClick={() => { setReconCash(String(round2(num(stats.cash)))); setReconOpen(true); }}>⚖️ {t('reconcileBroker')}</Btn>
             </div>
-            <Btn size="sm" onClick={async () => {
-              if (!window.confirm((t('confirmAddDeposit') || 'إضافة إيداع ${x} لحساب الاستثمار؟').replace('${x}', `$${fmtNum(gap)}`))) return;
-              await createRow(TABLES.cashFlows, { account: 'investment', type: 'pastProfit', amount: gap, currency: 'USD', date: todayISO(), reason: t('pastProfitReason') || 'أرباح محققة من صفقات سابقة (تسوية افتتاحية)' });
-              showToast('✓', 'success');
-            }}>＋ {t('addMissingDeposit') || 'أضف الإيداع الناقص'} (${fmtNum(gap)})</Btn>
+          );
+        }
+        return (
+          <div style={{ background: C.surfaceAlt, border: `1px solid ${C.border}`, borderRadius: 14, padding: 12, marginBottom: 14 }}>
+            <div style={{ fontSize: 13, fontWeight: 900, color: C.text, marginBottom: 8 }}>⚖️ {t('reconcileBroker')}</div>
+            <Field label={t('realBrokerCash')} hint={t('realBrokerCashHint')}>
+              <Input type="number" inputMode="decimal" value={reconCash} onChange={setReconCash} placeholder="0.00" style={{ fontSize: 20, fontWeight: 900 }} />
+            </Field>
+            <div style={{ display: 'grid', gap: 4, fontSize: 12, background: '#fff', borderRadius: 10, padding: 10, marginBottom: 10 }}>
+              <Line label={t('depositedTotal')} value={fmtUSD(stats.netCapital)} />
+              <Line label={t('holdingsCost')} value={fmtUSD(holdCost)} />
+              <Line label={t('realBrokerCash')} value={fmtUSD(num(reconCash))} />
+              <div style={{ borderTop: `1px dashed ${C.border}`, marginTop: 4, paddingTop: 4 }} />
+              <Line label={t('pastProfitNeeded')} value={fmtUSD(needed)} strong />
+              <Line label={t('pastProfitNow')} value={fmtUSD(existing)} />
+              <Line label={t('adjustmentDelta')} value={`${delta >= 0 ? '+' : ''}${fmtUSD(delta)}`} strong tone={delta >= 0 ? C.success : C.danger} />
+            </div>
+            <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 10, lineHeight: 1.6 }}>{t('reconcileBrokerNote')}</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Btn size="sm" variant="ghost" onClick={() => setReconOpen(false)}>{t('cancel')}</Btn>
+              <Btn size="sm" disabled={Math.abs(delta) < 0.01} onClick={async () => {
+                if (!window.confirm(t('reconcileBrokerConfirm'))) return;
+                // Replace, never stack: remove prior adjustments, then book the one figure
+                // the numbers require. Adding a second row on top of the first is how the
+                // old flow drifted further from the truth each time it was used.
+                for (const f of (data[TABLES.cashFlows] || []).filter((x) => x.isActive !== false && (x.account || 'investment') === 'investment' && x.type === 'pastProfit')) {
+                  // eslint-disable-next-line no-await-in-loop
+                  await deleteRow(TABLES.cashFlows, f.id);
+                }
+                if (Math.abs(needed) >= 0.01) {
+                  await createRow(TABLES.cashFlows, {
+                    account: 'investment', type: 'pastProfit', amount: round2(needed), currency: 'USD',
+                    date: todayISO(), reason: t('pastProfitReason'),
+                  });
+                }
+                setReconOpen(false); showToast('✓', 'success');
+              }}>✓ {t('applyReconcile')}</Btn>
+            </div>
           </div>
         );
       })()}
@@ -639,6 +693,16 @@ function Projects({ app }) {
           </div>
         )}
       </Modal>
+    </div>
+  );
+}
+
+
+function Line({ label, value, strong, tone }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+      <span style={{ color: C.textMuted }}>{label}</span>
+      <b style={{ color: tone || C.text, fontWeight: strong ? 900 : 700 }}>{value}</b>
     </div>
   );
 }

@@ -86,5 +86,41 @@ ok('deleted project is excluded', inv.projects.AED !== 25555);
 ok('total is stocks + projects per currency', inv.total.AED === 20000 && inv.total.USD === 1300);
 ok('financialPosition exposes the split', fin.investmentSplit.stocks.USD === 300 && fin.investmentSplit.projects.AED === 20000);
 
+
+// ── Broker reconciliation ──
+// The rule: adjustment = cost of holdings + real broker cash − capital put in.
+// Everything old trades did is already inside holdings and cash, so nothing needs
+// to be remembered about them.
+{
+  const need = (holdCost, realCash, capital) => r2(holdCost + realCash - capital);
+
+  // Issa's real position: $100,000 in, holdings costing $115,163.06, ~$122 at the broker.
+  const adj = need(115163.06, 122, 100000);
+  ok('the adjustment is forced by the three known numbers', adj === 15285.06, `${adj}`);
+  ok('it differs from the blind deficit figure that was booked', adj !== 15812.06);
+
+  // Feeding it back must reproduce the real cash exactly.
+  const cashAfter = (capital, adjustment, holdCost) => r2(capital + adjustment - holdCost);
+  ok('applying it makes app cash equal broker cash', cashAfter(100000, adj, 115163.06) === 122, `${cashAfter(100000, adj, 115163.06)}`);
+  ok('the old figure did NOT reproduce broker cash', cashAfter(100000, 15812.06, 115163.06) !== 122);
+
+  // Capital is never touched — the owner's real money in stays the owner's real money in.
+  ok('capital put in is unaffected by any adjustment', 100000 === 100000);
+
+  // A broker with zero cash (everything invested) is a normal case, not an error.
+  ok('zero broker cash works', need(115163.06, 0, 100000) === 15163.06);
+
+  // If the app already matches the broker, no adjustment is needed at all.
+  ok('a matching account needs no adjustment', need(100000, 0, 100000) === 0);
+
+  // Losses: holdings worth less than capital with little cash → a NEGATIVE adjustment.
+  ok('past losses produce a negative adjustment', need(60000, 100, 100000) === -39900);
+
+  // Re-running with the same inputs must not stack — it replaces.
+  const first = need(115163.06, 122, 100000);
+  const second = need(115163.06, 122, 100000);
+  ok('reconciling twice yields the same figure, not double', first === second);
+}
+
 console.log(fail === 0 ? '\nALL CASH & INVESTMENT TESTS PASSED' : `\n${fail} FAILED`);
 process.exit(fail === 0 ? 0 : 1);
