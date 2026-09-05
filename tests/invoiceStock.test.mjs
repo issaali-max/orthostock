@@ -269,7 +269,21 @@ console.log('\n─── 7. The detector finds a damaged invoice and clears a he
   ok('the damaged invoice is detected', !!hit);
   ok('the missing amount is reported exactly', hit && hit.gap === 2068, `${hit && hit.gap}`);
   ok('it is flagged as a line problem', hit && hit.issues.includes('lines'));
-  ok('a line with no stock movement is flagged', hit && hit.issues.includes('stock'));
+  // An invoice with NO movements at all is treated as mid-sync, not as damage — a
+  // detector that fires on healthy data is one you learn to ignore. The real fault is
+  // an invoice that HAS movements but is missing one for a specific line.
+  ok('an invoice with no movements at all is not flagged for stock', hit && !hit.issues.includes('stock'));
+
+  const partial = await db.insert(TABLES.invoices, { invoiceNumber: 'INV-PART', date: '2026-09-02', customerId: 'c1', currency: 'AED', status: 'active', total: 800, paidAmount: 0, paymentStatus: 'unpaid', payments: [] });
+  await db.insert(TABLES.invoiceItems, { invoiceId: partial.id, variantId: 'w16', qty: 10, listPrice: 39, unitPrice: 39, netUnitPrice: 39, total: 390, netTotal: 390 });
+  await db.insert(TABLES.invoiceItems, { invoiceId: partial.id, variantId: 'r16', qty: 10, listPrice: 41, unitPrice: 41, netUnitPrice: 41, total: 410, netTotal: 410 });
+  // Only ONE of the two lines has a movement behind it.
+  await db.insert(TABLES.stockMovements, { variantId: 'w16', type: 'sale', qtyChange: -10, qtyAfter: 0, refType: 'invoice', refId: partial.id });
+  await all();
+  const hitP = invoiceLineMismatches(app.data).find((f) => f.invoiceNumber === 'INV-PART');
+  ok('a line missing its movement IS flagged when others have one', hitP && hitP.issues.includes('stock'), JSON.stringify(hitP));
+  ok('exactly one line is reported as missing its movement', hitP && hitP.missingMovements === 1, `${hitP && hitP.missingMovements}`);
+  ok('its totals still reconcile, so it is a stock-only fault', hitP && !hitP.issues.includes('lines'), JSON.stringify(hitP && hitP.issues));
   ok('healthy invoices are still not flagged', !found2.some((f) => f.invoiceNumber === 'INV-1'));
 }
 

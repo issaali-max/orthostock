@@ -1002,8 +1002,12 @@ export function invoiceLineMismatches(data) {
     const total = round2(num(inv.total));
     const gap = round2(total - lineSum);
     // Lines with no stock movement behind them: billed but never taken off the shelf.
+    // Only meaningful if the invoice has SOME movements — an invoice with none at all is
+    // either mid-sync (its movements have not arrived on this device yet) or predates
+    // movement tracking. Flagging those would cry wolf on every partial sync, and a
+    // detector that fires on healthy data is one you learn to ignore.
     const moves = (data[TABLES.stockMovements] || []).filter((m) => m.refType === 'invoice' && m.refId === inv.id && m.isActive !== false);
-    const noMove = mine.filter((it) => !moves.some((m) => m.variantId === it.variantId));
+    const noMove = moves.length === 0 ? [] : mine.filter((it) => !moves.some((m) => m.variantId === it.variantId));
     if (Math.abs(gap) <= 0.02 && noMove.length === 0) continue;
     out.push({
       id: inv.id, invoiceNumber: inv.invoiceNumber, date: inv.date,
@@ -1175,6 +1179,16 @@ function soaEvents(data, customerId) {
       // accountLedger deliberately excludes it there until it clears.)
       const pending = p.method === 'cheque' && p.chequeStatus !== 'cleared';
       ev.push({ date: p.date || inv.date || '', kind: 'payment', ref: inv.invoiceNumber || '', invoiceId: inv.id, debit: 0, credit: round2(num(p.amount)), method: p.method || 'cash', pending });
+    }
+    // paidAmount is the authoritative figure for what the customer has paid; payments[]
+    // is the dated log of it. If the log is short — a payment recorded on another device
+    // whose log entry has not synced yet, or one made before logging existed — credit the
+    // remainder undated. Without this the statement demands money the clinic has already
+    // paid, which is the one error a customer-facing document must never make.
+    const loggedOnInv = round2((inv.payments || []).reduce((s, p) => s + num(p.amount), 0));
+    const unloggedOnInv = round2(num(inv.paidAmount) - loggedOnInv);
+    if (unloggedOnInv > 0.005) {
+      ev.push({ date: '', kind: 'payment', ref: inv.invoiceNumber || '', invoiceId: inv.id, debit: 0, credit: unloggedOnInv, method: '' });
     }
   }
   // Chronological; on the same day an invoice is raised before it is paid.
