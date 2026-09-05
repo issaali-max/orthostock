@@ -9,7 +9,7 @@ globalThis.localStorage = globalThis.localStorage || { getItem: () => null, setI
 
 const { TABLES } = await import('../src/lib/constants.js');
 const db = await import('../src/db/db.js');
-const { saveInvoiceAtomic, invoiceBreakdown, pnl, customerStats, invoiceLineMismatches } = await import('../src/lib/engine.js');
+const { saveInvoiceAtomic, invoiceBreakdown, pnl, customerStats, invoiceLineMismatches, proposeInvoiceLinesFromMovements } = await import('../src/lib/engine.js');
 const { round2, num } = await import('../src/lib/money.js');
 
 let pass = 0, fail = 0; const findings = [];
@@ -313,6 +313,51 @@ console.log('\n─── 8. Severity: rounding and pre-tracking invoices must NO
   const idxOf = (sev) => list.findIndex((x) => x.severity === sev);
   const iEmpty = idxOf('empty'), iRound = idxOf('rounding');
   ok('rounding is ranked last', iRound === -1 || iEmpty === -1 || iEmpty < iRound, `empty@${iEmpty} rounding@${iRound}`);
+}
+
+
+console.log('\n─── 9. Recovering lost lines from the movements that survived ───');
+{
+  const rec = await db.insert(TABLES.invoices, { invoiceNumber: 'INV-REC', date: '2026-09-03', customerId: 'c1', currency: 'AED', status: 'active', total: 2458, paidAmount: 0, paymentStatus: 'unpaid', payments: [] });
+  await db.insert(TABLES.invoiceItems, { invoiceId: rec.id, variantId: 'w16', qty: 10, unitPrice: 39, netUnitPrice: 39, total: 390, netTotal: 390 });
+  // Movements survived for lines whose item rows were lost.
+  await db.insert(TABLES.stockMovements, { variantId: 'w16', type: 'sale', qtyChange: -10, refType: 'invoice', refId: rec.id });
+  await db.insert(TABLES.stockMovements, { variantId: 'r16', type: 'sale', qtyChange: -40, refType: 'invoice', refId: rec.id });
+  await db.insert(TABLES.stockMovements, { variantId: 'brk', type: 'sale', qtyChange: -20, refType: 'invoice', refId: rec.id });
+  await all();
+
+  const p = proposeInvoiceLinesFromMovements(app.data, rec.id);
+  ok('the invoice is recoverable', p.recoverable);
+  ok('it recovers only the lines that are missing', p.lines.length === 2, `${p.lines.length}`);
+  ok('the surviving line is not proposed again', !p.lines.some((l) => l.variantId === 'w16'));
+  ok('quantities come straight from the movements', p.lines.find((l) => l.variantId === 'r16').qty === 40 && p.lines.find((l) => l.variantId === 'brk').qty === 20);
+  ok('the proposal closes the gap exactly', round2(p.lines.reduce((s, l) => s + l.lineTotal, 0)) === p.missingValue, `${p.lines.reduce((s, l) => s + l.lineTotal, 0)} vs ${p.missingValue}`);
+  ok('the missing value is the total minus what survived', p.missingValue === 2068, `${p.missingValue}`);
+  ok('it is honest that prices are derived', p.pricesDerived === true && p.quantitiesCertain === true);
+
+  // Applying the proposal must make the invoice whole.
+  const lines = [
+    { variantId: 'w16', qty: 10, unitPrice: 39 },
+    ...p.lines.map((l) => ({ variantId: l.variantId, qty: l.qty, unitPrice: l.unitPrice })),
+  ];
+  await saveInvoiceAtomic(app, {
+    invoiceData: { ...rec, payments: [] }, lines, invoiceDiscount: 0, editingId: rec.id,
+  });
+  await all();
+  const after = invoiceLineMismatches(app.data).find((x) => x.invoiceNumber === 'INV-REC');
+  ok('after applying, the invoice reports no fault', !after || after.severity === 'rounding', JSON.stringify(after));
+  const fixed = (await db.getAll(TABLES.invoices)).find((i) => i.id === rec.id);
+  const its = await itemsOf(rec.id);
+  ok('its lines now sum to its total', Math.abs(round2(its.reduce((s, i) => s + num(i.netTotal), 0)) - num(fixed.total)) < 0.05);
+  ok('every recovered line now moves stock', its.every((it) => (app.data[TABLES.stockMovements] || []).some((m) => m.refId === rec.id && m.variantId === it.variantId && m.isActive !== false)));
+
+  // An invoice with no movements cannot be recovered honestly, and says so.
+  const bare = await db.insert(TABLES.invoices, { invoiceNumber: 'INV-BARE', date: '2026-09-03', customerId: 'c1', currency: 'AED', status: 'active', total: 608, paidAmount: 0, paymentStatus: 'unpaid', payments: [] });
+  await all();
+  const p2 = proposeInvoiceLinesFromMovements(app.data, bare.id);
+  ok('an invoice with no movements is not recoverable', p2.recoverable === false);
+  ok('and it says why', p2.reason === 'noMovements');
+  ok('it proposes nothing rather than guessing', p2.lines.length === 0);
 }
 
 console.log('\n═══════════════════════════════════════');

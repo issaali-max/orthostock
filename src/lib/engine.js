@@ -272,8 +272,11 @@ export async function saveInvoiceAtomic(app, { editingId, invoiceData, lines, in
   const specs = [];
   let oldItems = [], oldMoves = [];
   if (editingId) {
-    oldItems = allItems.filter((x) => x.invoiceId === editingId);
-    oldMoves = allMoves.filter((x) => x.refType === 'invoice' && x.refId === editingId);
+    // LIVE rows only. Now that editing retires rows instead of deleting them, an earlier
+    // edit's retired rows sit under the same invoice id; counting them again would give
+    // their stock back a second time on every subsequent edit.
+    oldItems = allItems.filter((x) => x.invoiceId === editingId && x.isActive !== false);
+    oldMoves = allMoves.filter((x) => x.refType === 'invoice' && x.refId === editingId && x.isActive !== false);
     for (const it of oldItems) if (vById.has(it.variantId)) stock.set(it.variantId, round2(ensure(it.variantId) + num(it.qty)));
   }
 
@@ -297,8 +300,14 @@ export async function saveInvoiceAtomic(app, { editingId, invoiceData, lines, in
 
   if (editingId) specs.push({ op: 'update', table: TABLES.invoices, id: invId, patch: { ...invoiceData } });
   else specs.push({ op: 'insert', table: TABLES.invoices, row: { id: invId, ...invoiceData } });
-  for (const it of oldItems) specs.push({ op: 'remove', table: TABLES.invoiceItems, id: it.id });
-  for (const m of oldMoves) specs.push({ op: 'remove', table: TABLES.stockMovements, id: m.id });
+  // Old lines are RETIRED, not destroyed. A hard delete plus a fresh insert is two
+  // independent outbox operations: if the delete reached the cloud and the insert did
+  // not, the lines were gone from the cloud, and the next full pull on the other device
+  // deleted its local copies too — leaving an invoice with a correct total and no lines,
+  // unrecoverable. A soft delete keeps the row, so a half-flushed outbox can strand it
+  // but never erase it, and the history remains available for recovery.
+  for (const it of oldItems) specs.push({ op: 'update', table: TABLES.invoiceItems, id: it.id, patch: { isActive: false } });
+  for (const m of oldMoves) specs.push({ op: 'update', table: TABLES.stockMovements, id: m.id, patch: { isActive: false } });
 
   // The order the user arranged the cart in IS the order of the invoice. Store it so the
   // PDF, the detail screen and a later edit all present the same sequence — previously
@@ -356,7 +365,9 @@ export async function voidInvoice(app, invoiceId) {
     db.getAll(TABLES.variants), db.getAll(TABLES.invoiceItems), db.getAll(TABLES.stockMovements),
   ]);
   const vById = new Map(variants.map((v) => [v.id, v]));
-  const items = allItems.filter((x) => x.invoiceId === invoiceId);
+  // LIVE rows only, on both. Editing retires the previous lines under the same invoice
+  // id; counting a retired line here would hand its stock back a second time.
+  const items = allItems.filter((x) => x.invoiceId === invoiceId && x.isActive !== false);
   const moves = allMoves.filter((x) => x.refType === 'invoice' && x.refId === invoiceId && x.isActive !== false);
   const stock = new Map();
   const ensure = (id) => { if (!stock.has(id)) stock.set(id, num(vById.get(id)?.stockQty)); return stock.get(id); };
@@ -1038,6 +1049,70 @@ export function invoiceLineMismatches(data) {
   return out.sort((a, b) => rank[a.severity] - rank[b.severity] || Math.abs(b.gap) - Math.abs(a.gap) || (a.date || '').localeCompare(b.date || ''));
 }
 
+// Rebuilds an invoice's lost lines from the stock movements that survived them.
+//
+// When an edit's line-delete reached the cloud but its line-insert did not, the lines
+// vanished from both devices while the header kept its total. The MOVEMENTS often
+// survive, and each one records the material and the exact quantity that left the
+// shelf. That is not a guess — it is the same fact the missing line held.
+//
+// Price is the one thing a movement does not carry, so it is derived: the header's total
+// is spread across the recovered quantities in proportion to each material's selling
+// price, which reproduces the total exactly. Returns a proposal for review; it writes
+// nothing. Where movements did not survive either, nothing can be recovered honestly
+// and the invoice is reported as unrecoverable.
+export function proposeInvoiceLinesFromMovements(data, invoiceId) {
+  const inv = (data[TABLES.invoices] || []).find((i) => i.id === invoiceId);
+  if (!inv) return null;
+  const variants = data[TABLES.variants] || [];
+  const existing = (data[TABLES.invoiceItems] || []).filter((it) => it.invoiceId === invoiceId && it.isActive !== false);
+  const moves = (data[TABLES.stockMovements] || [])
+    .filter((m) => m.refType === 'invoice' && m.refId === invoiceId && m.isActive !== false && num(m.qtyChange) < 0);
+
+  const total = round2(num(inv.total));
+  const covered = round2(existing.reduce((s, it) => s + num(it.netTotal != null ? it.netTotal : it.total), 0));
+  const missingValue = round2(total - covered);
+
+  // Quantities per material that left the shelf but have no line accounting for them.
+  const need = new Map();
+  for (const m of moves) {
+    const already = existing.filter((it) => it.variantId === m.variantId).reduce((s, it) => s + num(it.qty), 0);
+    const qty = round2(Math.abs(num(m.qtyChange)) - already);
+    if (qty > 0) need.set(m.variantId, round2((need.get(m.variantId) || 0) + qty));
+  }
+
+  if (!need.size) {
+    return { invoiceId, invoiceNumber: inv.invoiceNumber, total, missingValue, recoverable: false,
+      reason: missingValue > 1 ? 'noMovements' : 'nothingMissing', lines: [] };
+  }
+
+  // Weight by each material's selling price so the split reflects what things cost,
+  // then give the rounding remainder to the largest line so the sum is exact.
+  const rows = [...need.entries()].map(([variantId, qty]) => {
+    const v = variants.find((x) => x.id === variantId);
+    return { variantId, name: v ? (v.nameEn || v.sku) : '—', qty, listPrice: round2(num(v?.sellingPriceDefault)) };
+  });
+  const weight = rows.reduce((s, r) => s + r.qty * (r.listPrice > 0 ? r.listPrice : 1), 0);
+  let allocated = 0;
+  rows.forEach((r, i) => {
+    const w = r.qty * (r.listPrice > 0 ? r.listPrice : 1);
+    r.lineTotal = i === rows.length - 1 ? round2(missingValue - allocated) : round2(weight > 0 ? (missingValue * w) / weight : 0);
+    allocated = round2(allocated + r.lineTotal);
+    r.unitPrice = r.qty > 0 ? round2(r.lineTotal / r.qty) : 0;
+    // A price that lands far from the catalogue price is a signal the split is a guess
+    // about proportions, even though the quantities are certain.
+    r.priceLooksOdd = r.listPrice > 0 && (r.unitPrice > r.listPrice * 1.5 || r.unitPrice < r.listPrice * 0.5);
+  });
+  const sum = round2(rows.reduce((s, r) => s + r.lineTotal, 0));
+  return {
+    invoiceId, invoiceNumber: inv.invoiceNumber, date: inv.date, total, missingValue,
+    recoverable: true, reason: null, lines: rows,
+    exact: Math.abs(sum - missingValue) < 0.02,
+    quantitiesCertain: true,          // straight from the movements
+    pricesDerived: true,              // proportional, not recorded
+  };
+}
+
 export function paymentLogMismatches(data) {
   const out = [];
   for (const inv of (data[TABLES.invoices] || [])) {
@@ -1354,7 +1429,7 @@ export function pnl(data, opts = {}) {
   // adding revenue and profit to every period.
   const invoices = (data[TABLES.invoices] || []).filter((i) => i.isActive !== false && i.status !== 'returned' && inRange(i.date));
   const invIds = new Set(invoices.map((i) => i.id));
-  const items = (data[TABLES.invoiceItems] || []).filter((it) => invIds.has(it.invoiceId));
+  const items = (data[TABLES.invoiceItems] || []).filter((it) => it.isActive !== false && invIds.has(it.invoiceId));
   const expenses = (data[TABLES.expenses] || []).filter((e) => inRange(e.date));
   const groups = data[TABLES.expenseGroups] || [];
   const typeOf = (gid) => groups.find((g) => g.id === gid)?.type || 'business';
@@ -1497,7 +1572,7 @@ export function topProducts(data, n = 10, bounds) {
   const ids = new Set((data[TABLES.invoices] || []).filter((i) => i.isActive !== false && i.status !== 'returned' && invInRange(i, bounds)).map((i) => i.id));
   const variants = data[TABLES.variants] || [];
   const map = {};
-  (data[TABLES.invoiceItems] || []).filter((it) => ids.has(it.invoiceId)).forEach((it) => {
+  (data[TABLES.invoiceItems] || []).filter((it) => it.isActive !== false && ids.has(it.invoiceId)).forEach((it) => {
     const m = map[it.variantId] || (map[it.variantId] = { qty: 0, revenue: 0, profit: 0 });
     // Revenue after the invoice discount. netTotal exists on invoices saved since the
     // agreed/net split; older rows stored the net figure in total.

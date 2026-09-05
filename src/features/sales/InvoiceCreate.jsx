@@ -64,7 +64,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
     const firstCat = categories.find((c) => products.some((p) => p.categoryId === c.id))?.id || categories[0]?.id || '';
     setProdId('');
     if (editing) {
-      const its = (data[TABLES.invoiceItems] || []).filter((it) => it.invoiceId === editing.id)
+      const its = (data[TABLES.invoiceItems] || []).filter((it) => it.invoiceId === editing.id && it.isActive !== false)
         // Reopen in the invoice's own order, matching the PDF exactly. Without this the
         // order came from the database's return order, so editing reshuffled the lines.
         .map((it, i) => ({ it, i }))
