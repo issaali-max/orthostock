@@ -332,6 +332,16 @@ export default function Dashboard() {
           <PnlRow label={`${t('revenueLabel')} — ${rangeLabel}`} value={cur(pl.revenue)} color={C.text} />
           <PnlRow label={t('cogs')} value={'− ' + cur(pl.cogs)} color={C.danger} />
           <PnlRow label={t('salesProfit')} value={cur(pl.salesProfit)} color={C.success} strong />
+          {/* A non-zero gap means invoice totals and their line items disagree. It is a
+              data fault, not a business result, so it is named rather than absorbed. */}
+          {Math.abs(pl.lineIntegrityGap || 0) > 0.05 && (
+            <div style={{ background: C.warning + '18', border: `1px solid ${C.warning}55`, borderRadius: 10, padding: '8px 11px', margin: '2px 0 6px' }}>
+              <div style={{ fontSize: 11.5, fontWeight: 800, color: C.text }}>⚠ {t('lineGapTitle')}</div>
+              <div style={{ fontSize: 11, color: C.textMid, marginTop: 3, lineHeight: 1.6 }}>
+                {t('lineGapBody').replace('{x}', cur(Math.abs(pl.lineIntegrityGap)))}
+              </div>
+            </div>
+          )}
           {pl.freeRestockGain > 0 && <PnlRow label={`🎁 ${t('freeRestock')}`} value={'＋ ' + cur(pl.freeRestockGain)} color={C.success} />}
           <PnlRow label={t('businessExpenses')} value={'− ' + cur(pl.businessExp)} color={C.warning} />
           <PnlRow label={t('operatingProfit')} value={cur(pl.operatingProfit)} color={C.primary} strong />

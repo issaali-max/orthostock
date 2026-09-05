@@ -1328,7 +1328,18 @@ export function pnl(data, opts = {}) {
 
   const revenue = invoices.reduce((s, i) => s + num(i.total), 0);
   const cogs = items.reduce((s, it) => s + num(it.avgCostAtSale) * num(it.qty), 0);
-  const salesProfit = items.reduce((s, it) => s + num(it.lineProfit), 0);
+  // Sales profit is DERIVED from the two figures above, not summed independently from
+  // lineProfit. Summing it separately meant revenue came from the invoice headers while
+  // profit came from the lines, so any invoice with missing lines produced a statement
+  // that failed its own arithmetic — 14,556 − 1,387.50 displayed as 7,368.50, off by
+  // exactly the value of the missing lines. Deriving it makes
+  // revenue − cogs = salesProfit an identity that cannot break, whatever the data.
+  const salesProfit = round2(revenue - cogs);
+  // The independent line-based figure is still computed, purely to expose disagreement:
+  // a non-zero gap means invoice totals and their lines have drifted apart, which is a
+  // data fault worth surfacing rather than silently absorbing into profit.
+  const lineProfitSum = round2(items.reduce((s, it) => s + num(it.lineProfit), 0));
+  const lineIntegrityGap = round2(salesProfit - lineProfitSum);
 
   // Free restocks (استرجاع مجاني) are pieces billed on an invoice but kept in stock — a
   // real gain (recovered inventory at cost) that the sale's COGS over-charged for. Add
@@ -1354,6 +1365,9 @@ export function pnl(data, opts = {}) {
     operatingProfit: round2(operatingProfit), netAfterAll: round2(netAfterAll),
     invoiceCount: invoices.length, expenseCount: expenses.length,
     margin: revenue > 0 ? round2((grossProfit / revenue) * 100) : 0,
+    // Non-zero when invoice totals and their line items disagree — a data fault, not a
+    // business result. Surfaced so it can be seen and repaired rather than hidden.
+    lineProfitSum, lineIntegrityGap,
   };
 }
 

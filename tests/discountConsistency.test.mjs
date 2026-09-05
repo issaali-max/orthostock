@@ -68,7 +68,13 @@ const data = {
 const p = pnl(data, { from: '2026-08-01', to: '2026-08-31' });
 ok('revenue is the DISCOUNTED total, not the gross', p.revenue === 250);
 ok('revenue is not the pre-discount 300', p.revenue !== 300);
-ok('profit is computed on the discounted price', p.salesProfit === r2((20.83 - 3.67) * 12));
+// Sales profit is now derived as revenue − COGS, using the invoice's OWN recorded
+// total rather than a unit price re-multiplied by quantity. Those differ by a few fils
+// whenever the net unit price is a rounded figure (20.83 × 12 = 249.96, not 250), and
+// the recorded total is the one that is true. The identity revenue − cogs = salesProfit
+// must hold exactly, which the re-multiplied form could not guarantee.
+ok('profit is revenue minus cost of goods', p.salesProfit === r2(250 - 3.67 * 12), `${p.salesProfit}`);
+ok('the statement satisfies its own arithmetic', r2(p.revenue - p.cogs) === p.salesProfit);
 ok('the discount is absorbed by profit, not hidden', p.salesProfit < r2((25 - 3.67) * 12));
 
 // ── 5. The drawer must credit exactly what the invoice says was paid ──
