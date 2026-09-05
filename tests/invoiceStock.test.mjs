@@ -267,6 +267,7 @@ console.log('\n─── 7. The detector finds a damaged invoice and clears a he
   const found2 = invoiceLineMismatches(app.data);
   const hit = found2.find((f) => f.invoiceNumber === 'INV-DMG');
   ok('the damaged invoice is detected', !!hit);
+  ok('it is ranked as a real line fault, not rounding', hit && hit.severity === 'lines', `${hit && hit.severity}`);
   ok('the missing amount is reported exactly', hit && hit.gap === 2068, `${hit && hit.gap}`);
   ok('it is flagged as a line problem', hit && hit.issues.includes('lines'));
   // An invoice with NO movements at all is treated as mid-sync, not as damage — a
@@ -285,6 +286,33 @@ console.log('\n─── 7. The detector finds a damaged invoice and clears a he
   ok('exactly one line is reported as missing its movement', hitP && hitP.missingMovements === 1, `${hitP && hitP.missingMovements}`);
   ok('its totals still reconcile, so it is a stock-only fault', hitP && !hitP.issues.includes('lines'), JSON.stringify(hitP && hitP.issues));
   ok('healthy invoices are still not flagged', !found2.some((f) => f.invoiceNumber === 'INV-1'));
+}
+
+
+console.log('\n─── 8. Severity: rounding and pre-tracking invoices must NOT be called errors ───');
+{
+  // A few fils from a rounded unit price is not a fault.
+  const rnd1 = await db.insert(TABLES.invoices, { invoiceNumber: 'INV-RND', date: '2026-09-03', customerId: 'c1', currency: 'AED', status: 'active', total: 2210, paidAmount: 0, paymentStatus: 'unpaid', payments: [] });
+  await db.insert(TABLES.invoiceItems, { invoiceId: rnd1.id, variantId: 'w16', qty: 57, listPrice: 38.78, unitPrice: 38.78, netUnitPrice: 38.78, total: 2210.53, netTotal: 2210.53 });
+  await db.insert(TABLES.stockMovements, { variantId: 'w16', type: 'sale', qtyChange: -57, qtyAfter: 0, refType: 'invoice', refId: rnd1.id });
+  await all();
+  const r = invoiceLineMismatches(app.data).find((x) => x.invoiceNumber === 'INV-RND');
+  ok('a sub-dirham difference is classed as rounding', r && r.severity === 'rounding', `${r && r.severity}`);
+  ok('rounding is not reported as a line fault', r && !r.issues.includes('lines'));
+
+  // An invoice with a total but no lines at all is the most serious kind.
+  const emp = await db.insert(TABLES.invoices, { invoiceNumber: 'INV-EMPTY', date: '2026-09-03', customerId: 'c1', currency: 'AED', status: 'active', total: 608, paidAmount: 0, paymentStatus: 'unpaid', payments: [] });
+  await all();
+  const e = invoiceLineMismatches(app.data).find((x) => x.invoiceNumber === 'INV-EMPTY');
+  ok('an invoice with no lines is classed as empty', e && e.severity === 'empty', `${e && e.severity}`);
+  ok('empty invoices sort before everything else', invoiceLineMismatches(app.data)[0].severity === 'empty');
+  void emp;
+
+  // Ordering: real money problems must come before cosmetic ones.
+  const list = invoiceLineMismatches(app.data);
+  const idxOf = (sev) => list.findIndex((x) => x.severity === sev);
+  const iEmpty = idxOf('empty'), iRound = idxOf('rounding');
+  ok('rounding is ranked last', iRound === -1 || iEmpty === -1 || iEmpty < iRound, `empty@${iEmpty} rounding@${iRound}`);
 }
 
 console.log('\n═══════════════════════════════════════');

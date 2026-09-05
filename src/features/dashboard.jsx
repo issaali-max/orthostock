@@ -334,7 +334,7 @@ export default function Dashboard() {
           <PnlRow label={t('salesProfit')} value={cur(pl.salesProfit)} color={C.success} strong />
           {/* A non-zero gap means invoice totals and their line items disagree. It is a
               data fault, not a business result, so it is named rather than absorbed. */}
-          {Math.abs(pl.lineIntegrityGap || 0) > 0.05 && (
+          {Math.abs(pl.lineIntegrityGap || 0) > 1 && (
             <div style={{ background: C.warning + '18', border: `1px solid ${C.warning}55`, borderRadius: 10, padding: '8px 11px', margin: '2px 0 6px' }}>
               <div style={{ fontSize: 11.5, fontWeight: 800, color: C.text }}>⚠ {t('lineGapTitle')}</div>
               <div style={{ fontSize: 11, color: C.textMid, marginTop: 3, lineHeight: 1.6 }}>

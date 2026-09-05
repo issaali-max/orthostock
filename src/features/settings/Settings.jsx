@@ -492,7 +492,7 @@ export default function Settings() {
           const h = dataHealth(data);
           const payGaps = paymentLogMismatches(data);
           const lineGaps = invoiceLineMismatches(data);
-          const ok = h.orphan.length === 0 && h.hiddenDebt.length === 0 && h.dupCustomers.length === 0 && (!h.dupMaterials || h.dupMaterials.length === 0) && (!h.dupInvoiceNumbers || h.dupInvoiceNumbers.length === 0) && payGaps.length === 0 && lineGaps.length === 0;
+          const ok = h.orphan.length === 0 && h.hiddenDebt.length === 0 && h.dupCustomers.length === 0 && (!h.dupMaterials || h.dupMaterials.length === 0) && (!h.dupInvoiceNumbers || h.dupInvoiceNumbers.length === 0) && payGaps.length === 0 && lineGaps.filter((g) => g.severity === 'empty' || g.severity === 'lines').length === 0;
           const Row = ({ tone, children }) => <div style={{ background: tone === 'bad' ? '#FBECEC' : C.surfaceAlt, borderRadius: 8, padding: '6px 10px', fontSize: 12, color: C.textMid }}>{children}</div>;
           return (
             <div style={{ display: 'grid', gap: 10 }}>
@@ -502,14 +502,37 @@ export default function Settings() {
               </div>
               {ok ? <div style={{ padding: 12, textAlign: 'center', color: C.success, fontWeight: 700 }}>✓ {t('dataHealthOk')}</div> : (
                 <>
-                  {lineGaps.length > 0 && (<div><div style={{ fontSize: 12, fontWeight: 800, color: C.danger, marginBottom: 4 }}>⚠ {t('invLineGap')} ({lineGaps.length})</div>
-                    <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 6 }}>{t('invLineGapHint')}</div>
-                    <div style={{ display: 'grid', gap: 4 }}>{lineGaps.map((g) => (
-                      <Row key={g.id} tone="bad">
-                        <div><b>{g.invoiceNumber}</b> · {t('total')} {cur(g.total)} · {t('lines')} {cur(g.lineSum)} · <b>{g.gap > 0 ? '+' : ''}{cur(g.gap)}</b></div>
-                        {g.issues.includes('stock') && <div>· ⚠ {g.missingMovements} {t('linesNoStock')}</div>}
-                      </Row>
-                    ))}</div></div>)}
+                  {(() => {
+                    // Grouped by severity so a few fils of rounding never sits beside
+                    // thousands of missing lines. Only the first group is a real problem.
+                    const bySev = { empty: [], lines: [], stock: [], rounding: [] };
+                    for (const g of lineGaps) bySev[g.severity].push(g);
+                    const groups = [
+                      ['empty', C.danger, t('sevEmpty'), t('sevEmptyHint')],
+                      ['lines', C.danger, t('sevLines'), t('sevLinesHint')],
+                      ['stock', C.warning, t('sevStock'), t('sevStockHint')],
+                      ['rounding', C.textMuted, t('sevRounding'), t('sevRoundingHint')],
+                    ];
+                    return groups.filter(([k]) => bySev[k].length).map(([k, color, title, hint]) => (
+                      <div key={k}>
+                        <div style={{ fontSize: 12, fontWeight: 800, color, marginBottom: 4 }}>
+                          {k === 'rounding' ? 'ℹ️' : '⚠'} {title} ({bySev[k].length})
+                        </div>
+                        <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 6 }}>{hint}</div>
+                        <div style={{ display: 'grid', gap: 4 }}>{bySev[k].slice(0, k === 'rounding' ? 5 : 100).map((g) => (
+                          <Row key={g.id} tone={k === 'rounding' ? 'muted' : 'bad'}>
+                            <div><b>{g.invoiceNumber}</b> · {t('total')} {cur(g.total)}
+                              {k !== 'stock' && <> · {t('lines')} {cur(g.lineSum)} · <b>{g.gap > 0 ? '+' : ''}{cur(g.gap)}</b></>}
+                              {k === 'stock' && <> · {g.missingMovements} {t('linesNoStock')}</>}
+                            </div>
+                          </Row>
+                        ))}</div>
+                        {k === 'rounding' && bySev[k].length > 5 && (
+                          <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>… +{bySev[k].length - 5}</div>
+                        )}
+                      </div>
+                    ));
+                  })()}
                   {payGaps.length > 0 && (<div><div style={{ fontSize: 12, fontWeight: 800, color: C.danger, marginBottom: 4 }}>⚠ {t('payLogGap')} ({payGaps.length})</div>
                     <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 6 }}>{t('payLogGapHint')}</div>
                     <div style={{ display: 'grid', gap: 4 }}>{payGaps.map((g) => (

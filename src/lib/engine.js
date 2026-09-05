@@ -994,6 +994,13 @@ export function reconcilePayments(existing, paidTotal, { date, method } = {}) {
 // Reported, never silently rewritten: the gap is the evidence of what went missing.
 export function invoiceLineMismatches(data) {
   const items = (data[TABLES.invoiceItems] || []).filter((it) => it.isActive !== false);
+  const allMoves = (data[TABLES.stockMovements] || []).filter((m) => m.isActive !== false);
+  // Invoices that DO have movements tell us when stock tracking began working for this
+  // book. Anything older than the earliest of those predates tracking, so its lines
+  // legitimately have no movements and must not be reported as damaged.
+  const trackedFrom = allMoves.filter((m) => m.refType === 'invoice')
+    .map((m) => (data[TABLES.invoices] || []).find((i) => i.id === m.refId)?.date)
+    .filter(Boolean).sort()[0] || null;
   const out = [];
   for (const inv of (data[TABLES.invoices] || [])) {
     if (inv.isActive === false || inv.status === 'returned') continue;
@@ -1001,22 +1008,34 @@ export function invoiceLineMismatches(data) {
     const lineSum = round2(mine.reduce((s, it) => s + num(it.netTotal != null ? it.netTotal : it.total), 0));
     const total = round2(num(inv.total));
     const gap = round2(total - lineSum);
-    // Lines with no stock movement behind them: billed but never taken off the shelf.
-    // Only meaningful if the invoice has SOME movements — an invoice with none at all is
-    // either mid-sync (its movements have not arrived on this device yet) or predates
-    // movement tracking. Flagging those would cry wolf on every partial sync, and a
-    // detector that fires on healthy data is one you learn to ignore.
-    const moves = (data[TABLES.stockMovements] || []).filter((m) => m.refType === 'invoice' && m.refId === inv.id && m.isActive !== false);
-    const noMove = moves.length === 0 ? [] : mine.filter((it) => !moves.some((m) => m.variantId === it.variantId));
-    if (Math.abs(gap) <= 0.02 && noMove.length === 0) continue;
+
+    const moves = allMoves.filter((m) => m.refType === 'invoice' && m.refId === inv.id);
+    // Only meaningful once tracking was running AND this invoice has some movements —
+    // otherwise we would flag every invoice that predates the feature.
+    const preTracking = trackedFrom && (inv.date || '') < trackedFrom;
+    const noMove = (moves.length === 0 || preTracking) ? [] : mine.filter((it) => !moves.some((m) => m.variantId === it.variantId));
+
+    // Severity, so a few fils of rounding is never shown next to 2,000 of missing lines.
+    //   empty    — a total with no lines at all: the lines were never written
+    //   lines    — a material difference between the total and its lines
+    //   rounding — under one dirham: a unit price rounded to two decimals, not a fault
+    //   stock    — totals agree, but a line never moved stock
+    const severity = mine.length === 0 && total > 0.005 ? 'empty'
+      : Math.abs(gap) > 1 ? 'lines'
+        : Math.abs(gap) > 0.005 ? 'rounding'
+          : noMove.length ? 'stock' : null;
+    if (!severity) continue;
     out.push({
       id: inv.id, invoiceNumber: inv.invoiceNumber, date: inv.date,
       total, lineSum, gap, lineCount: mine.length,
       missingMovements: noMove.length,
-      issues: [...(Math.abs(gap) > 0.02 ? ['lines'] : []), ...(noMove.length ? ['stock'] : [])],
+      severity,
+      issues: [...(severity === 'empty' || severity === 'lines' ? ['lines'] : []), ...(noMove.length ? ['stock'] : [])],
     });
   }
-  return out.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  // Worst first: money problems before cosmetic ones.
+  const rank = { empty: 0, lines: 1, stock: 2, rounding: 3 };
+  return out.sort((a, b) => rank[a.severity] - rank[b.severity] || Math.abs(b.gap) - Math.abs(a.gap) || (a.date || '').localeCompare(b.date || ''));
 }
 
 export function paymentLogMismatches(data) {
