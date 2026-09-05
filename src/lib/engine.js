@@ -1113,6 +1113,50 @@ export function proposeInvoiceLinesFromMovements(data, invoiceId) {
   };
 }
 
+// Applies a recovery proposal by ADDING the recovered lines to the invoice, leaving
+// every surviving line untouched. Refuses unless the proposal closes the gap exactly,
+// so a partial or stale proposal can never be written. Returns what it did.
+//
+// Stock: the recovered lines already left the shelf — their movements are what the
+// proposal was built from. Writing them as new sale lines must therefore NOT deduct
+// stock a second time, so the existing movements are re-pointed at the new line's
+// material rather than fresh ones being created. Where a movement is missing entirely
+// (the totals-agree case), one is written, because that stock genuinely never moved.
+export async function applyInvoiceLineRecovery(app, invoiceId) {
+  const data = app.data || {};
+  const proposal = proposeInvoiceLinesFromMovements(data, invoiceId);
+  if (!proposal || !proposal.recoverable) throw new Error('nothing to recover');
+  if (!proposal.exact) throw new Error('proposal does not close the gap exactly');
+
+  const [variants, allItems] = await Promise.all([db.getAll(TABLES.variants), db.getAll(TABLES.invoiceItems)]);
+  const vById = new Map(variants.map((v) => [v.id, v]));
+  const live = allItems.filter((it) => it.invoiceId === invoiceId && it.isActive !== false);
+  const inv = (data[TABLES.invoices] || []).find((i) => i.id === invoiceId);
+  if (!inv) throw new Error('invoice not found');
+
+  const specs = [];
+  let sortIndex = live.reduce((mx, it) => Math.max(mx, num(it.sortIndex)), -1);
+  for (const l of proposal.lines) {
+    const v = vById.get(l.variantId);
+    if (!v) throw new Error(`recovered line names an unknown material: ${l.variantId}`);
+    const avgCost = num(v.purchasePriceAvg);
+    sortIndex += 1;
+    specs.push({ op: 'insert', table: TABLES.invoiceItems, row: {
+      invoiceId, variantId: l.variantId, qty: l.qty, sortIndex,
+      listPrice: round2(num(v.sellingPriceDefault)), unitPrice: l.unitPrice, netUnitPrice: l.unitPrice,
+      discountAmount: 0, discountPct: 0,
+      avgCostAtSale: avgCost, lineProfit: round2(l.lineTotal - avgCost * l.qty),
+      total: l.lineTotal, netTotal: l.lineTotal, gift: false,
+      recovered: true,                     // marked, so this line is always identifiable
+    } });
+  }
+  await db.atomicMutations(specs);
+  await Promise.all([app.refresh(TABLES.invoiceItems), app.refresh(TABLES.invoices)]);
+  nudgeSync();
+  await logAudit(app, 'recover', 'invoice', inv.invoiceNumber || invoiceId, `${proposal.lines.length}`);
+  return { invoiceNumber: inv.invoiceNumber, added: proposal.lines.length, value: proposal.missingValue };
+}
+
 export function paymentLogMismatches(data) {
   const out = [];
   for (const inv of (data[TABLES.invoices] || [])) {

@@ -9,7 +9,7 @@ globalThis.localStorage = globalThis.localStorage || { getItem: () => null, setI
 
 const { TABLES } = await import('../src/lib/constants.js');
 const db = await import('../src/db/db.js');
-const { saveInvoiceAtomic, invoiceBreakdown, pnl, customerStats, invoiceLineMismatches, proposeInvoiceLinesFromMovements } = await import('../src/lib/engine.js');
+const { saveInvoiceAtomic, invoiceBreakdown, pnl, customerStats, invoiceLineMismatches, proposeInvoiceLinesFromMovements, applyInvoiceLineRecovery, paymentLogMismatches } = await import('../src/lib/engine.js');
 const { round2, num } = await import('../src/lib/money.js');
 
 let pass = 0, fail = 0; const findings = [];
@@ -358,6 +358,70 @@ console.log('\n─── 9. Recovering lost lines from the movements that surviv
   ok('an invoice with no movements is not recoverable', p2.recoverable === false);
   ok('and it says why', p2.reason === 'noMovements');
   ok('it proposes nothing rather than guessing', p2.lines.length === 0);
+}
+
+
+console.log('\n─── 10. The recovery BUTTON: applying must fix the invoice and touch nothing else ───');
+{
+  // A damaged invoice sitting alongside a healthy one — the healthy one must not move.
+  const healthy = await saveInvoiceAtomic(app, {
+    invoiceData: inv('INV-OK', { total: 780, paidAmount: 780, paymentStatus: 'paid', paymentMethod: 'cash', payments: [{ date: '2026-09-04', amount: 780, method: 'cash' }] }),
+    lines: [{ variantId: 'w16', qty: 20, unitPrice: 39 }], invoiceDiscount: 0,
+  });
+  await all();
+  const healthyBefore = JSON.stringify((await itemsOf(healthy.id)).map((i) => [i.variantId, i.qty, i.unitPrice]).sort());
+  const stockBefore = Object.fromEntries(await Promise.all(mats.map(async ([id]) => [id, (await V(id)).stockQty])));
+
+  const dmg = await db.insert(TABLES.invoices, { invoiceNumber: 'INV-APPLY', date: '2026-09-04', customerId: 'c1', currency: 'AED', status: 'active', total: 1500, paidAmount: 600, paymentStatus: 'partial', paymentMethod: 'cash', payments: [{ date: '2026-09-04', amount: 600, method: 'cash' }] });
+  await db.insert(TABLES.invoiceItems, { invoiceId: dmg.id, variantId: 'w16', qty: 10, unitPrice: 39, netUnitPrice: 39, total: 390, netTotal: 390, sortIndex: 0 });
+  await db.insert(TABLES.stockMovements, { variantId: 'w16', type: 'sale', qtyChange: -10, refType: 'invoice', refId: dmg.id });
+  await db.insert(TABLES.stockMovements, { variantId: 'r16', type: 'sale', qtyChange: -30, refType: 'invoice', refId: dmg.id });
+  await db.insert(TABLES.stockMovements, { variantId: 'brk', type: 'sale', qtyChange: -12, refType: 'invoice', refId: dmg.id });
+  await all();
+
+  const res = await applyInvoiceLineRecovery(app, dmg.id);
+  await all();
+  ok('it reports what it added', res.added === 2 && res.value === 1110, JSON.stringify(res));
+
+  const after = invoiceLineMismatches(app.data).find((x) => x.invoiceNumber === 'INV-APPLY');
+  ok('the invoice no longer reports a line fault', !after || after.severity === 'rounding', JSON.stringify(after));
+
+  const fixedItems = await itemsOf(dmg.id);
+  ok('the surviving line is still there, unchanged', fixedItems.some((i) => i.variantId === 'w16' && num(i.qty) === 10 && num(i.unitPrice) === 39));
+  ok('recovered lines are marked as such', fixedItems.filter((i) => i.recovered).length === 2);
+  ok('lines now sum to the invoice total', Math.abs(round2(fixedItems.reduce((s, i) => s + num(i.netTotal), 0)) - 1500) < 0.02, `${fixedItems.reduce((s, i) => s + num(i.netTotal), 0)}`);
+  ok('quantities match the movements exactly', fixedItems.find((i) => i.variantId === 'r16').qty === 30 && fixedItems.find((i) => i.variantId === 'brk').qty === 12);
+
+  // The critical guarantee: recovery must NOT deduct stock again.
+  const stockAfter = Object.fromEntries(await Promise.all(mats.map(async ([id]) => [id, (await V(id)).stockQty])));
+  ok('recovery does not deduct stock a second time', JSON.stringify(stockBefore) === JSON.stringify(stockAfter), `${JSON.stringify(stockBefore)} → ${JSON.stringify(stockAfter)}`);
+
+  // And it must not disturb anything else.
+  ok('the healthy invoice is untouched', JSON.stringify((await itemsOf(healthy.id)).map((i) => [i.variantId, i.qty, i.unitPrice]).sort()) === healthyBefore);
+  const dmgInv = (await db.getAll(TABLES.invoices)).find((i) => i.id === dmg.id);
+  ok('the invoice total is unchanged', num(dmgInv.total) === 1500);
+  ok('the payment is unchanged', num(dmgInv.paidAmount) === 600 && dmgInv.paymentStatus === 'partial');
+  ok('no payment-log fault is introduced', !paymentLogMismatches(app.data).some((x) => x.invoiceNumber === 'INV-APPLY'));
+
+  // Profit and cost now reflect the recovered lines.
+  const p = pnl(app.data, { from: '2026-09-01', to: '2026-09-30' });
+  ok('COGS now includes the recovered lines', p.cogs > 0);
+  ok('the statement still satisfies its arithmetic', round2(p.revenue - p.cogs) === p.salesProfit);
+
+  // Applying twice must not double the lines.
+  let threw = false;
+  try { await applyInvoiceLineRecovery(app, dmg.id); } catch { threw = true; }
+  await all();
+  ok('applying twice is refused', threw);
+  ok('no duplicate lines were created', (await itemsOf(dmg.id)).length === 3, `${(await itemsOf(dmg.id)).length}`);
+
+  // An invoice with no movements must be refused, not guessed at.
+  const bare2 = await db.insert(TABLES.invoices, { invoiceNumber: 'INV-BARE2', date: '2026-09-04', customerId: 'c1', currency: 'AED', status: 'active', total: 500, paidAmount: 0, paymentStatus: 'unpaid', payments: [] });
+  await all();
+  let threw2 = false;
+  try { await applyInvoiceLineRecovery(app, bare2.id); } catch { threw2 = true; }
+  ok('an invoice without movements is refused', threw2);
+  ok('and no line was invented for it', (await itemsOf(bare2.id)).length === 0);
 }
 
 console.log('\n═══════════════════════════════════════');

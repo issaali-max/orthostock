@@ -8,8 +8,8 @@ import { subscribeSync, pushAllLocal, pull, cloudReady, wipeCloud, forcePushOver
 import { exportBackup } from '../../lib/backup.js';
 import { exportExcel, importExcel } from '../../lib/excel.js';
 import { resizeImageToDataUrl } from '../../lib/image.js';
-import { mergeCustomers, reconcileStock, dataHealth, paymentLogMismatches, invoiceLineMismatches } from '../../lib/engine.js';
-import { num, fmtCur } from '../../lib/money.js';
+import { mergeCustomers, reconcileStock, dataHealth, paymentLogMismatches, invoiceLineMismatches, proposeInvoiceLinesFromMovements, applyInvoiceLineRecovery } from '../../lib/engine.js';
+import { num, fmtNum, fmtCur } from '../../lib/money.js';
 
 
 export default function Settings() {
@@ -519,14 +519,36 @@ export default function Settings() {
                           {k === 'rounding' ? 'ℹ️' : '⚠'} {title} ({bySev[k].length})
                         </div>
                         <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 6 }}>{hint}</div>
-                        <div style={{ display: 'grid', gap: 4 }}>{bySev[k].slice(0, k === 'rounding' ? 5 : 100).map((g) => (
-                          <Row key={g.id} tone={k === 'rounding' ? 'muted' : 'bad'}>
-                            <div><b>{g.invoiceNumber}</b> · {t('total')} {cur(g.total)}
-                              {k !== 'stock' && <> · {t('lines')} {cur(g.lineSum)} · <b>{g.gap > 0 ? '+' : ''}{cur(g.gap)}</b></>}
-                              {k === 'stock' && <> · {g.missingMovements} {t('linesNoStock')}</>}
-                            </div>
-                          </Row>
-                        ))}</div>
+                        <div style={{ display: 'grid', gap: 4 }}>{bySev[k].slice(0, k === 'rounding' ? 5 : 100).map((g) => {
+                          // Only the money faults can be recovered, and only when the
+                          // stock movements survived to rebuild the lines from.
+                          const prop = (k === 'empty' || k === 'lines') ? proposeInvoiceLinesFromMovements(data, g.id) : null;
+                          const canFix = prop && prop.recoverable && prop.exact;
+                          return (
+                            <Row key={g.id} tone={k === 'rounding' ? 'muted' : 'bad'}>
+                              <div><b>{g.invoiceNumber}</b> · {t('total')} {cur(g.total)}
+                                {k !== 'stock' && <> · {t('lines')} {cur(g.lineSum)} · <b>{g.gap > 0 ? '+' : ''}{cur(g.gap)}</b></>}
+                                {k === 'stock' && <> · {g.missingMovements} {t('linesNoStock')}</>}
+                              </div>
+                              {prop && !canFix && <div style={{ fontSize: 10.5, color: C.textMuted }}>· {t('recoverImpossible')}</div>}
+                              {canFix && (
+                                <div style={{ marginTop: 5 }}>
+                                  <div style={{ fontSize: 10.5, color: C.textMid, marginBottom: 4 }}>
+                                    🔍 {t('recoverFound')}: {prop.lines.map((l) => `${l.name} ×${fmtNum(l.qty)}`).join(' · ')}
+                                  </div>
+                                  <Btn size="sm" variant="light" onClick={async () => {
+                                    const detail = prop.lines.map((l) => `${l.name}  ×${fmtNum(l.qty)}  =  ${cur(l.lineTotal)}`).join('\n');
+                                    if (!window.confirm(`${t('recoverConfirm')}\n\n${g.invoiceNumber}\n${detail}\n\n${t('recoverQtyNote')}`)) return;
+                                    try {
+                                      const r = await applyInvoiceLineRecovery(app, g.id);
+                                      showToast(`✓ ${r.invoiceNumber} · ${r.added}`, 'success');
+                                    } catch (e) { showToast(String(e?.message || e), 'error'); }
+                                  }}>🔧 {t('recoverApply')}</Btn>
+                                </div>
+                              )}
+                            </Row>
+                          );
+                        })}</div>
                         {k === 'rounding' && bySev[k].length > 5 && (
                           <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>… +{bySev[k].length - 5}</div>
                         )}
