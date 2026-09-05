@@ -8,7 +8,7 @@ import { subscribeSync, pushAllLocal, pull, cloudReady, wipeCloud, forcePushOver
 import { exportBackup } from '../../lib/backup.js';
 import { exportExcel, importExcel } from '../../lib/excel.js';
 import { resizeImageToDataUrl } from '../../lib/image.js';
-import { mergeCustomers, reconcileStock, dataHealth, paymentLogMismatches } from '../../lib/engine.js';
+import { mergeCustomers, reconcileStock, dataHealth, paymentLogMismatches, invoiceLineMismatches } from '../../lib/engine.js';
 import { num, fmtCur } from '../../lib/money.js';
 
 
@@ -491,7 +491,8 @@ export default function Settings() {
         {showHealth && (() => {
           const h = dataHealth(data);
           const payGaps = paymentLogMismatches(data);
-          const ok = h.orphan.length === 0 && h.hiddenDebt.length === 0 && h.dupCustomers.length === 0 && (!h.dupMaterials || h.dupMaterials.length === 0) && (!h.dupInvoiceNumbers || h.dupInvoiceNumbers.length === 0) && payGaps.length === 0;
+          const lineGaps = invoiceLineMismatches(data);
+          const ok = h.orphan.length === 0 && h.hiddenDebt.length === 0 && h.dupCustomers.length === 0 && (!h.dupMaterials || h.dupMaterials.length === 0) && (!h.dupInvoiceNumbers || h.dupInvoiceNumbers.length === 0) && payGaps.length === 0 && lineGaps.length === 0;
           const Row = ({ tone, children }) => <div style={{ background: tone === 'bad' ? '#FBECEC' : C.surfaceAlt, borderRadius: 8, padding: '6px 10px', fontSize: 12, color: C.textMid }}>{children}</div>;
           return (
             <div style={{ display: 'grid', gap: 10 }}>
@@ -501,6 +502,14 @@ export default function Settings() {
               </div>
               {ok ? <div style={{ padding: 12, textAlign: 'center', color: C.success, fontWeight: 700 }}>✓ {t('dataHealthOk')}</div> : (
                 <>
+                  {lineGaps.length > 0 && (<div><div style={{ fontSize: 12, fontWeight: 800, color: C.danger, marginBottom: 4 }}>⚠ {t('invLineGap')} ({lineGaps.length})</div>
+                    <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 6 }}>{t('invLineGapHint')}</div>
+                    <div style={{ display: 'grid', gap: 4 }}>{lineGaps.map((g) => (
+                      <Row key={g.id} tone="bad">
+                        <div><b>{g.invoiceNumber}</b> · {t('total')} {cur(g.total)} · {t('lines')} {cur(g.lineSum)} · <b>{g.gap > 0 ? '+' : ''}{cur(g.gap)}</b></div>
+                        {g.issues.includes('stock') && <div>· ⚠ {g.missingMovements} {t('linesNoStock')}</div>}
+                      </Row>
+                    ))}</div></div>)}
                   {payGaps.length > 0 && (<div><div style={{ fontSize: 12, fontWeight: 800, color: C.danger, marginBottom: 4 }}>⚠ {t('payLogGap')} ({payGaps.length})</div>
                     <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 6 }}>{t('payLogGapHint')}</div>
                     <div style={{ display: 'grid', gap: 4 }}>{payGaps.map((g) => (

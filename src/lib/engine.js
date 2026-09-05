@@ -277,6 +277,17 @@ export async function saveInvoiceAtomic(app, { editingId, invoiceData, lines, in
     for (const it of oldItems) if (vById.has(it.variantId)) stock.set(it.variantId, round2(ensure(it.variantId) + num(it.qty)));
   }
 
+  // A line must name a material that EXISTS. Previously the item row was written
+  // unconditionally while the stock movement was written only `if (v)` — so a line
+  // naming a material that had been deleted, or an id that never resolved, produced an
+  // invoice item with NO movement behind it: the sale was billed, the total was right,
+  // but the stock never came down and the line had nothing to render from. Reject the
+  // whole save instead, so the invoice can never disagree with the ledger.
+  for (const l of lines) {
+    if (!vById.has(l.variantId)) throw new Error(`invoice line names an unknown material: ${l.variantId}`);
+    if (!(num(l.qty) > 0)) throw new Error('invoice line has no quantity');
+  }
+
   const gross = lines.reduce((s, l) => s + (l.gift ? 0 : num(l.unitPrice) * num(l.qty)), 0);
   const invDisc = Math.min(Math.max(0, num(invoiceDiscount)), gross);
   // Allocate the discount across the priced lines so the ROUNDED line totals sum to
@@ -319,11 +330,11 @@ export async function saveInvoiceAtomic(app, { editingId, invoiceData, lines, in
       total: round2(rawUnit * qty), netTotal,
       gift: isGift,
     } });
-    if (v) {
-      const after = round2(ensure(l.variantId) - qty);
-      stock.set(l.variantId, after);
-      specs.push({ op: 'insert', table: TABLES.stockMovements, row: { variantId: v.id, type: 'sale', qtyChange: -qty, qtyAfter: after, refType: 'invoice', refId: invId } });
-    }
+    // Validation above guarantees v exists, so a sale ALWAYS moves stock. This used to
+    // be conditional, which is how a sale could be billed without ever leaving the shelf.
+    const after = round2(ensure(l.variantId) - qty);
+    stock.set(l.variantId, after);
+    specs.push({ op: 'insert', table: TABLES.stockMovements, row: { variantId: v.id, type: 'sale', qtyChange: -qty, qtyAfter: after, refType: 'invoice', refId: invId } });
   }
   for (const [vid, finalQty] of stock) specs.push({ op: 'update', table: TABLES.variants, id: vid, patch: { stockQty: round2(finalQty) } });
 
@@ -978,6 +989,32 @@ export function reconcilePayments(existing, paidTotal, { date, method } = {}) {
 
 // Finds invoices whose payment log disagrees with paidAmount — the divergence above,
 // already written to existing records. Reported, not silently rewritten.
+// Invoices whose stored total does not equal the sum of their own lines — the shape of
+// the reported fault: the total is right, but lines are missing or were never written.
+// Reported, never silently rewritten: the gap is the evidence of what went missing.
+export function invoiceLineMismatches(data) {
+  const items = (data[TABLES.invoiceItems] || []).filter((it) => it.isActive !== false);
+  const out = [];
+  for (const inv of (data[TABLES.invoices] || [])) {
+    if (inv.isActive === false || inv.status === 'returned') continue;
+    const mine = items.filter((it) => it.invoiceId === inv.id);
+    const lineSum = round2(mine.reduce((s, it) => s + num(it.netTotal != null ? it.netTotal : it.total), 0));
+    const total = round2(num(inv.total));
+    const gap = round2(total - lineSum);
+    // Lines with no stock movement behind them: billed but never taken off the shelf.
+    const moves = (data[TABLES.stockMovements] || []).filter((m) => m.refType === 'invoice' && m.refId === inv.id && m.isActive !== false);
+    const noMove = mine.filter((it) => !moves.some((m) => m.variantId === it.variantId));
+    if (Math.abs(gap) <= 0.02 && noMove.length === 0) continue;
+    out.push({
+      id: inv.id, invoiceNumber: inv.invoiceNumber, date: inv.date,
+      total, lineSum, gap, lineCount: mine.length,
+      missingMovements: noMove.length,
+      issues: [...(Math.abs(gap) > 0.02 ? ['lines'] : []), ...(noMove.length ? ['stock'] : [])],
+    });
+  }
+  return out.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+}
+
 export function paymentLogMismatches(data) {
   const out = [];
   for (const inv of (data[TABLES.invoices] || [])) {
