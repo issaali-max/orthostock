@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 import { useApp } from '../app/AppProvider.jsx';
 import { C, TABLES, SHADOW } from '../lib/constants.js';
-import { fmtCur, fmtNum, num } from '../lib/money.js';
+import { fmtCur, fmtNum, num, round2 } from '../lib/money.js';
 import { todayISO } from '../lib/dates.js';
 import RestockList from './catalogue/RestockList.jsx';
 import { pnl, periodSeries, buildAlerts, emirateStats, topProducts, topCustomers, openingDebtTotal, vatLiability } from '../lib/engine.js';
@@ -39,26 +39,6 @@ export default function Dashboard() {
   const dPur = data[TABLES.purchases], dPurIt = data[TABLES.purchaseItems];
   const pl = useMemo(() => pnl(data, bounds), [dInv, dItems, dExp, dExpG, dPur, dPurIt, range]); // eslint-disable-line react-hooks/exhaustive-deps
   const today = useMemo(() => pnl(data, { from: todayISO(), to: todayISO() }), [dInv, dItems, dExp, dExpG, dPur, dPurIt]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Expenses grouped by their group for the selected range (AED base). These are the very
-  // same amounts the P&L subtracts (business → operating, personal/home → net) and that
-  // leave cash, so this chart ties exactly to profit and cash.
-  const expByGroup = useMemo(() => {
-    const inRange = (d) => d && d >= bounds.from && (!bounds.to || d <= bounds.to);
-    const grps = dExpG || [];
-    const gById = (id) => grps.find((g) => g.id === id);
-    const map = new Map();
-    for (const e of (dExp || [])) {
-      if (e.isActive === false || !inRange(e.date)) continue;
-      const g = gById(e.groupId);
-      const aed = e.currency === 'USD' ? num(e.amount) * num(usdRate) : num(e.amount);
-      const key = e.groupId || 'none';
-      const row = map.get(key) || { id: key, name: g ? ((lang === 'ar' ? g.nameAr : g.nameEn) || g.nameEn || g.nameAr) : t('other'), type: g?.type || 'business', color: g?.color, total: 0 };
-      row.total += aed; map.set(key, row);
-    }
-    const rows = [...map.values()].sort((a, b) => b.total - a.total);
-    return { rows, total: rows.reduce((s, r) => s + r.total, 0) };
-  }, [dExp, dExpG, range, usdRate, lang]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Drill-down: materials sold + buyers within the active range (active invoices only)
   const periodReport = useMemo(() => {
@@ -145,6 +125,23 @@ export default function Dashboard() {
   const bestEmirate = emirates[0];
   const maxEmRev = Math.max(1, ...emirates.map((e) => e.revenue));
 
+  // ── Layout ───────────────────────────────────────────────────────────────
+  // Ordered the way a manager actually asks: how did TODAY go, then how is the
+  // MONTH going, then why, then everything else.
+  //
+  // Removed as duplication:
+  //   • the lifetime KPI strip — revenue/margin repeated the P&L in a different
+  //     period, which is what made two figures for "revenue" appear on one screen
+  //   • the standalone P&L card — its figures now live in the month panel, once
+  //   • the expenses-by-group bars — the Expenses screen owns that, in more depth
+  // Kept, because each answers a question nothing else does: the comparison
+  // (is this month better than last?), emirates, top products, top customers,
+  // alerts, and the financial position.
+  const dayNet = today.netAfterAll;
+  const monthPace = pl.revenue > 0 && range === 'month'
+    ? Math.round((new Date().getDate() / new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate()) * 100)
+    : null;
+
   return (
     <div>
       <style>{`
@@ -156,8 +153,110 @@ export default function Dashboard() {
 
       <PageHeader title={t('overview')} />
 
-      {/* ── Month-by-month comparison (first thing on the page) ── */}
-      <Card className="rise" style={{ marginBottom: 14 }}>
+      {/* ══ 1. TODAY — the first question every morning ══ */}
+      <div className="rise" style={{
+        background: `linear-gradient(135deg, ${C.primary} 0%, ${C.primaryMid || C.primary} 100%)`,
+        color: '#fff', borderRadius: 18, padding: '16px 18px', marginBottom: 12, boxShadow: SHADOW?.card || '0 6px 20px rgba(14,29,46,.18)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+          <span style={{ fontSize: 12.5, fontWeight: 800, opacity: 0.92 }}>☀️ {t('today')}</span>
+          <span style={{ marginInlineStart: 'auto', fontSize: 11, opacity: 0.8 }}>
+            {today.invoiceCount} {t('invoices')}
+          </span>
+        </div>
+        <div style={{ fontSize: 32, fontWeight: 900, letterSpacing: -0.8, margin: '4px 0 2px' }}>{cur(today.revenue)}</div>
+        <div style={{ fontSize: 11.5, opacity: 0.9 }}>{t('todaySalesHint')}</div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+          {[
+            [t('salesProfit'), cur(today.salesProfit), '#fff'],
+            [t('expenses'), cur(round2(today.businessExp + today.personalExp + today.homeExp)), '#FFD9A8'],
+            [t('netAfterAll'), cur(dayNet), dayNet >= 0 ? '#A8F0C6' : '#FFC2C2'],
+          ].map(([label, value, color]) => (
+            <div key={label} style={{ flex: 1, background: 'rgba(255,255,255,.14)', borderRadius: 12, padding: '8px 10px' }}>
+              <div style={{ fontSize: 10, opacity: 0.85, fontWeight: 700 }}>{label}</div>
+              <div style={{ fontSize: 14.5, fontWeight: 900, color, marginTop: 2 }}>{value}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ══ 2. THE PERIOD — one card, one set of figures, no repetition ══ */}
+      <Card className="rise" style={{ marginBottom: 12, padding: 0, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', gap: 4, padding: 8, background: C.surfaceAlt }}>
+          {[['day', `📅 ${t('today')}`], ['month', `🗓️ ${t('thisMonth')}`], ['year', `📆 ${t('thisYear')}`]].map(([k, label]) => (
+            <button key={k} onClick={() => setRange(k)} style={{
+              flex: 1, border: 'none', borderRadius: 9, padding: '8px 4px', fontSize: 12, fontWeight: 800, cursor: 'pointer',
+              background: range === k ? C.primary : 'transparent', color: range === k ? '#fff' : C.textMid,
+            }}>{label}</button>
+          ))}
+        </div>
+
+        <div style={{ padding: '14px 16px' }}>
+          {/* Revenue is the headline; everything under it explains where it went. */}
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ fontSize: 11.5, color: C.textMuted, fontWeight: 700 }}>{t('revenueLabel')} · {rangeLabel}</div>
+              <div style={{ fontSize: 27, fontWeight: 900, color: C.text, letterSpacing: -0.6 }}>{cur(pl.revenue)}</div>
+            </div>
+            <div style={{ marginInlineStart: 'auto', textAlign: 'end' }}>
+              <div style={{ fontSize: 11.5, color: C.textMuted, fontWeight: 700 }}>{t('netAfterAll')}</div>
+              <div style={{ fontSize: 20, fontWeight: 900, color: pl.netAfterAll >= 0 ? C.success : C.danger }}>{cur(pl.netAfterAll)}</div>
+            </div>
+          </div>
+          {monthPace !== null && (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ height: 5, background: C.surfaceAlt, borderRadius: 3, overflow: 'hidden' }}>
+                <div style={{ width: `${monthPace}%`, height: '100%', background: C.primaryLight || C.primary, borderRadius: 3 }} />
+              </div>
+              <div style={{ fontSize: 10, color: C.textMuted, marginTop: 3 }}>{t('monthElapsed').replace('{x}', String(monthPace))}</div>
+            </div>
+          )}
+
+          {/* The waterfall: revenue down to net, each step named. One place only. */}
+          <div style={{ marginTop: 14, display: 'grid', gap: 1, background: C.border, borderRadius: 12, overflow: 'hidden' }}>
+            <Step label={t('cogs')} value={`− ${cur(pl.cogs)}`} tone={C.danger} />
+            <Step label={t('salesProfit')} value={cur(pl.salesProfit)} tone={C.success} strong />
+            {pl.freeRestockGain > 0 && <Step label={`🎁 ${t('freeRestock')}`} value={`＋ ${cur(pl.freeRestockGain)}`} tone={C.success} />}
+            <Step label={t('businessExpenses')} value={`− ${cur(pl.businessExp)}`} tone={C.warning} />
+            <Step label={t('operatingProfit')} value={cur(pl.operatingProfit)} tone={C.primary} strong />
+            {pl.personalExp > 0 && <Step label={t('personalExpenses')} value={`− ${cur(pl.personalExp)}`} tone={C.warning} />}
+            {pl.homeExp > 0 && <Step label={`🏠 ${t('home')}`} value={`− ${cur(pl.homeExp)}`} tone={C.warning} />}
+            <Step label={t('netAfterAll')} value={cur(pl.netAfterAll)} tone={pl.netAfterAll >= 0 ? C.success : C.danger} strong big />
+          </div>
+
+          {Math.abs(pl.lineIntegrityGap || 0) > 1 && (
+            <div style={{ background: C.warning + '18', border: `1px solid ${C.warning}55`, borderRadius: 10, padding: '8px 11px', marginTop: 10 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 800, color: C.text }}>⚠ {t('lineGapTitle')}</div>
+              <div style={{ fontSize: 11, color: C.textMid, marginTop: 3, lineHeight: 1.6 }}>
+                {t('lineGapBody').replace('{x}', cur(Math.abs(pl.lineIntegrityGap)))}
+              </div>
+            </div>
+          )}
+
+          <button onClick={() => setShowSold(true)} style={{
+            width: '100%', marginTop: 12, border: `1px solid ${C.border}`, background: '#fff', borderRadius: 10,
+            padding: '9px', fontSize: 12, fontWeight: 800, color: C.primary, cursor: 'pointer',
+          }}>🔍 {t('whatWasSold')} · {rangeLabel}</button>
+        </div>
+      </Card>
+
+      {/* ══ 3. WHAT NEEDS ATTENTION — money owed and stock running out ══ */}
+      <div className="rise" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+        <Tile icon="⏳" label={t('debt')} value={cur(kpi.debt)} tone={kpi.debt > 0 ? C.danger : C.success}
+          sub={kpi.oldDebt > 0 ? `${t('oldDebt')}: ${cur(kpi.oldDebt)}` : null} />
+        <Tile icon="🔻" label={t('lowStock')} value={fmtNum(kpi.lowStock.length)} tone={kpi.lowStock.length ? C.warning : C.success}
+          sub={t('tapToView')} onClick={() => setShowRestock(true)} />
+        <Tile icon="📦" label={t('inventoryValue')} value={cur(kpi.inventoryValue)} tone={C.text} />
+        {kpi.vatDue > 0
+          ? <Tile icon="🧾" label={t('vatDue')} value={cur(kpi.vatDue)} tone={C.warning} />
+          : <Tile icon="💎" label={t('salesMarginLifetime')} value={cur(kpi.profit)} tone={C.success} />}
+      </div>
+
+      {/* ══ 4. Financial position ══ */}
+      <FinancialPanel />
+
+      {/* ══ 5. Is this month better than last? ══ */}
+      <Card className="rise" style={{ marginBottom: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <SectionTitle>📅 {cmpMode === 'year' ? t('yearCompare') : t('monthCompare')}</SectionTitle>
           <div style={{ marginInlineStart: 'auto', display: 'flex', gap: 4, background: C.surfaceAlt, padding: 3, borderRadius: 9 }}>
@@ -179,7 +278,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Pick what to compare. At least one column always stays on. */}
         <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 8 }}>
           {CMP_METRICS.map((m) => (
             <button key={m.key} onClick={() => toggleCol(m.key)} style={{
@@ -188,13 +286,9 @@ export default function Dashboard() {
               background: cmpCols.includes(m.key) ? C.primary : '#fff', color: cmpCols.includes(m.key) ? '#fff' : C.textMid,
             }}>{cmpCols.includes(m.key) ? '☑' : '☐'} {m.label}</button>
           ))}
-          <button onClick={() => setCmpCols(CMP_METRICS.map((m) => m.key))} style={{
-            border: `1px dashed ${C.border}`, borderRadius: 999, padding: '4px 10px',
-            fontSize: 10.5, fontWeight: 800, cursor: 'pointer', background: 'transparent', color: C.primary,
-          }}>＋ {t('compareAll')}</button>
           <div style={{ marginInlineStart: 'auto', display: 'flex', gap: 4 }}>
             {[['bar', '📊'], ['line', '📈']].map(([k, icon]) => (
-              <button key={k} onClick={() => setCmpChart(k)} title={k} style={{
+              <button key={k} onClick={() => setCmpChart(k)} style={{
                 border: `1px solid ${cmpChart === k ? C.primary : C.border}`, borderRadius: 8, padding: '3px 9px',
                 fontSize: 12, cursor: 'pointer', background: cmpChart === k ? C.surfaceAlt : '#fff',
               }}>{icon}</button>
@@ -202,8 +296,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Same months, same metrics as the table below — one selection drives both. */}
-        <div style={{ width: '100%', height: 240, marginTop: 10 }} dir="ltr">
+        <div style={{ width: '100%', height: 230, marginTop: 10 }} dir="ltr">
           <ResponsiveContainer>
             {cmpChart === 'bar' ? (
               <BarChart data={chartData} margin={{ top: 4, right: 4, left: -18, bottom: 0 }} barCategoryGap="18%" barGap={1}>
@@ -227,7 +320,7 @@ export default function Dashboard() {
           </ResponsiveContainer>
         </div>
 
-        <div style={{ overflowX: 'auto', marginTop: 10 }}>
+        <div style={{ overflowX: 'auto', marginTop: 8 }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 120 + activeCols.length * 92 }}>
             <thead>
               <tr style={{ color: C.textMuted, fontSize: 10.5 }}>
@@ -237,7 +330,7 @@ export default function Dashboard() {
             </thead>
             <tbody>
               {compare.map((row, i) => {
-                const prev = compare[i + 1];                       // list is newest-first
+                const prev = compare[i + 1];
                 return (
                   <tr key={row.key} style={{ borderTop: `1px solid ${C.border}` }}>
                     <td style={cmpTd('start')}>
@@ -265,138 +358,30 @@ export default function Dashboard() {
             </tbody>
           </table>
         </div>
-        <div style={{ fontSize: 10.5, color: C.textMuted, marginTop: 8, lineHeight: 1.6 }}>
-          {t('monthCompareHint')}
-        </div>
+        <div style={{ fontSize: 10.5, color: C.textMuted, marginTop: 8, lineHeight: 1.6 }}>{t('monthCompareHint')}</div>
       </Card>
 
-      {/* ── HERO: Profit & Loss ── */}
-      <div className="rise" style={{
-        borderRadius: 20, padding: 18, marginBottom: 14, color: '#fff',
-        background: `linear-gradient(135deg, ${C.primary} 0%, ${C.primaryMid} 55%, ${C.primaryLight} 100%)`,
-        boxShadow: '0 10px 30px rgba(13,59,110,.28)', position: 'relative', overflow: 'hidden',
-      }}>
-        <div style={{ position: 'absolute', insetInlineEnd: -40, top: -40, width: 160, height: 160, borderRadius: 999, background: 'rgba(255,255,255,.08)' }} />
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, position: 'relative' }}>
-          <div style={{ fontSize: 13, fontWeight: 700, opacity: .9 }}>📊 {t('profitLoss')} — {rangeLabel}</div>
-          <div style={{ display: 'flex', gap: 4, background: 'rgba(255,255,255,.15)', padding: 3, borderRadius: 10 }}>
-            {[['day', t('today')], ['month', t('thisMonth')], ['year', t('thisYear')]].map(([k, label]) => (
-              <button key={k} onClick={() => setRange(k)} style={{
-                padding: '5px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', border: 'none',
-                background: range === k ? '#fff' : 'transparent', color: range === k ? C.primary : '#fff',
-              }}>{label}</button>
-            ))}
-          </div>
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: range === 'day' ? '1fr 1fr' : '1fr 1fr 1fr', gap: 10, position: 'relative' }}>
-          <HeroFig label={t('salesProfit')} value={cur(pl.salesProfit)} sub={`${t('profitMargin')} ${fmtNum(pl.margin)}%`} onClick={() => setShowSold(true)} />
-          {range !== 'day' && <HeroFig label={t('operatingProfit')} value={cur(pl.operatingProfit)} sub={t('operatingProfitHint')} />}
-          <HeroFig label={t('netAfterAll')} value={cur(pl.netAfterAll)} sub={t('netAfterAllHint')} strong neg={pl.netAfterAll < 0} />
-        </div>
-      </div>
-
-      {/* ── Smart daily summary ── */}
-      <Card className="rise" style={{ marginBottom: 14, display: 'flex', gap: 12, alignItems: 'flex-start', borderInlineStart: `3px solid ${C.primaryLight}` }}>
-        <div style={{ fontSize: 22 }}>💡</div>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 12, fontWeight: 800, color: C.text, marginBottom: 2 }}>{t('dailyInsight')}</div>
-          <div style={{ fontSize: 13, color: C.textMid, lineHeight: 1.6 }}>
-            {today.invoiceCount > 0 || today.expenseCount > 0 ? (
-              <>🧾 {fmtNum(today.invoiceCount)} · {t('revenueLabel')} <b style={{ color: C.primary }}>{cur(today.revenue)}</b> · {t('salesProfit')} <b style={{ color: C.success }}>{cur(today.salesProfit)}</b>
-              {(today.businessExp + today.personalExp) > 0 && <> · {t('expenses')} <b style={{ color: C.warning }}>{cur(today.businessExp + today.personalExp)}</b></>}
-              {' · '}<b>{t('netToday')}</b> <b style={{ color: today.netAfterAll >= 0 ? C.success : C.danger }}>{cur(today.netAfterAll)}</b></>
-            ) : t('noData')}
-          </div>
-        </div>
-      </Card>
-
-      {/* ── KPI strip ── */}
-      <div className="rise" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 14 }}>
-        <Kpi icon="💰" label={t('revenueLifetime')} value={cur(kpi.revenue)} color={C.primary} />
-        <Kpi icon="📈" label={t('salesMarginLifetime')} value={cur(kpi.profit)} color={C.success} />
-        <Kpi icon="⏳" label={t('debt')} value={cur(kpi.debt)} color={kpi.debt > 0 ? C.danger : C.success} />
-        {kpi.oldDebt > 0 && <Kpi icon="📜" label={t('oldDebt')} value={cur(kpi.oldDebt)} color={C.danger} />}
-        {kpi.vatDue > 0 && <Kpi icon="🧾" label={t('vatDue')} value={cur(kpi.vatDue)} color={C.warning} />}
-        <Kpi icon="📦" label={t('inventoryValue')} value={cur(kpi.inventoryValue)} color={C.text} />
-        <Kpi icon="🔻" label={t('lowStock')} value={fmtNum(kpi.lowStock.length)} color={kpi.lowStock.length ? C.warning : C.success} onClick={() => setShowRestock(true)} />
-      </div>
-      {showRestock && <RestockList onClose={() => setShowRestock(false)} />}
-
-      {/* ── Financial position (interactive: donut + drill-downs) ── */}
-      <FinancialPanel app={app} />
-
-      {/* ── P&L waterfall ── */}
-      <Card className="rise" style={{ marginBottom: 14 }}>
-        <SectionTitle>🧮 {t('profitLoss')} — {rangeLabel}</SectionTitle>
-        <div style={{ display: 'grid', gap: 1, background: C.border, borderRadius: 12, overflow: 'hidden', marginTop: 8 }}>
-          <PnlRow label={`${t('revenueLabel')} — ${rangeLabel}`} value={cur(pl.revenue)} color={C.text} />
-          <PnlRow label={t('cogs')} value={'− ' + cur(pl.cogs)} color={C.danger} />
-          <PnlRow label={t('salesProfit')} value={cur(pl.salesProfit)} color={C.success} strong />
-          {/* A non-zero gap means invoice totals and their line items disagree. It is a
-              data fault, not a business result, so it is named rather than absorbed. */}
-          {Math.abs(pl.lineIntegrityGap || 0) > 1 && (
-            <div style={{ background: C.warning + '18', border: `1px solid ${C.warning}55`, borderRadius: 10, padding: '8px 11px', margin: '2px 0 6px' }}>
-              <div style={{ fontSize: 11.5, fontWeight: 800, color: C.text }}>⚠ {t('lineGapTitle')}</div>
-              <div style={{ fontSize: 11, color: C.textMid, marginTop: 3, lineHeight: 1.6 }}>
-                {t('lineGapBody').replace('{x}', cur(Math.abs(pl.lineIntegrityGap)))}
-              </div>
-            </div>
-          )}
-          {pl.freeRestockGain > 0 && <PnlRow label={`🎁 ${t('freeRestock')}`} value={'＋ ' + cur(pl.freeRestockGain)} color={C.success} />}
-          <PnlRow label={t('businessExpenses')} value={'− ' + cur(pl.businessExp)} color={C.warning} />
-          <PnlRow label={t('operatingProfit')} value={cur(pl.operatingProfit)} color={C.primary} strong />
-          <PnlRow label={t('personalExpenses')} value={'− ' + cur(pl.personalExp)} color={C.warning} />
-          {pl.homeExp > 0 && <PnlRow label={`🏠 ${t('home')}`} value={'− ' + cur(pl.homeExp)} color={C.warning} />}
-          <PnlRow label={t('netAfterAll')} value={cur(pl.netAfterAll)} color={pl.netAfterAll >= 0 ? C.success : C.danger} strong />
-        </div>
-      </Card>
-
-      {/* ── Expenses by group (ties to the P&L expenses and cash) ── */}
-      {expByGroup.rows.length > 0 && (
-        <Card style={{ marginBottom: 14 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
-            <span style={{ fontSize: 13, fontWeight: 800, color: C.text }}>📊 {t('expensesByGroup')}</span>
-            <span style={{ fontSize: 12, fontWeight: 800, color: C.warning }}>{cur(expByGroup.total)}</span>
-          </div>
-          <div style={{ display: 'grid', gap: 7 }}>
-            {expByGroup.rows.map((r) => {
-              const color = r.type === 'business' ? C.primary : r.type === 'home' ? C.success : C.warning;
-              const pctv = expByGroup.total > 0 ? (r.total / expByGroup.total) * 100 : 0;
-              return (
-                <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ width: 84, fontSize: 11, color: C.textMid, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
-                  <div style={{ flex: 1, height: 13, background: C.surfaceAlt, borderRadius: 7, overflow: 'hidden' }}>
-                    <div style={{ width: `${pctv}%`, height: '100%', background: color, borderRadius: 7 }} />
-                  </div>
-                  <span style={{ width: 72, textAlign: 'end', fontSize: 11, fontWeight: 700, color: C.text }}>{cur(r.total)}</span>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
-      )}
-
-      {/* ── Sales by emirate ── */}
-      <Card className="rise" style={{ marginBottom: 14 }}>
+      {/* ══ 6. Where the sales come from ══ */}
+      <Card className="rise" style={{ marginBottom: 12 }}>
         <SectionTitle>🗺️ {t('bySalesEmirate')}</SectionTitle>
         {emirates.length === 0 ? <EmptyState icon="🗺️" text={t('noData')} /> : (
           <>
             {bestEmirate && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '6px 0 12px', fontSize: 13 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
                 <Badge tone="success">🏆 {t('bestEmirate')}</Badge>
-                <b style={{ color: C.text }}>{bestEmirate.emirate}</b>
-                <span style={{ color: C.primary, fontWeight: 800, marginInlineStart: 'auto' }}>{cur(bestEmirate.revenue)}</span>
+                <span style={{ fontWeight: 800, color: C.text, fontSize: 13 }}>{bestEmirate.emirate}</span>
+                <span style={{ marginInlineStart: 'auto', fontWeight: 900, color: C.primary }}>{cur(bestEmirate.revenue)}</span>
               </div>
             )}
-            <div style={{ display: 'grid', gap: 9 }}>
+            <div style={{ display: 'grid', gap: 8 }}>
               {emirates.map((e) => (
                 <div key={e.emirate}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 3 }}>
                     <span style={{ fontWeight: 700, color: C.text }}>{e.emirate}</span>
-                    <span style={{ color: C.textMid }}>{cur(e.revenue)} · <span style={{ color: C.success }}>{cur(e.profit)}</span></span>
+                    <span style={{ color: C.textMuted }}>{cur(e.revenue)} · <span style={{ color: C.success }}>{cur(e.profit)}</span></span>
                   </div>
-                  <div style={{ height: 8, background: C.surfaceAlt, borderRadius: 999, overflow: 'hidden' }}>
-                    <div style={{ width: `${(e.revenue / maxEmRev) * 100}%`, height: '100%', borderRadius: 999, background: `linear-gradient(90deg, ${C.primaryLight}, ${C.primary})` }} />
+                  <div style={{ height: 8, background: C.surfaceAlt, borderRadius: 4, overflow: 'hidden' }}>
+                    <div style={{ width: `${(e.revenue / maxEmRev) * 100}%`, height: '100%', background: C.primary, borderRadius: 4 }} />
                   </div>
                 </div>
               ))}
@@ -405,50 +390,28 @@ export default function Dashboard() {
         )}
       </Card>
 
-      {/* ── Top products / customers (by profit, for the selected period) ── */}
-      {(() => {
-        const ppl = (data[TABLES.externalDebts] || []).filter((p) => p.isActive !== false);
-        const tot = ppl.reduce((s, p) => s + (p.txns || []).reduce((a, x) => a + (x.type === 'collect' ? -num(x.amount) : num(x.amount)), 0), 0);
-        if (!ppl.length || tot <= 0) return null;
-        return (
-          <Card style={{ marginBottom: 14 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: 800, color: C.text }}>🤝 {t('extDebts')}</div>
-                <div style={{ fontSize: 11, color: C.textMuted }}>{ppl.length} {t('persons')}</div>
-              </div>
-              <div style={{ fontWeight: 800, fontSize: 16, color: C.danger }}>{cur(tot)}</div>
-            </div>
-          </Card>
-        );
-      })()}
-
       <RankCard title={`💎 ${t('topProducts')}`} rows={topProd} cur={cur}
-        emptyIcon="💎" emptyText={t('noData')}
-        primary={(r) => cur(r.profit)} secondary={(r) => `${fmtNum(r.qty)} × · ${cur(r.revenue)}`} label={(r) => r.label} />
+        label={(r) => r.label} primary={(r) => cur(r.revenue)} secondary={(r) => `${fmtNum(r.qty)} · ${cur(r.profit)}`}
+        emptyIcon="💎" emptyText={t('noData')} />
 
       <RankCard title={`🏆 ${t('topCustomers')}`} rows={topCust} cur={cur}
-        emptyIcon="🏆" emptyText={t('noData')}
-        primary={(r) => cur(r.profit)} secondary={(r) => `${r.emirate || '—'}${r.debt > 0 ? ` · ${t('debt')} ${cur(r.debt)}` : ''}`} label={(r) => `${r.type === 'center' ? '🏥' : '🧑‍⚕️'} ${r.name}`} />
+        label={(r) => r.name} primary={(r) => cur(r.revenue)} secondary={(r) => `${fmtNum(r.invoiceCount || 0)} · ${cur(r.profit)}`}
+        emptyIcon="🏆" emptyText={t('noData')} />
 
-      <Card className="rise" style={{ marginBottom: 14 }}>
+      {/* ══ 7. Alerts ══ */}
+      <Card className="rise" style={{ marginBottom: 12 }}>
         <SectionTitle>
           🔔 {t('alerts')}
           {alerts.length > 0 && <Badge tone={alerts.some((a) => a.sev === 3) ? 'danger' : 'warning'}>{fmtNum(alerts.length)}</Badge>}
         </SectionTitle>
         {alerts.length === 0 ? <EmptyState icon="✅" text={t('noAlerts')} /> : (
-          <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
+          <div style={{ display: 'grid', gap: 6 }}>
             {alerts.slice(0, 12).map((al) => {
-              const txt = alertText(al, t, cur);
-              const stripe = al.tone === 'danger' ? C.danger : al.tone === 'warning' ? C.warning : C.primaryMid;
+              const tone = al.sev === 3 ? C.danger : al.sev === 2 ? C.warning : C.primary;
               return (
-                <div key={al.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 10, borderRadius: 12, background: C.surfaceAlt, borderInlineStart: `3px solid ${stripe}` }}>
-                  <div style={{ fontSize: 17 }}>{al.icon}</div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, color: C.text, fontSize: 13 }}>{txt.title}</div>
-                    <div style={{ fontSize: 11, color: C.textMuted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{txt.desc}</div>
-                  </div>
-                  <Badge tone={al.tone}>{al.sev === 3 ? '!' : al.sev === 2 ? '•' : 'i'}</Badge>
+                <div key={al.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', background: tone + '10', borderRadius: 9, borderInlineStart: `3px solid ${tone}` }}>
+                  <span style={{ fontSize: 15 }}>{al.icon}</span>
+                  <span style={{ flex: 1, fontSize: 12, color: C.text }}>{alertText(al, t, cur)}</span>
                 </div>
               );
             })}
@@ -456,78 +419,80 @@ export default function Dashboard() {
         )}
       </Card>
 
-      {/* Interactive drill-down: full period report (KPIs, chart, materials, buyers) */}
+      {/* Drill-down: what was sold in this period, and who bought it */}
       <Modal open={showSold} onClose={() => setShowSold(false)}
-        title={`📊 ${t('periodReport')} — ${range === 'day' ? t('today') : range === 'year' ? t('thisYear') : t('thisMonth')}`}>
-        {soldList.length === 0 ? <EmptyState icon="🧾" text={t('noData')} /> : (
-          <div style={{ display: 'grid', gap: 12 }}>
-            {/* KPI strip */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
-              {[
-                { l: t('revenueLabel'), v: pl.revenue, c: C.text },
-                { l: t('wholesaleCost'), v: pl.cogs, c: C.textMid },
-                { l: t('salesProfit'), v: pl.salesProfit, c: C.success },
-                { l: t('businessExpenses'), v: pl.businessExp, c: C.danger },
-              ].map((k, i) => (
-                <div key={i} style={{ background: C.surfaceAlt, borderRadius: 10, padding: '8px 10px', textAlign: 'center' }}>
-                  <div style={{ fontSize: 10, color: C.textMuted, fontWeight: 700 }}>{k.l}</div>
-                  <div style={{ fontSize: 15, fontWeight: 800, color: k.c }}>{cur(k.v)}</div>
-                </div>
-              ))}
-            </div>
-            {/* Top materials by profit — visual */}
-            <div style={{ background: C.surfaceAlt, borderRadius: 10, padding: '8px 4px' }}>
-              <ResponsiveContainer width="100%" height={160}>
-                <BarChart data={soldList.slice(0, 6)} margin={{ top: 4, right: 6, left: -14, bottom: 0 }} dir="ltr">
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="label" tick={{ fontSize: 9 }} interval={0} tickFormatter={(s) => (s.length > 9 ? s.slice(0, 8) + '…' : s)} />
-                  <YAxis tick={{ fontSize: 9 }} />
-                  <Tooltip formatter={(v) => cur(v)} />
-                  <Bar dataKey="profit" name={t('profit')} fill={C.success} radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="revenue" name={t('revenueLabel')} fill={C.primary} radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-            {/* Materials table — name with numbers right beside it */}
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 800, color: C.textMid, marginBottom: 6 }}>📦 {t('soldMaterials')}</div>
-              <div style={{ display: 'grid', gap: 6 }}>
-                {soldList.map((r, i) => (
-                  <div key={i} style={{ background: C.surfaceAlt, borderRadius: 10, padding: '8px 10px' }}>
-                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, justifyContent: 'space-between' }}>
-                      <div style={{ fontWeight: 700, color: C.text, fontSize: 13, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.label}</div>
-                      <div style={{ fontWeight: 800, color: r.profit >= 0 ? C.success : C.danger, flexShrink: 0 }}>{cur(r.profit)}</div>
-                    </div>
-                    <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>
-                      {fmtNum(r.qty)} × · {t('wholesale')} {cur(r.unitCost)} → {t('sell')} {cur(r.unitSell)}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-            {/* Buyers in this period */}
-            <div>
-              <div style={{ fontSize: 12, fontWeight: 800, color: C.textMid, marginBottom: 6 }}>🏥 {t('whoBought')}</div>
-              <div style={{ display: 'grid', gap: 6 }}>
-                {periodReport.buyers.map((b, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, background: C.surfaceAlt, borderRadius: 10, padding: '8px 10px' }}>
-                    <div style={{ width: 20, textAlign: 'center', fontWeight: 800, color: C.textMuted, fontSize: 12 }}>{i + 1}</div>
+        title={`🔍 ${t('whatWasSold')} · ${rangeLabel}`} width={620}>
+        <div style={{ display: 'grid', gap: 14 }}>
+          <div>
+            <div style={{ fontSize: 12.5, fontWeight: 800, color: C.text, marginBottom: 6 }}>💎 {t('materials')}</div>
+            {soldList.length === 0 ? <EmptyState icon="💎" text={t('noData')} /> : (
+              <div style={{ display: 'grid', gap: 5 }}>
+                {soldList.map((r) => (
+                  <div key={r.sku + r.label} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', background: C.surfaceAlt, borderRadius: 9 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 700, color: C.text, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.name}</div>
-                      <div style={{ fontSize: 11, color: C.textMuted }}>{b.count} {t('invoices')} · {cur(b.revenue)}</div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: C.text, overflowWrap: 'anywhere' }}>{r.label}</div>
+                      <div style={{ fontSize: 10.5, color: C.textMuted }}>{fmtNum(r.qty)} × {cur(r.unitSell)}</div>
                     </div>
-                    <div style={{ fontWeight: 800, color: C.success, flexShrink: 0 }}>{cur(b.profit)}</div>
+                    <div style={{ textAlign: 'end' }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 900, color: C.text }}>{cur(r.revenue)}</div>
+                      <div style={{ fontSize: 10.5, color: C.success }}>{cur(r.profit)}</div>
+                    </div>
                   </div>
                 ))}
               </div>
-            </div>
+            )}
           </div>
-        )}
+          <div>
+            <div style={{ fontSize: 12.5, fontWeight: 800, color: C.text, marginBottom: 6 }}>🏥 {t('customers')}</div>
+            {periodReport.buyers.length === 0 ? <EmptyState icon="🏥" text={t('noData')} /> : (
+              <div style={{ display: 'grid', gap: 5 }}>
+                {periodReport.buyers.map((b) => (
+                  <div key={b.name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', background: C.surfaceAlt, borderRadius: 9 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: C.text }}>{b.name}</div>
+                      <div style={{ fontSize: 10.5, color: C.textMuted }}>{fmtNum(b.count)} {t('invoices')}</div>
+                    </div>
+                    <div style={{ textAlign: 'end' }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 900, color: C.text }}>{cur(b.revenue)}</div>
+                      <div style={{ fontSize: 10.5, color: C.success }}>{cur(b.profit)}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </Modal>
+
+      {showRestock && <RestockList onClose={() => setShowRestock(false)} />}
     </div>
   );
 }
 
+// One line of the revenue-to-net waterfall.
+function Step({ label, value, tone, strong, big }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: strong ? C.surfaceAlt : '#fff', padding: big ? '11px 12px' : '8px 12px' }}>
+      <span style={{ fontSize: big ? 13 : 12, fontWeight: strong ? 800 : 600, color: C.textMid }}>{label}</span>
+      <span style={{ fontSize: big ? 17 : strong ? 14 : 12.5, fontWeight: strong ? 900 : 700, color: tone }}>{value}</span>
+    </div>
+  );
+}
+
+// A single figure that needs attention.
+function Tile({ icon, label, value, tone, sub, onClick }) {
+  return (
+    <div onClick={onClick} style={{
+      background: '#fff', borderRadius: 14, padding: '11px 13px', border: `1px solid ${C.border}`,
+      cursor: onClick ? 'pointer' : 'default',
+    }}>
+      <div style={{ fontSize: 15 }}>{icon}</div>
+      <div style={{ fontSize: 10.5, color: C.textMuted, fontWeight: 700, marginTop: 2 }}>{label}</div>
+      <div style={{ fontSize: 17, fontWeight: 900, color: tone, marginTop: 1 }}>{value}</div>
+      {sub && <div style={{ fontSize: 9.5, color: onClick ? C.primaryLight : C.textMuted, fontWeight: 700, marginTop: 2 }}>{sub}</div>}
+    </div>
+  );
+}
 
 function RankCard({ title, rows, label, primary, secondary, emptyIcon, emptyText }) {
   return (
@@ -563,38 +528,12 @@ function alertText(al, t, cur) {
   }
 }
 
-function HeroFig({ label, value, sub, strong, neg, onClick }) {
-  return (
-    <div onClick={onClick} style={{ background: strong ? 'rgba(255,255,255,.16)' : 'transparent', borderRadius: 14, padding: strong ? '10px 12px' : '4px 2px', cursor: onClick ? 'pointer' : 'default' }}>
-      <div style={{ fontSize: 11, opacity: .85, fontWeight: 600 }}>{label}{onClick ? ' ›' : ''}</div>
-      <div style={{ fontSize: 21, fontWeight: 800, marginTop: 2, color: neg ? '#FFD9D9' : '#fff' }}>{value}</div>
-      {sub && <div style={{ fontSize: 10, opacity: .8 }}>{sub}</div>}
-    </div>
-  );
-}
 
-function Kpi({ icon, label, value, color, onClick }) {
-  return (
-    <div onClick={onClick} style={{ background: C.surface, borderRadius: 16, border: `1px solid ${C.border}`, boxShadow: SHADOW, padding: 14, cursor: onClick ? 'pointer' : 'default' }}>
-      <div style={{ fontSize: 18 }}>{icon}</div>
-      <div style={{ fontSize: 18, fontWeight: 800, color, marginTop: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{value}</div>
-      <div style={{ fontSize: 11, color: C.textMuted }}>{label}{onClick ? ' ›' : ''}</div>
-    </div>
-  );
-}
 
 function SectionTitle({ children }) {
   return <div style={{ fontSize: 14, fontWeight: 800, color: C.text, display: 'flex', alignItems: 'center', gap: 6 }}>{children}</div>;
 }
 
-function PnlRow({ label, value, color, strong }) {
-  return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: strong ? '#F7FAFF' : '#fff', padding: strong ? '11px 13px' : '8px 13px' }}>
-      <span style={{ fontSize: 13, fontWeight: strong ? 800 : 600, color: strong ? C.text : C.textMid }}>{label}</span>
-      <span style={{ fontSize: strong ? 15 : 13, fontWeight: strong ? 800 : 700, color }}>{value}</span>
-    </div>
-  );
-}
 
 const cmpTh = (align) => ({ textAlign: align, padding: '4px 6px', fontWeight: 700, whiteSpace: 'nowrap' });
 const cmpTd = (align) => ({ textAlign: align, padding: '7px 6px', whiteSpace: 'nowrap' });
