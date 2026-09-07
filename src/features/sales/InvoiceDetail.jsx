@@ -3,7 +3,7 @@ import { useApp } from '../../app/AppProvider.jsx';
 import { Modal, Btn } from '../../ui/components.jsx';
 import { C, TABLES } from '../../lib/constants.js';
 import { fmtDate } from '../../lib/dates.js';
-import { variantLabel, invoiceBreakdown } from '../../lib/engine.js';
+import { variantLabel, invoiceBreakdown , invoiceLinesNow} from '../../lib/engine.js';
 import { money } from '../../lib/whatsapp.js';
 import { generateInvoicePdf, printInvoice, printReceipt, generateReceiptPdf } from '../../lib/invoicePdf.js';
 import { SendInvoiceModal } from './SendInvoiceModal.jsx';
@@ -21,7 +21,9 @@ export default function InvoiceDetail({ invoice, onClose, onEdit }) {
   const customer = (data[TABLES.customers] || []).find((c) => c.id === invoice.customerId);
   const variants = data[TABLES.variants] || [];
   const variantById = (id) => variants.find((x) => x.id === id);
-  const items = (data[TABLES.invoiceItems] || []).filter((it) => it.invoiceId === invoice.id && it.isActive !== false);
+  // Uses the healing reader: if an edit's replacement lines have not reached this
+  // device yet, the retired ones are shown rather than an empty invoice.
+  const items = invoiceLinesNow(data, invoice.id).lines;
   const b = invoiceBreakdown(invoice, items, settings);
   const m = (v) => money(v, b.currency);
 

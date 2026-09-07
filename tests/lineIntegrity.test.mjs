@@ -251,6 +251,63 @@ console.log('\n─── 10. VAT: billed gross, earned net ───');
   ok('VAT is reported as a liability, not as income', Number.isFinite(liab));
 }
 
+
+console.log('\n─── 11. Lines synced, then vanished after an edit ───');
+{
+  // Husam creates the invoice in Dubai; Issa sees it in Sweden with all its lines, so
+  // they DID upload. Later the lines disappear. The cause is not a failed first upload:
+  // an edit retires the old lines and inserts new ones as SEPARATE cloud rows, so a
+  // device can hold the retire without its replacements. The invoice then shows nothing.
+  const res = await save({ lines: [
+    { variantId: 'a', qty: 8, unitPrice: 50 },
+    { variantId: 'b', qty: 3, unitPrice: 30 },
+  ] });
+  const id = typeof res === 'string' ? res : res?.id;
+  await all();
+  ok('the invoice starts with both lines', (await itemsOf(id)).length === 2);
+
+  // Edit it: the old lines are retired, new ones inserted.
+  await save({ id, lines: [
+    { variantId: 'a', qty: 8, unitPrice: 50 },
+    { variantId: 'b', qty: 3, unitPrice: 30 },
+  ] });
+  await all();
+  const retired = (await db.getAll(TABLES.invoiceItems)).filter((i) => i.invoiceId === id && i.isActive === false);
+  ok('the previous lines are retired, not destroyed', retired.length === 2, `${retired.length}`);
+  ok('each retired line records what replaced it', retired.every((r) => r.supersededBy === id && num(r.supersededAt) > 0));
+
+  // Now simulate the sync fault: the retire arrived, its replacements did not.
+  for (const it of (await db.getAll(TABLES.invoiceItems)).filter((i) => i.invoiceId === id && i.isActive !== false)) {
+    await db.remove(TABLES.invoiceItems, it.id);
+  }
+  await all();
+  ok('no live lines remain (the reported symptom)',
+    (await db.getAll(TABLES.invoiceItems)).filter((i) => i.invoiceId === id && i.isActive !== false).length === 0);
+
+  // The healing reader must still show the materials.
+  const shown = E.invoiceLinesNow(app.data, id);
+  ok('the invoice still shows its materials', shown.lines.length === 2, `${shown.lines.length}`);
+  ok('it reports that they were recovered', shown.recovered === true);
+  ok('the quantities are the real ones', shown.lines.find((l) => l.variantId === 'a').qty === 8);
+  ok('the prices are the real ones', num(shown.lines.find((l) => l.variantId === 'b').unitPrice) === 30);
+  const sum = round2(shown.lines.reduce((s, l) => s + num(l.netTotal), 0));
+  const invRow = (await db.getAll(TABLES.invoices)).find((i) => i.id === id);
+  ok('they still reconcile with the invoice total', Math.abs(sum - num(invRow.total)) < 0.02, `${sum} vs ${invRow.total}`);
+
+  // And the health check must not call this damaged, because nothing is missing.
+  const flagged = E.invoiceLineMismatches(app.data).find((x) => x.id === id);
+  ok('the invoice is not reported as damaged', !flagged, JSON.stringify(flagged));
+
+  // When the replacements finally arrive, the live rows take over with no intervention.
+  await save({ id, lines: [
+    { variantId: 'a', qty: 8, unitPrice: 50 }, { variantId: 'b', qty: 3, unitPrice: 30 },
+  ] });
+  await all();
+  const after = E.invoiceLinesNow(app.data, id);
+  ok('once replacements exist the live lines take over', after.recovered === false);
+  ok('and there are still exactly two of them', after.lines.length === 2, `${after.lines.length}`);
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${pass + fail} checks · ${fail} finding(s)`);
 findings.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));

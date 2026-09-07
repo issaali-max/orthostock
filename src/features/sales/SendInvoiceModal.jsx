@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useApp } from '../../app/AppProvider.jsx';
 import { Modal, Btn, Field, Input } from '../../ui/components.jsx';
 import { C, TABLES } from '../../lib/constants.js';
-import { invoiceBreakdown } from '../../lib/engine.js';
+import { invoiceBreakdown , invoiceLinesNow} from '../../lib/engine.js';
 import { normalizePhone, isValidPhone, invoiceMessage, sendInvoiceWhatsApp, downloadBlob } from '../../lib/whatsapp.js';
 import { generateInvoicePdf } from '../../lib/invoicePdf.js';
 
@@ -13,7 +13,9 @@ export function SendInvoiceModal({ invoice, onClose }) {
   const app = useApp();
   const { t, lang, settings, data, showToast } = app;
   const customer = (data[TABLES.customers] || []).find((c) => c.id === invoice.customerId);
-  const items = (data[TABLES.invoiceItems] || []).filter((it) => it.invoiceId === invoice.id && it.isActive !== false);
+  // Uses the healing reader: if an edit's replacement lines have not reached this
+  // device yet, the retired ones are shown rather than an empty invoice.
+  const items = invoiceLinesNow(data, invoice.id).lines;
   const variants = data[TABLES.variants] || [];
   const variantById = (id) => variants.find((x) => x.id === id);
 

@@ -323,7 +323,14 @@ export async function saveInvoiceAtomic(app, { editingId, invoiceData, lines, in
   // deleted its local copies too — leaving an invoice with a correct total and no lines,
   // unrecoverable. A soft delete keeps the row, so a half-flushed outbox can strand it
   // but never erase it, and the history remains available for recovery.
-  for (const it of oldItems) specs.push({ op: 'update', table: TABLES.invoiceItems, id: it.id, patch: { isActive: false } });
+  // Retiring carries the id of the save that replaced it. Locally this is one atomic
+  // transaction, but the retire and the replacement travel to the cloud as SEPARATE
+  // rows: if the retire arrives and its replacements do not — a dropped connection
+  // between two uploads, or the other device pulling in between — the invoice shows no
+  // lines at all, even though nothing was deleted. Stamping the replacement's id lets a
+  // reader tell "superseded by lines that exist" from "hidden with nothing to show",
+  // and restore the latter rather than displaying an empty invoice.
+  for (const it of oldItems) specs.push({ op: 'update', table: TABLES.invoiceItems, id: it.id, patch: { isActive: false, supersededBy: invId, supersededAt: nextTimestamp() } });
   for (const m of oldMoves) specs.push({ op: 'update', table: TABLES.stockMovements, id: m.id, patch: { isActive: false } });
 
   // The order the user arranged the cart in IS the order of the invoice. Store it so the
@@ -975,7 +982,9 @@ export function invoiceLineMismatches(data) {
   const out = [];
   for (const inv of (data[TABLES.invoices] || [])) {
     if (inv.isActive === false || inv.status === 'returned') continue;
-    const mine = items.filter((it) => it.invoiceId === inv.id);
+    // Use the healing reader: an invoice whose replacements have not arrived still has
+    // its retired lines, and reporting it as damaged would be wrong — the data is here.
+    const mine = invoiceLinesNow(data, inv.id).lines;
     const lineSum = round2(mine.reduce((s, it) => s + num(it.netTotal != null ? it.netTotal : it.total), 0));
     // Compare like with like: an invoice's `total` includes VAT, its lines do not, so a
     // healthy taxed invoice would otherwise be reported as missing exactly its VAT.
@@ -1201,6 +1210,29 @@ export function invoiceTotals(lines, settings, taxApplied) {
 // Single source of truth for an invoice's money breakdown — used by the screen,
 // the PDF and reports so discount/tax/total/paid/remaining are always identical.
 // Works from a SAVED invoice + its items (reconstructs the same numbers).
+// The lines that belong to an invoice RIGHT NOW.
+//
+// Normally these are the live rows. But an edit retires the old lines and inserts new
+// ones as separate cloud rows, so a device can legitimately hold the retire without yet
+// holding its replacements — a connection dropped between two uploads, or a pull that
+// landed in between. The invoice then shows NO lines even though nothing was deleted.
+//
+// Rather than display an empty invoice, fall back to the most recent retired set. The
+// data was never lost; it was hidden waiting for a replacement that has not arrived.
+// When the replacements do arrive the live rows take over automatically, so this heals
+// itself and never needs undoing.
+export function invoiceLinesNow(data, invoiceId) {
+  const all = (data[TABLES.invoiceItems] || []).filter((it) => it.invoiceId === invoiceId);
+  const live = all.filter((it) => it.isActive !== false);
+  if (live.length) return { lines: live, recovered: false };
+  const retired = all.filter((it) => it.isActive === false);
+  if (!retired.length) return { lines: [], recovered: false };
+  // The newest retired generation: the rows retired by the most recent save.
+  const newest = retired.reduce((mx, it) => Math.max(mx, num(it.supersededAt), num(it.updatedAt)), 0);
+  const sameGen = retired.filter((it) => Math.abs(num(it.supersededAt) || num(it.updatedAt)) === newest);
+  return { lines: sameGen.length ? sameGen : retired, recovered: true };
+}
+
 export function invoiceBreakdown(invoice, items, settings) {
   // Present lines in the order they were entered. sortIndex is stored on save; invoices
   // written before it fall back to their existing array position, so nothing reshuffles.
