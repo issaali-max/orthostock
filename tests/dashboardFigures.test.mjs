@@ -155,6 +155,48 @@ console.log('\n─── 7. Edge cases the layout must survive ───');
   ok('margin is zero rather than NaN when revenue is zero', q.margin === 0);
 }
 
+
+console.log('\n─── 8. Render safety: nothing the screen prints may be an object ───');
+{
+  // React throws "error #31" when given a plain object as a child, and a production
+  // build cannot catch it — the whole app shows "Something went wrong". A build passing
+  // proves nothing here, so the shapes that reach JSX are asserted directly.
+  const fs = await import('node:fs');
+  const src = fs.readFileSync(new URL('../src/features/dashboard.jsx', import.meta.url), 'utf8');
+
+  // Any helper whose value is placed straight into JSX must return a primitive.
+  const alertTextSrc = src.slice(src.indexOf('function alertText'));
+  const returnsObject = /return \{ title:/.test(alertTextSrc);
+  ok('alertText returns an object (by design)', returnsObject);
+  ok('but it is destructured before rendering, never rendered whole',
+    !/\{alertText\([^)]*\)\}/.test(src), 'alertText(...) appears directly as a JSX child');
+
+  // The same trap for every other function used as a JSX child.
+  const jsxCalls = [...src.matchAll(/\{\s*([a-zA-Z_][\w]*)\(/g)].map((m) => m[1]);
+  const known = new Set(['t', 'cur', 'fmtNum', 'cmpTh', 'cmpTd', 'String', 'label', 'primary', 'secondary', 'setRange', 'setShowSold', 'setShowRestock', 'setCmpMode', 'setCmpCount', 'setCmpChart', 'toggleCol', 'alertText']);
+  const unknown = [...new Set(jsxCalls)].filter((f) => !known.has(f));
+  ok('no unreviewed function is rendered as a JSX child', unknown.length === 0, unknown.join(', '));
+
+  // Every figure the dashboard prints must be a number or a string.
+  const p = pnl(data, MONTH);
+  const printed = [p.revenue, p.cogs, p.salesProfit, p.grossProfit, p.operatingProfit, p.netAfterAll, p.freeRestockGain, p.businessExp, p.personalExp, p.homeExp, p.invoiceCount, p.margin, p.lineIntegrityGap];
+  ok('every P&L figure is a finite number', printed.every((v) => typeof v === 'number' && Number.isFinite(v)));
+
+  const series = periodSeries(data, 'month', 6);
+  ok('every comparison cell is a number', series.every((r) => ['revenue', 'cogs', 'salesProfit', 'totalExp', 'operatingProfit', 'net'].every((k) => typeof r[k] === 'number' && Number.isFinite(r[k]))));
+  ok('every comparison key is a string', series.every((r) => typeof r.key === 'string'));
+
+  const tp = topProducts(data, 10, MONTH);
+  ok('ranking labels are strings', tp.every((r) => typeof r.label === 'string'));
+  ok('ranking figures are numbers', tp.every((r) => typeof r.revenue === 'number' && typeof r.profit === 'number'));
+
+  const tc = topCustomers(data, 10, { bounds: MONTH });
+  ok('customer names are strings', tc.every((r) => typeof r.name === 'string'));
+
+  const em = emirateStats(data);
+  ok('emirate names are strings', em.every((e) => typeof e.emirate === 'string'));
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${pass + fail} checks · ${fail} finding(s)`);
 findings.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));

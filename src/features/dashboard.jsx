@@ -408,10 +408,16 @@ export default function Dashboard() {
           <div style={{ display: 'grid', gap: 6 }}>
             {alerts.slice(0, 12).map((al) => {
               const tone = al.sev === 3 ? C.danger : al.sev === 2 ? C.warning : C.primary;
+              // alertText returns { title, desc }. Rendering the object itself is what
+              // crashed the screen — React cannot render a plain object as a child.
+              const { title, desc } = alertText(al, t, cur);
               return (
                 <div key={al.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', background: tone + '10', borderRadius: 9, borderInlineStart: `3px solid ${tone}` }}>
                   <span style={{ fontSize: 15 }}>{al.icon}</span>
-                  <span style={{ flex: 1, fontSize: 12, color: C.text }}>{alertText(al, t, cur)}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: C.text }}>{title}</div>
+                    {desc && <div style={{ fontSize: 10.5, color: C.textMuted, overflowWrap: 'anywhere' }}>{desc}</div>}
+                  </div>
                 </div>
               );
             })}
