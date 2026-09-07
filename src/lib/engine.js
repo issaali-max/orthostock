@@ -440,74 +440,7 @@ export async function purgeInvoice(app, invoiceId) {
 // Back-compat: the old name now soft-deletes (moves to recycle bin).
 export async function deleteInvoiceAtomic(app, invoiceId) { return voidInvoice(app, invoiceId); }
 
-// Commit a SALE: invoice + items + stock-out movements.
-// opts.invoiceDiscount = amount discounted off the items subtotal
-// (distributed proportionally across lines so lineProfit stays honest).
-// Per-line discount is implicit: pass a unitPrice below the variant's
-// default selling price and the discount is recorded for display.
-export async function commitInvoice(app, invoiceData, lines, opts = {}) {
-  const variants = await db.getAll(TABLES.variants); // freshest stock (correct after a reversal too)
-  const vById = (id) => variants.find((x) => x.id === id);
 
-  const gross = lines.reduce((s, l) => s + num(l.unitPrice) * num(l.qty), 0);
-  const invDisc = Math.max(0, num(opts.invoiceDiscount));
-  const netTotals = allocateDiscount(lines, gross, invDisc);   // exact, no rounding drift
-
-  const inv = await db.insert(TABLES.invoices, invoiceData);
-  let sortIndex = 0;
-  let lineIdx = -1;
-  for (const l of lines) {
-    lineIdx++;
-    const v = vById(l.variantId);
-    const avgCost = num(v?.purchasePriceAvg);
-    const listPrice = num(v?.sellingPriceDefault);
-    const rawUnit = num(l.unitPrice);
-    const qty = num(l.qty);
-    const netTotal = num(netTotals[lineIdx]);
-    const effUnit = qty === 0 ? 0 : round2(netTotal / qty);
-    const lineDisc = Math.max(0, round2((listPrice - rawUnit) * qty));
-    await db.insert(TABLES.invoiceItems, {
-      invoiceId: inv.id, variantId: l.variantId, qty, sortIndex: sortIndex++,
-      listPrice, unitPrice: rawUnit, netUnitPrice: effUnit,
-      discountAmount: lineDisc, discountPct: listPrice > 0 ? round2((1 - rawUnit / listPrice) * 100) : 0,
-      avgCostAtSale: avgCost, lineProfit: round2(netTotal - avgCost * qty),
-      total: round2(rawUnit * qty), netTotal,
-    });
-    if (v) {
-      const after = round2(num(v.stockQty) - qty);
-      await db.update(TABLES.variants, v.id, { stockQty: after });
-      await db.insert(TABLES.stockMovements, { variantId: v.id, type: 'sale', qtyChange: -qty, qtyAfter: after, refType: 'invoice', refId: inv.id, date: inv.date || todayISO() });
-    }
-  }
-  await Promise.all([app.refresh(TABLES.invoices), app.refresh(TABLES.invoiceItems), app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements)]);
-  nudgeSync();
-  return inv;
-}
-
-// Reverse a sale: restore stock, delete its items + movements + the invoice.
-// Used before re-committing an edited invoice. Reads from db so it is
-// always accurate regardless of cached app.data.
-export async function reverseInvoice(app, invoiceId) {
-  const [allItems, allMoves, allVars] = await Promise.all([
-    db.getAll(TABLES.invoiceItems), db.getAll(TABLES.stockMovements), db.getAll(TABLES.variants),
-  ]);
-  const vById = new Map(allVars.map((v) => [v.id, v]));
-  for (const it of allItems.filter((x) => x.invoiceId === invoiceId)) {
-    const v = vById.get(it.variantId);
-    if (v) {
-      const after = round2(num(v.stockQty) + num(it.qty));
-      await db.update(TABLES.variants, v.id, { stockQty: after });
-      v.stockQty = after;
-    }
-    await db.remove(TABLES.invoiceItems, it.id);
-  }
-  for (const m of allMoves.filter((x) => x.refType === 'invoice' && x.refId === invoiceId)) {
-    await db.remove(TABLES.stockMovements, m.id);
-  }
-  await db.remove(TABLES.invoices, invoiceId);
-  await Promise.all([app.refresh(TABLES.invoices), app.refresh(TABLES.invoiceItems), app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements)]);
-  nudgeSync();
-}
 
 // Commit a PURCHASE: purchase + items + stock-in + moving-average cost.
 // One-click migration: move every legacy base64 image (image_url starting with
@@ -1044,7 +977,10 @@ export function invoiceLineMismatches(data) {
     if (inv.isActive === false || inv.status === 'returned') continue;
     const mine = items.filter((it) => it.invoiceId === inv.id);
     const lineSum = round2(mine.reduce((s, it) => s + num(it.netTotal != null ? it.netTotal : it.total), 0));
-    const total = round2(num(inv.total));
+    // Compare like with like: an invoice's `total` includes VAT, its lines do not, so a
+    // healthy taxed invoice would otherwise be reported as missing exactly its VAT.
+    const vat = num(inv.vatAmount);
+    const total = round2(num(inv.total) - (vat > 0 ? vat : 0));
     const gap = round2(total - lineSum);
 
     const moves = allMoves.filter((m) => m.refType === 'invoice' && m.refId === inv.id);
@@ -1537,7 +1473,21 @@ export function pnl(data, opts = {}) {
   const groups = data[TABLES.expenseGroups] || [];
   const typeOf = (gid) => groups.find((g) => g.id === gid)?.type || 'business';
 
-  const revenue = invoices.reduce((s, i) => s + num(i.total), 0);
+  // VAT is collected ON BEHALF OF the tax authority and owed to it — it is never the
+  // seller's income. An invoice's `total` includes it, so counting the total as revenue
+  // overstated both revenue and profit by the VAT amount on every taxed invoice, and
+  // the same money was simultaneously reported as a liability by vatLiability().
+  // Revenue is therefore the net of tax: subtotal where recorded, else total − VAT.
+  const netOfVat = (i) => {
+    const total = num(i.total);
+    const vat = num(i.vatAmount);
+    if (vat > 0) return round2(total - vat);
+    // Older invoices may carry only a subtotal; trust it when it is consistent.
+    const sub = num(i.subtotal);
+    if (sub > 0 && sub <= total + 0.005) return round2(sub);
+    return round2(total);
+  };
+  const revenue = invoices.reduce((s, i) => s + netOfVat(i), 0);
   const cogs = items.reduce((s, it) => s + num(it.avgCostAtSale) * num(it.qty), 0);
   // Sales profit is DERIVED from the two figures above, not summed independently from
   // lineProfit. Summing it separately meant revenue came from the invoice headers while
@@ -1877,7 +1827,7 @@ export function outstandingLoans(customer) {
 }
 // Lend material to a doctor ATOMICALLY: append the loan to the customer row,
 // decrement variant stock, and write a stockMovements row (type 'loan') — the same
-// single-transaction pattern commitInvoice uses, so stock stays the source of truth.
+// single-transaction pattern saveInvoiceAtomic uses, so stock stays the source of truth.
 export async function lendMaterial(app, customerId, { variantId, qty, date, note }) {
   const data = app.data;
   const cust = (data[TABLES.customers] || []).find((c) => c.id === customerId);

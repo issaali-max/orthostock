@@ -162,6 +162,54 @@ console.log('\n─── 9. USD expenses weigh their AED value ───');
   ok('a USD expense is not counted as AED at face value', p.businessExp !== 100, `${p.businessExp}`);
 }
 
+
+console.log('\n─── 10. VAT is never revenue and never profit ───');
+{
+  // VAT is collected for the tax authority and owed to it. Counting it as income
+  // overstates revenue AND profit, while vatLiability reports the same money as a debt.
+  const d = mk({
+    invoices: [{ id: 'a', date: '2026-09-05', status: 'active', currency: 'AED', total: 1050, subtotal: 1000, vatAmount: 50, taxApplied: true }],
+    items: [{ invoiceId: 'a', variantId: 'v1', qty: 10, unitPrice: 100, total: 1000, netTotal: 1000, avgCostAtSale: 30, lineProfit: 700 }],
+  });
+  const p = pnl(d, B);
+  ok('revenue excludes the VAT', p.revenue === 1000, `${p.revenue}`);
+  ok('profit excludes the VAT', p.salesProfit === 700, `${p.salesProfit}`);
+  ok('the identity still holds with tax on', round2(p.revenue - p.cogs) === p.salesProfit);
+  ok('the customer still owes the full total including VAT',
+    round2(1050 - 0) === 1050, 'debt is billed gross; only revenue is net');
+
+  // A zero-rated invoice is unaffected.
+  const d0 = mk({
+    invoices: [{ id: 'b', date: '2026-09-05', status: 'active', currency: 'AED', total: 1000, subtotal: 1000, vatAmount: 0, taxApplied: false }],
+    items: [{ invoiceId: 'b', variantId: 'v1', qty: 10, unitPrice: 100, total: 1000, netTotal: 1000, avgCostAtSale: 30, lineProfit: 700 }],
+  });
+  ok('an invoice without VAT is unchanged', pnl(d0, B).revenue === 1000);
+
+  // An older invoice carrying neither vatAmount nor a distinct subtotal falls back to
+  // its total, so historical figures do not shift.
+  const dLegacy = mk({
+    invoices: [{ id: 'c', date: '2026-09-05', status: 'active', currency: 'AED', total: 800 }],
+    items: [{ invoiceId: 'c', variantId: 'v1', qty: 8, unitPrice: 100, total: 800, netTotal: 800, avgCostAtSale: 30, lineProfit: 560 }],
+  });
+  ok('a legacy invoice keeps its historical revenue', pnl(dLegacy, B).revenue === 800);
+
+  // Mixed period: one taxed, one not.
+  const dMix = mk({
+    invoices: [
+      { id: 'a', date: '2026-09-05', status: 'active', currency: 'AED', total: 1050, subtotal: 1000, vatAmount: 50, taxApplied: true },
+      { id: 'b', date: '2026-09-06', status: 'active', currency: 'AED', total: 500, subtotal: 500, vatAmount: 0 },
+    ],
+    items: [
+      { invoiceId: 'a', variantId: 'v1', qty: 10, unitPrice: 100, total: 1000, netTotal: 1000, avgCostAtSale: 30, lineProfit: 700 },
+      { invoiceId: 'b', variantId: 'v1', qty: 5, unitPrice: 100, total: 500, netTotal: 500, avgCostAtSale: 30, lineProfit: 350 },
+    ],
+  });
+  const pm = pnl(dMix, B);
+  ok('a mixed period nets only the taxed invoice', pm.revenue === 1500, `${pm.revenue}`);
+  ok('and still satisfies its arithmetic', round2(pm.revenue - pm.cogs) === pm.salesProfit);
+  ok('no line-integrity gap is introduced by netting VAT', Math.abs(pm.lineIntegrityGap) < 0.05, `${pm.lineIntegrityGap}`);
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${pass + fail} checks · ${fail} finding(s)`);
 findings.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));

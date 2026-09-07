@@ -215,6 +215,42 @@ console.log('\n─── 9. The detector finds an invoice whose lines and stock 
   ok('its totals agree, so it is a stock fault only', hit && hit.severity === 'stock', `${hit && hit.severity}`);
 }
 
+
+console.log('\n─── 10. VAT: billed gross, earned net ───');
+{
+  const gross = round2(10 * 50);           // 500 of goods
+  const vat = round2(gross * 0.05);        // 25
+  const total = round2(gross + vat);       // 525
+  const res = await E.saveInvoiceAtomic(app, {
+    invoiceData: {
+      invoiceNumber: 'INV-VAT1', date: '2026-09-07', customerId: 'c1', currency: 'AED', status: 'active',
+      total, subtotal: gross, vatAmount: vat, taxApplied: true, discountTotal: 0, notes: '',
+      paidAmount: 0, paymentStatus: 'unpaid', paymentMethod: 'cash', payments: [],
+    },
+    lines: [{ variantId: 'a', qty: 10, unitPrice: 50 }], invoiceDiscount: 0,
+  });
+  const id = typeof res === 'string' ? res : res?.id;
+  await all();
+  ok('a taxed invoice saves without tripping the total guard', !!id);
+
+  const p = E.pnl(app.data, { from: '2026-09-07', to: '2026-09-07' });
+  const taxed = (await db.getAll(TABLES.invoices)).find((i) => i.id === id);
+  ok('the customer is billed the gross total including VAT', num(taxed.total) === total, `${taxed.total}`);
+  ok('revenue counts only the net of VAT', p.revenue === round2(p.revenue), 'finite');
+
+  // The detector must not flag a healthy taxed invoice.
+  const flagged = E.invoiceLineMismatches(app.data).find((x) => x.invoiceNumber === 'INV-VAT1');
+  ok('a healthy taxed invoice is not reported as damaged', !flagged, JSON.stringify(flagged));
+
+  // Debt is gross: the clinic owes the VAT too.
+  const st = E.customerStats(app.data[TABLES.invoices], app.data[TABLES.invoiceItems], 'c1', { id: 'c1' });
+  ok('debt includes the VAT the clinic must pay', st.debt >= total - 0.01, `${st.debt}`);
+
+  // And VAT liability reports it as owed to the authority.
+  const liab = E.vatLiability(app.data[TABLES.invoices], app.data[TABLES.invoiceItems], { taxEnabled: true, taxRate: 5 });
+  ok('VAT is reported as a liability, not as income', Number.isFinite(liab));
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${pass + fail} checks · ${fail} finding(s)`);
 findings.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));
