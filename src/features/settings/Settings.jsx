@@ -665,7 +665,15 @@ export default function Settings() {
               <Btn onClick={async () => {
                 if (!window.confirm(t('reconcileConfirm'))) return;
                 const res = await reconcileStock(app);
-                showToast(`${t('reconcileDone')} (${res.fixed})`, 'success');
+                // Materials it refused to raise because their ledger is incomplete —
+                // saying so matters, since the owner would otherwise believe stock is
+                // now correct when some of it is still waiting on sync.
+                if (res.skipped?.length) {
+                  showToast(`${t('reconcileDone')} (${res.fixed}) · ⚠ ${res.skipped.length}`, 'error');
+                  window.alert(`${t('reconcileSkipped')}\n\n${res.skipped.map((x) => `• ${x.name}: ${x.from} → ${x.wouldBe} (${x.unbackedQty})`).join('\n')}`);
+                } else {
+                  showToast(`${t('reconcileDone')} (${res.fixed})`, 'success');
+                }
                 setShowAudit(false);
               }} style={{ marginTop: 6 }}>🔧 {t('reconcileStock')}</Btn>
               <div style={{ fontSize: 11, color: C.textMuted, lineHeight: 1.5 }}>{t('reconcileNote')}</div>
