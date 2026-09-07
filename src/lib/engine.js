@@ -343,7 +343,7 @@ export async function saveInvoiceAtomic(app, { editingId, invoiceData, lines, in
     // be conditional, which is how a sale could be billed without ever leaving the shelf.
     const after = round2(ensure(l.variantId) - qty);
     stock.set(l.variantId, after);
-    specs.push({ op: 'insert', table: TABLES.stockMovements, row: { variantId: v.id, type: 'sale', qtyChange: -qty, qtyAfter: after, refType: 'invoice', refId: invId } });
+    specs.push({ op: 'insert', table: TABLES.stockMovements, row: { variantId: v.id, type: 'sale', qtyChange: -qty, qtyAfter: after, refType: 'invoice', refId: invId, date: invoiceData.date || todayISO() } });
   }
   for (const [vid, finalQty] of stock) specs.push({ op: 'update', table: TABLES.variants, id: vid, patch: { stockQty: round2(finalQty) } });
 
@@ -459,7 +459,7 @@ export async function commitInvoice(app, invoiceData, lines, opts = {}) {
     if (v) {
       const after = round2(num(v.stockQty) - qty);
       await db.update(TABLES.variants, v.id, { stockQty: after });
-      await db.insert(TABLES.stockMovements, { variantId: v.id, type: 'sale', qtyChange: -qty, qtyAfter: after, refType: 'invoice', refId: inv.id });
+      await db.insert(TABLES.stockMovements, { variantId: v.id, type: 'sale', qtyChange: -qty, qtyAfter: after, refType: 'invoice', refId: inv.id, date: inv.date || todayISO() });
     }
   }
   await Promise.all([app.refresh(TABLES.invoices), app.refresh(TABLES.invoiceItems), app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements)]);
@@ -563,7 +563,13 @@ export function replayVariantCost(variantId, { purchases, invoices, purchaseItem
   const pos = (m) => {
     if (m.type === 'opening') return `0000-00-00|0|0|${m.id || ''}`;
     const d = doc(m);
-    return `${d?.date || (m.createdAt || '').slice(0, 10)}|${d?.createdAt || m.createdAt || ''}|${m.createdAt || ''}|${m.id || ''}`;
+    // A movement whose document cannot be found — deleted, or not yet synced to this
+    // device — still has to sort somewhere sensible. Its own date, then its creation
+    // time, place it correctly; without this it fell to the front of the walk and its
+    // quantity was applied before the purchases it actually followed, which weighted
+    // the next purchase's average against a stock level that no longer existed.
+    const date = d?.date || m.date || (m.createdAt || '').slice(0, 10);
+    return `${date}|${d?.createdAt || m.createdAt || ''}|${m.createdAt || ''}|${m.id || ''}`;
   };
   const mine = (stockMovements || []).filter((m) => m.variantId === variantId);
   const withSnap = mine.filter((m) => m.refType === 'purchase' && m.costBefore).sort((a, b) => pos(a).localeCompare(pos(b)));
