@@ -264,11 +264,26 @@ export async function flush() {
         await outboxDelete(op.seq);
       } catch (e) {
         const msg = String(e?.message || e);
+        // Rows whose loss would destroy history: an invoice line that never uploads is
+        // an invoice with a total and no materials. These are NEVER dropped from the
+        // queue — they keep retrying, and the failure is surfaced to the user rather
+        // than disappearing into a console warning.
+        const CRITICAL = op.table === TABLES.invoiceItems || op.table === TABLES.purchaseItems
+          || op.table === TABLES.stockMovements || op.table === TABLES.orderItems;
         // A permission / row-level-security failure won't be fixed by retrying the
         // same row — it needs a cloud-side policy change. Drop it immediately and
         // QUIETLY (don't count it as a user-facing failure, don't retry 6×). Once the
         // policy is in place, pull's push-back re-queues the local row and it syncs.
         if (/row-level security|violates|permission denied|not authorized|RLS/i.test(msg)) {
+          if (CRITICAL) {
+            // Dropping these quietly is how invoice lines were lost: the op left the
+            // queue, the row never reached the cloud, and the deletion reconcile then
+            // removed it locally for being absent. Report it instead.
+            await outboxBumpTries(op.seq);
+            failed.push({ table: op.table, id: op.id, error: msg });
+            console.warn('[sync] policy-blocked CRITICAL row kept queued:', op.table, op.id);
+            continue;
+          }
           await outboxDelete(op.seq);
           console.warn('[sync] dropping policy-blocked op (will re-sync once policy is set):', op.table, op.id);
           continue;
@@ -276,10 +291,15 @@ export async function flush() {
         // Otherwise: skip this op and keep going so ONE bad row never blocks the rest
         // of the queue. After several tries, drop it and record it for the user.
         const tries = await outboxBumpTries(op.seq);
-        if (tries >= MAX_OP_TRIES) {
+        if (tries >= MAX_OP_TRIES && !CRITICAL) {
           await outboxDelete(op.seq);
           failed.push({ table: op.table, id: op.id, error: msg });
           console.warn(`[sync] dropping op after ${tries} tries:`, op.table, op.id, msg);
+        } else if (tries >= MAX_OP_TRIES) {
+          // Critical row: keep it queued forever and tell the user, so the data is
+          // still on this device and still trying, rather than silently gone.
+          if (tries === MAX_OP_TRIES) failed.push({ table: op.table, id: op.id, error: msg });
+          console.warn(`[sync] CRITICAL row still failing after ${tries} tries, keeping queued:`, op.table, op.id, msg);
         } else {
           console.warn(`[sync] op failed (try ${tries}/${MAX_OP_TRIES}), will retry:`, op.table, msg);
         }
@@ -397,14 +417,33 @@ export async function pull(onData, { full = false } = {}) {
       if (full && outboxEmpty && cloudKeys && cloudKeys.length > 0) {
         const cloudIds = new Set(cloudKeys.map((c) => c.id));
         const gone = localRows.filter((r) => !cloudIds.has(r.id));
-        const suspicious = gone.length > 25 && gone.length > cloudKeys.length;
-        if (gone.length && suspicious) {
-          console.warn('[sync] skipping suspicious mass local deletion:', table, gone.length, 'missing vs', cloudKeys.length, 'in cloud');
-        } else if (gone.length) {
-          const stillEmpty = (await outboxAll()).length === 0;           // a row created mid-pull must survive
-          if (stillEmpty) {
-            for (const r of gone) await idbDelete(table, r.id);
-            changed += gone.length;
+        // ── Why CHILD rows are never deleted here ──
+        // "Absent from the cloud" has two possible causes: deleted on another device,
+        // or never successfully uploaded from THIS one. flush() drops an op after
+        // MAX_OP_TRIES failures (or immediately on an RLS error), which empties the
+        // outbox without the row ever reaching the cloud — so outboxEmpty cannot
+        // distinguish the two cases.
+        //
+        // For a child row that difference is destructive: an invoice's lines were
+        // deleted here for having failed to upload, leaving a header with a correct
+        // total and no lines, on both devices, unrecoverable. The parent's own delete
+        // already cascades to its children, so nothing is leaked by declining to
+        // delete them; the row is RE-QUEUED for upload instead, which repairs exactly
+        // the case that caused the loss.
+        const CHILD_TABLES = new Set([TABLES.invoiceItems, TABLES.purchaseItems, TABLES.stockMovements, TABLES.orderItems]);
+        if (gone.length && CHILD_TABLES.has(table)) {
+          for (const r of gone) await enqueueMutation({ type: 'insert', table, id: r.id, row: r });
+          console.warn('[sync] re-queueing', gone.length, 'unsynced rows instead of deleting:', table);
+        } else {
+          const suspicious = gone.length > 25 && gone.length > cloudKeys.length;
+          if (gone.length && suspicious) {
+            console.warn('[sync] skipping suspicious mass local deletion:', table, gone.length, 'missing vs', cloudKeys.length, 'in cloud');
+          } else if (gone.length) {
+            const stillEmpty = (await outboxAll()).length === 0;           // a row created mid-pull must survive
+            if (stillEmpty) {
+              for (const r of gone) await idbDelete(table, r.id);
+              changed += gone.length;
+            }
           }
         }
       }

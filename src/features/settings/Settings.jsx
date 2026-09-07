@@ -501,6 +501,14 @@ export default function Settings() {
                 <div style={{ fontSize: 11, color: C.textMuted }}>{t('totalOutstanding')}</div>
                 <div style={{ fontSize: 10, color: C.textMuted, marginTop: 3, lineHeight: 1.5 }}>{t('totalOutstandingHint')}</div>
               </div>
+              {/* Rows that could not be uploaded. A silent upload failure is what let
+                  invoice lines disappear unnoticed, so it is now stated plainly. */}
+              {sync?.failedCount > 0 && (
+                <div style={{ background: C.danger + '12', border: `1px solid ${C.danger}44`, borderRadius: 10, padding: 12 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 800, color: C.danger }}>⚠ {t('syncFailedTitle')} ({sync.failedCount})</div>
+                  <div style={{ fontSize: 11, color: C.textMid, marginTop: 4, lineHeight: 1.6 }}>{t('syncFailedHint')}</div>
+                </div>
+              )}
               {ok ? <div style={{ padding: 12, textAlign: 'center', color: C.success, fontWeight: 700 }}>✓ {t('dataHealthOk')}</div> : (
                 <>
                   {(() => {
