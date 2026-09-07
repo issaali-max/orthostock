@@ -23,18 +23,44 @@ console.log('\n─── 1. Required props are actually passed ───');
 {
   // Crash #2: FinancialPanel destructures { t, data, ... } from an `app` PROP. Rendered
   // without it, React threw "Cannot destructure property 't' from null or undefined".
-  const needsApp = /function FinancialPanel\(\{\s*app\s*\}\)/.test(fin);
-  ok('FinancialPanel declares app as a required prop', needsApp);
+  const finTakesApp = /function FinancialPanel\(\{\s*app\s*\}\)/.test(fin);
+  ok('FinancialPanel declares app as a required prop', finTakesApp);
   ok('the dashboard passes app={app} to it', /<FinancialPanel\s+app=\{app\}\s*\/?>/.test(dash),
     'without it: Cannot destructure property t from null or undefined');
 
-  // Any component taking `app` as a prop must be given it, wherever it is rendered.
-  for (const [file, name] of [[fin, 'FinancialPanel']]) {
-    if (!/function \w+\(\{\s*app\b/.test(file)) continue;
-    const rendered = new RegExp(`<${name}(\\s[^>]*)?/?>`, 'g');
-    const calls = [...dash.matchAll(rendered)].map((m) => m[0]);
-    ok(`every <${name}> is given app`, calls.every((c) => /app=\{app\}/.test(c)), calls.join(' | '));
+  // The same class of fault, across the WHOLE app rather than this one screen: any
+  // component that destructures from an `app` PROP must be given it at every place it
+  // is rendered. Checking only the dashboard is what let the second crash through.
+  const srcFiles = [];
+  const walk = (dir) => {
+    for (const e of fs.readdirSync(new URL(dir, import.meta.url), { withFileTypes: true })) {
+      if (e.isDirectory()) walk(`${dir}${e.name}/`);
+      else if (e.name.endsWith('.jsx')) srcFiles.push(`${dir}${e.name}`);
+    }
+  };
+  walk('../src/');
+  const all = srcFiles.map((f) => ({ f, code: read(f) }));
+
+  // Components declaring `app` as their first destructured prop.
+  const needsApp = [];
+  for (const { code } of all) {
+    for (const m of code.matchAll(/function ([A-Z][A-Za-z]*)\(\{\s*app\b/g)) needsApp.push(m[1]);
   }
+  ok('found the components that require an app prop', needsApp.length > 0, needsApp.join(', '));
+
+  const offenders = [];
+  for (const name of new Set(needsApp)) {
+    for (const { f, code } of all) {
+      for (const m of code.matchAll(new RegExp(`<${name}(\\s[^>]*?)?/?>`, 'g'))) {
+        if (!/\bapp=\{/.test(m[0])) offenders.push(`${f} → ${m[0].slice(0, 60)}`);
+      }
+    }
+  }
+  ok('every component requiring app is given it, everywhere', offenders.length === 0, offenders.join(' | '));
+
+  // And each such component should survive a missing prop rather than blanking the app.
+  ok('FinancialPanel tolerates a missing app prop', /=\s*app\s*\|\|\s*\{\}/.test(fin),
+    'destructuring a missing prop throws and the error boundary blanks the whole screen');
 }
 
 console.log('\n─── 2. Nothing that returns an object is rendered as a child ───');

@@ -13,7 +13,9 @@ const HUE = { cash: '#1A8F52', inventory: '#0E8A8F', receivables: '#1558A0', inv
 const ccy = (v, c) => `${c === 'USD' ? 'USD' : 'AED'} ${num(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export default function FinancialPanel({ app }) {
-  const { t, data, displayCurrency, usdRate } = app;
+  // Defensive: a missing app prop must not take the whole application down with a
+  // destructuring error. An empty object renders an empty panel instead.
+  const { t = (k) => k, data = {}, displayCurrency = 'AED', usdRate = 3.6725 } = app || {};
   const cur = (v) => fmtCur(v, displayCurrency, usdRate);
   const aedBase = (b) => num(b?.AED) + num(b?.USD) * num(usdRate);
 
