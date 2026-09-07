@@ -119,13 +119,21 @@ export default function InvoiceCreate({ open, onClose, editing }) {
   const setLine = (key, patch) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
   const removeLine = (key) => setLines((ls) => ls.filter((l) => l.key !== key));
 
-  const grossSubtotal = lines.reduce((s, l) => s + num(l.unitPrice) * num(l.qty), 0);
-  const lineDiscountTotal = lines.reduce((s, l) => { const v = vById(l.variantId); const list = num(v?.sellingPriceDefault); return s + Math.max(0, (list - num(l.unitPrice)) * num(l.qty)); }, 0);
+  // ONE definition of which lines count. The totals shown on screen, the totals saved,
+  // and the lines written to the invoice must all come from this same list — otherwise
+  // a line can contribute to the price while never being saved, which is exactly how an
+  // invoice ended up with a correct total of 301.50 and a single 48.50 line on it.
+  // A line counts once it has a quantity or a gift quantity; anything else is a row the
+  // user started and left blank.
+  const usableLines = lines.filter((l) => l.variantId && (num(l.qty) > 0 || num(l.giftQty) > 0));
+
+  const grossSubtotal = usableLines.reduce((s, l) => s + num(l.unitPrice) * num(l.qty), 0);
+  const lineDiscountTotal = usableLines.reduce((s, l) => { const v = vById(l.variantId); const list = num(v?.sellingPriceDefault); return s + Math.max(0, (list - num(l.unitPrice)) * num(l.qty)); }, 0);
   const invDisc = Math.min(num(invDiscount), grossSubtotal);
   const invDiscPct = grossSubtotal > 0 ? round2(safeDiv(invDisc, grossSubtotal) * 100) : 0;
   const netSubtotal = round2(grossSubtotal - invDisc);
   const totals = invoiceTotals([{ unitPrice: netSubtotal, qty: 1, discountAmount: 0 }], settings, taxApplied);
-  const costTotal = round2(lines.reduce((s, l) => { const v = vById(l.variantId); return s + num(v?.purchasePriceAvg) * (num(l.qty) + num(l.giftQty)); }, 0));
+  const costTotal = round2(usableLines.reduce((s, l) => { const v = vById(l.variantId); return s + num(v?.purchasePriceAvg) * (num(l.qty) + num(l.giftQty)); }, 0));
   const expectedProfit = round2(netSubtotal - costTotal);
   const expectedMargin = netSubtotal > 0 ? round2((expectedProfit / netSubtotal) * 100) : 0;
 
@@ -134,8 +142,16 @@ export default function InvoiceCreate({ open, onClose, editing }) {
 
   const save = async () => {
     if (lines.length === 0) return;
-    const usable = lines.filter((l) => num(l.qty) > 0 || num(l.giftQty) > 0);
+    const usable = usableLines;   // the same list the displayed total was built from
     if (usable.length === 0) { showToast(t('qty') + ' > 0', 'error'); return; }
+    // A line the user filled in but which cannot be saved would silently vanish while
+    // still having been priced. Refuse the save and say which one, rather than dropping it.
+    const dropped = lines.filter((l) => !usableLines.includes(l) && (num(l.unitPrice) > 0 || l.variantId));
+    if (dropped.length) {
+      const names = dropped.map((l) => vById(l.variantId)?.nameEn || '—').join('، ');
+      showToast(`${t('lineNeedsQty')}: ${names}`, 'error');
+      setBusy(false); return;
+    }
     setBusy(true);
     try {
       const number = editing ? editing.invoiceNumber : await nextNumber(TABLES.invoices, 'INV', 'invoiceNumber');

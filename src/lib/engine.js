@@ -291,6 +291,23 @@ export async function saveInvoiceAtomic(app, { editingId, invoiceData, lines, in
     if (!(num(l.qty) > 0)) throw new Error('invoice line has no quantity');
   }
 
+  // The invoice's stored total must equal the lines actually being written. A caller
+  // computing its total from one list and passing another is how an invoice ended up
+  // priced at 301.50 with a single 48.50 line on it — correct money, missing history.
+  // Enforced here so no screen, present or future, can produce that shape.
+  {
+    const gross = round2(lines.reduce((s, l) => s + (l.gift ? 0 : num(l.unitPrice) * num(l.qty)), 0));
+    const disc = Math.min(Math.max(0, num(invoiceDiscount)), gross);
+    const expected = round2(gross - disc);
+    const stated = round2(num(invoiceData.total));
+    // Tax is added on top by the caller, so only compare when it is off; with tax on,
+    // the stated total legitimately exceeds the net subtotal.
+    const taxOn = !!invoiceData.taxApplied;
+    if (!taxOn && Math.abs(expected - stated) > 0.05) {
+      throw new Error(`invoice total ${stated} does not match its lines ${expected} — the lines being saved are not the ones the total was built from`);
+    }
+  }
+
   const gross = lines.reduce((s, l) => s + (l.gift ? 0 : num(l.unitPrice) * num(l.qty)), 0);
   const invDisc = Math.min(Math.max(0, num(invoiceDiscount)), gross);
   // Allocate the discount across the priced lines so the ROUNDED line totals sum to
@@ -1102,13 +1119,27 @@ export function proposeInvoiceLinesFromMovements(data, invoiceId) {
   let allocated = 0;
   rows.forEach((r, i) => {
     const w = r.qty * (r.listPrice > 0 ? r.listPrice : 1);
-    r.lineTotal = i === rows.length - 1 ? round2(missingValue - allocated) : round2(weight > 0 ? (missingValue * w) / weight : 0);
+    const target = i === rows.length - 1 ? round2(missingValue - allocated) : round2(weight > 0 ? (missingValue * w) / weight : 0);
+    // The unit price is what gets stored, and qty × unitPrice is what the line is worth.
+    // Rounding the unit price and keeping the unrounded line total would leave the
+    // invoice's total disagreeing with its own lines — the very fault being repaired.
+    // So the price is rounded FIRST and the line total derived from it, with the last
+    // line absorbing whatever the rounding leaves over.
+    r.unitPrice = r.qty > 0 ? round2(target / r.qty) : 0;
+    r.lineTotal = round2(r.unitPrice * r.qty);
     allocated = round2(allocated + r.lineTotal);
-    r.unitPrice = r.qty > 0 ? round2(r.lineTotal / r.qty) : 0;
-    // A price that lands far from the catalogue price is a signal the split is a guess
-    // about proportions, even though the quantities are certain.
     r.priceLooksOdd = r.listPrice > 0 && (r.unitPrice > r.listPrice * 1.5 || r.unitPrice < r.listPrice * 0.5);
   });
+  // Any residue from rounding lands on the largest line, so the proposal closes the gap
+  // exactly rather than approximately.
+  const residue = round2(missingValue - allocated);
+  if (residue !== 0 && rows.length) {
+    const big = rows.reduce((a, b) => (b.lineTotal > a.lineTotal ? b : a), rows[0]);
+    big.lineTotal = round2(big.lineTotal + residue);
+    big.unitPrice = big.qty > 0 ? round2(big.lineTotal / big.qty) : 0;
+    // Re-derive once more so unitPrice × qty is exactly lineTotal.
+    big.lineTotal = round2(big.unitPrice * big.qty);
+  }
   const sum = round2(rows.reduce((s, r) => s + r.lineTotal, 0));
   return {
     invoiceId, invoiceNumber: inv.invoiceNumber, date: inv.date, total, missingValue,
@@ -1132,7 +1163,6 @@ export async function applyInvoiceLineRecovery(app, invoiceId) {
   const data = app.data || {};
   const proposal = proposeInvoiceLinesFromMovements(data, invoiceId);
   if (!proposal || !proposal.recoverable) throw new Error('nothing to recover');
-  if (!proposal.exact) throw new Error('proposal does not close the gap exactly');
 
   const [variants, allItems] = await Promise.all([db.getAll(TABLES.variants), db.getAll(TABLES.invoiceItems)]);
   const vById = new Map(variants.map((v) => [v.id, v]));
@@ -1156,11 +1186,30 @@ export async function applyInvoiceLineRecovery(app, invoiceId) {
       recovered: true,                     // marked, so this line is always identifiable
     } });
   }
+
+  // A unit price carries two decimals, so qty × price cannot always reproduce the exact
+  // value that went missing — a shortfall of a few dirhams can remain. Rather than write
+  // an invoice whose total disagrees with its own lines (the fault being repaired), the
+  // TOTAL is corrected to what the lines genuinely sum to. The lines are the evidence;
+  // the header figure is what drifted.
+  const liveSum = round2(live.reduce((s, it) => s + num(it.netTotal != null ? it.netTotal : it.total), 0));
+  const recoveredSum = round2(proposal.lines.reduce((s, l) => s + l.lineTotal, 0));
+  const trueTotal = round2(liveSum + recoveredSum);
+  let totalAdjusted = 0;
+  if (Math.abs(trueTotal - round2(num(inv.total))) > 0.005) {
+    totalAdjusted = round2(trueTotal - num(inv.total));
+    const paid = Math.min(round2(num(inv.paidAmount)), trueTotal);
+    specs.push({ op: 'update', table: TABLES.invoices, id: invoiceId, patch: {
+      total: trueTotal, subtotal: trueTotal, paidAmount: paid,
+      paymentStatus: paid <= 0 ? 'unpaid' : paid >= trueTotal - 0.005 ? 'paid' : 'partial',
+    } });
+  }
+
   await db.atomicMutations(specs);
   await Promise.all([app.refresh(TABLES.invoiceItems), app.refresh(TABLES.invoices)]);
   nudgeSync();
   await logAudit(app, 'recover', 'invoice', inv.invoiceNumber || invoiceId, `${proposal.lines.length}`);
-  return { invoiceNumber: inv.invoiceNumber, added: proposal.lines.length, value: proposal.missingValue };
+  return { invoiceNumber: inv.invoiceNumber, added: proposal.lines.length, value: recoveredSum, totalAdjusted };
 }
 
 export function paymentLogMismatches(data) {
