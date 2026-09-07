@@ -253,7 +253,7 @@ export default function Dashboard() {
       </div>
 
       {/* ══ 4. Financial position ══ */}
-      <FinancialPanel />
+      <FinancialPanel app={app} />
 
       {/* ══ 5. Is this month better than last? ══ */}
       <Card className="rise" style={{ marginBottom: 12 }}>

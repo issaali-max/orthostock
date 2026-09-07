@@ -98,9 +98,9 @@ export function Select({ value, onChange, options = [], placeholder, style }) {
 }
 
 // ── Card ──
-export function Card({ children, style, onClick }) {
+export function Card({ children, style, onClick, className }) {
   return (
-    <div onClick={onClick} style={{
+    <div onClick={onClick} className={className} style={{
       background: C.surface, borderRadius: RADIUS, boxShadow: SHADOW,
       border: `1px solid ${C.border}`, padding: 14, ...style,
     }}>
