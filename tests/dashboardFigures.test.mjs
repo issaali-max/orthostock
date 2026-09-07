@@ -4,7 +4,7 @@
 // the screen is recomputed here from the raw records and compared against what the
 // dashboard's own sources produce — because a layout change must never quietly change
 // a number, and because "today" and "this month" must agree with each other.
-import { pnl, periodSeries, emirateStats, topProducts, topCustomers, openingDebtTotal, vatLiability } from '../src/lib/engine.js';
+import { pnl, periodSeries, emirateStats, topProducts, topCustomers, openingDebtTotal, vatLiability, dataHealth, customerStats } from '../src/lib/engine.js';
 import { TABLES } from '../src/lib/constants.js';
 import { round2, num } from '../src/lib/money.js';
 
@@ -195,6 +195,34 @@ console.log('\n─── 8. Render safety: nothing the screen prints may be an o
 
   const em = emirateStats(data);
   ok('emirate names are strings', em.every((e) => typeof e.emirate === 'string'));
+}
+
+
+console.log('\n─── 9. Health-screen debt must equal the Debts screen ───');
+{
+  // A deleted invoice is not a debt. Every report excludes them; the health screen did
+  // not, so it showed a larger figure than the Debts screen for the same question.
+  const withDeleted = {
+    ...data,
+    [TABLES.invoices]: [
+      ...data[TABLES.invoices],
+      { id: 'DEL', invoiceNumber: 'INV-DEL', date: TODAY, customerId: 'c1', status: 'active', isActive: false, currency: 'AED', total: 9999, paidAmount: 0, paymentStatus: 'unpaid', payments: [] },
+    ],
+  };
+  const h = dataHealth(withDeleted);
+  const live = withDeleted[TABLES.invoices].filter((i) => i.isActive !== false && i.status !== 'returned');
+  const owed = round2(live.reduce((s, i) => s + Math.max(0, num(i.total) - num(i.paidAmount)), 0));
+  ok('a deleted invoice is not counted as debt', h.totalDebt === owed, `${h.totalDebt} vs ${owed}`);
+  ok('it does not include the deleted 9,999', h.totalDebt < 9999);
+
+  // And it must agree with what each customer is shown to owe.
+  const perCustomer = round2(['c1', 'c2'].reduce((s, cid) =>
+    s + customerStats(withDeleted[TABLES.invoices], withDeleted[TABLES.invoiceItems], cid, { id: cid }).debt, 0));
+  ok('health debt equals the sum of customer debts', Math.abs(h.totalDebt - perCustomer) < 0.05, `${h.totalDebt} vs ${perCustomer}`);
+
+  // A returned invoice is likewise not a debt.
+  const withReturned = { ...data, [TABLES.invoices]: [...data[TABLES.invoices], { id: 'RET', invoiceNumber: 'INV-RET', date: TODAY, customerId: 'c1', status: 'returned', currency: 'AED', total: 5000, paidAmount: 0, payments: [] }] };
+  ok('a returned invoice is not counted as debt', dataHealth(withReturned).totalDebt === dataHealth(data).totalDebt);
 }
 
 console.log('\n═══════════════════════════════════════');

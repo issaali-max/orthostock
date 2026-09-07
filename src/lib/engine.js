@@ -792,7 +792,11 @@ export function giftsToCenters(app, { from, to, customerId } = {}) {
 export function dataHealth(data) {
   const customers = data[TABLES.customers] || [];
   const byId = new Map(customers.map((c) => [c.id, c]));
-  const invoices = (data[TABLES.invoices] || []).filter((i) => i.status !== 'returned');
+  // Deleted invoices are excluded here exactly as they are in customerStats, the Debts
+  // screen and the P&L. Without this filter the health screen showed a debt total that
+  // included invoices already deleted, so its figure was higher than the Debts screen's
+  // and disagreed with every other place the same number appears.
+  const invoices = (data[TABLES.invoices] || []).filter((i) => i.isActive !== false && i.status !== 'returned');
   const orphan = []; const hiddenDebt = []; let totalDebt = 0;
   invoices.forEach((i) => {
     const rem = Math.max(0, num(i.total) - num(i.paidAmount));

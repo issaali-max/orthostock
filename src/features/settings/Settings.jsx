@@ -499,6 +499,7 @@ export default function Settings() {
               <div style={{ background: C.surfaceAlt, borderRadius: 10, padding: 12, textAlign: 'center' }}>
                 <div style={{ fontSize: 22, fontWeight: 800, color: h.totalDebt > 0 ? C.danger : C.success }}>{cur(h.totalDebt)}</div>
                 <div style={{ fontSize: 11, color: C.textMuted }}>{t('totalOutstanding')}</div>
+                <div style={{ fontSize: 10, color: C.textMuted, marginTop: 3, lineHeight: 1.5 }}>{t('totalOutstandingHint')}</div>
               </div>
               {ok ? <div style={{ padding: 12, textAlign: 'center', color: C.success, fontWeight: 700 }}>✓ {t('dataHealthOk')}</div> : (
                 <>

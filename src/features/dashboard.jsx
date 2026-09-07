@@ -252,10 +252,7 @@ export default function Dashboard() {
           : <Tile icon="💎" label={t('salesMarginLifetime')} value={cur(kpi.profit)} tone={C.success} />}
       </div>
 
-      {/* ══ 4. Financial position ══ */}
-      <FinancialPanel app={app} />
-
-      {/* ══ 5. Is this month better than last? ══ */}
+      {/* ══ 4. Is this month better than last? ══ */}
       <Card className="rise" style={{ marginBottom: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <SectionTitle>📅 {cmpMode === 'year' ? t('yearCompare') : t('monthCompare')}</SectionTitle>
@@ -360,6 +357,9 @@ export default function Dashboard() {
         </div>
         <div style={{ fontSize: 10.5, color: C.textMuted, marginTop: 8, lineHeight: 1.6 }}>{t('monthCompareHint')}</div>
       </Card>
+
+      {/* ══ 5. Financial position ══ */}
+      <FinancialPanel app={app} />
 
       {/* ══ 6. Where the sales come from ══ */}
       <Card className="rise" style={{ marginBottom: 12 }}>
