@@ -108,6 +108,64 @@ console.log('\n─── 5. A genuine remote delete of a PARENT still propagates
     'voiding an invoice retires its lines, so orphans are not leaked');
 }
 
+
+console.log('\n─── 6. Children upload BEFORE parents ───');
+{
+  // Each row is its own network request. If the invoice lands and some of its lines do
+  // not, every device sees a complete-looking invoice with no materials — right total,
+  // right payment, right debt, no lines. That is the reported fault exactly, and it
+  // explains why only SOME invoices are hit: it depends on when the connection drops
+  // and how many lines there are.
+  ok('flush ranks tables for upload order', /UPLOAD_RANK\s*=\s*new Map/.test(sync));
+  for (const t of ['invoiceItems', 'purchaseItems', 'orderItems', 'stockMovements']) {
+    ok(`${t} is ranked before parents`, new RegExp(`\\[TABLES\\.${t}, 0\\]`).test(sync));
+  }
+  for (const t of ['invoices', 'purchases', 'orders']) {
+    ok(`${t} is ranked after its children`, new RegExp(`\\[TABLES\\.${t}, 1\\]`).test(sync));
+  }
+  ok('the outbox is sorted by that rank', /sort\(\(a, b\) => rank\(a\.table\) - rank\(b\.table\) \|\| a\.seq - b\.seq\)/.test(sync));
+  ok('order within a table is still preserved', /\|\| a\.seq - b\.seq/.test(sync));
+
+  ok('a parent whose child failed is held back', /blockedParents\.has\(op\.id\)/.test(sync));
+  ok('a failing child blocks its parent', /if \(pid\) blockedParents\.add\(pid\)/.test(sync));
+  ok('the held parent stays queued rather than being dropped', /holding parent until its rows upload/.test(sync));
+  ok('parents are resolved for every child type', /invoiceId[\s\S]{0,200}purchaseId[\s\S]{0,200}refId[\s\S]{0,200}orderId/.test(sync));
+
+  // Simulate: invoice + 3 lines, where line 2 fails.
+  const simulate = ({ childrenFirst, blockParent }) => {
+    const queue = childrenFirst
+      ? [{ t: 'line', id: 'L1' }, { t: 'line', id: 'L2' }, { t: 'line', id: 'L3' }, { t: 'inv', id: 'INV' }]
+      : [{ t: 'inv', id: 'INV' }, { t: 'line', id: 'L1' }, { t: 'line', id: 'L2' }, { t: 'line', id: 'L3' }];
+    const cloud = new Set();
+    let blocked = false;
+    for (const op of queue) {
+      if (op.t === 'inv' && blocked && blockParent) continue;      // held for next flush
+      if (op.id === 'L2') { blocked = true; continue; }            // this one fails
+      cloud.add(op.id);
+    }
+    return { invVisible: cloud.has('INV'), linesInCloud: ['L1', 'L2', 'L3'].filter((l) => cloud.has(l)).length };
+  };
+
+  const old = simulate({ childrenFirst: false, blockParent: false });
+  ok('the OLD order publishes an invoice with missing lines', old.invVisible && old.linesInCloud < 3,
+    `invoice visible with ${old.linesInCloud}/3 lines`);
+
+  const now = simulate({ childrenFirst: true, blockParent: true });
+  ok('the NEW order publishes no invoice until its lines are up', !now.invVisible,
+    'the invoice waits for the next flush, so no device sees a partial one');
+}
+
+console.log('\n─── 7. Stock repair must never invent stock ───');
+{
+  const engine = fs.readFileSync(new URL('../src/lib/engine.js', import.meta.url), 'utf8');
+  ok('reconcileStock looks for sold lines with no movement', /unbacked/.test(engine));
+  ok('it refuses to RAISE stock for those materials', /expected > actual && missing > 0/.test(engine),
+    'replaying an incomplete ledger would add back goods that really left the shelf');
+  ok('and reports them instead of correcting silently', /skipped\.push/.test(engine));
+  ok('the result exposes what was skipped', /return \{ fixed: fixes\.length, fixes, skipped \}/.test(engine));
+  ok('lowering stock is still allowed', /fixes\.push/.test(engine));
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${pass + fail} checks · ${fail} finding(s)`);
 findings.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));

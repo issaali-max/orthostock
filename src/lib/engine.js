@@ -1986,9 +1986,22 @@ export async function deleteSecurityCascade(app, securityId) {
 // stockQty = sum of its movements and writes back the ones that differ, in ONE
 // atomic batch. Returns the list of fixes so the UI can show what changed.
 export async function reconcileStock(app) {
-  const [variants, moves] = await Promise.all([
+  const [variants, moves, items, invoices] = await Promise.all([
     db.getAll(TABLES.variants), db.getAll(TABLES.stockMovements),
+    db.getAll(TABLES.invoiceItems), db.getAll(TABLES.invoices),
   ]);
+  // Sold quantities that have NO movement behind them. This happens when an invoice's
+  // rows sync partially: the line arrived, its stock movement did not. Replaying the
+  // ledger would then RAISE stock for goods that genuinely left the shelf — turning a
+  // sync gap into wrong inventory. Those materials are reported and left alone.
+  const liveInv = new Set(invoices.filter((i) => i.isActive !== false && i.status !== 'returned').map((i) => i.id));
+  const moveKey = new Set(moves.filter((m) => m.isActive !== false && m.refType === 'invoice').map((m) => `${m.refId}|${m.variantId}`));
+  const unbacked = new Map();
+  for (const it of items) {
+    if (it.isActive === false || !liveInv.has(it.invoiceId)) continue;
+    if (moveKey.has(`${it.invoiceId}|${it.variantId}`)) continue;
+    unbacked.set(it.variantId, round2((unbacked.get(it.variantId) || 0) + num(it.qty)));
+  }
   const sumByVar = new Map();
   for (const m of moves) {
     if (m.isActive === false) continue;
@@ -1996,11 +2009,19 @@ export async function reconcileStock(app) {
   }
   const fixes = [];
   const specs = [];
+  const skipped = [];
   for (const v of variants) {
     if (v.isActive === false) continue;
     const expected = round2(sumByVar.get(v.id) || 0);
     const actual = round2(num(v.stockQty));
     if (expected !== actual) {
+      // Only block the case that would INVENT stock: the ledger says more than the
+      // cached figure, and this material has sales with no movement to explain them.
+      const missing = round2(unbacked.get(v.id) || 0);
+      if (expected > actual && missing > 0) {
+        skipped.push({ id: v.id, name: v.nameEn || v.sku, from: actual, wouldBe: expected, unbackedQty: missing });
+        continue;
+      }
       fixes.push({ id: v.id, name: v.nameEn || v.sku, from: actual, to: expected, diff: round2(expected - actual) });
       specs.push({ op: 'update', table: TABLES.variants, id: v.id, patch: { stockQty: expected } });
     }
@@ -2010,7 +2031,10 @@ export async function reconcileStock(app) {
     await app.refresh(TABLES.variants);
     nudgeSync();
   }
-  return { fixed: fixes.length, fixes };
+  // `skipped` are materials whose ledger is incomplete — sold lines with no movement.
+  // Raising them would invent stock, so they are reported for the owner to resolve by
+  // letting sync finish, rather than silently corrected.
+  return { fixed: fixes.length, fixes, skipped };
 }
 
 // Renumber duplicate invoice numbers (keeps the oldest of each clash, assigns the

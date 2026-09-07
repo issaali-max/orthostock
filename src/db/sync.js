@@ -234,12 +234,43 @@ export async function flush() {
   if (!supabase || state.syncing) return;
   state.syncing = true; emit();
   try {
-    const ops = (await outboxAll()).sort((a, b) => a.seq - b.seq);
+    // ── Upload order: CHILDREN BEFORE PARENTS ──
+    // Each row is a separate network request; there is no transaction spanning them.
+    // An invoice with five materials produces sixteen requests, and if the invoice row
+    // lands while some of its lines do not, every device sees a complete-looking
+    // invoice with missing materials — correct total, correct payment, correct debt,
+    // no lines. That is exactly the reported fault, and it explains why only SOME
+    // invoices are hit: it depends on when the connection drops, how many lines there
+    // are, and whether the app was closed mid-flush.
+    //
+    // Ordering children first inverts the failure: if a line fails to upload, its
+    // invoice has not been uploaded either, so no device ever sees a partial invoice.
+    // Both are retried together on the next flush, and the invoice appears only once
+    // its lines are already there. Within a table the outbox order (seq) is preserved.
+    const UPLOAD_RANK = new Map([
+      [TABLES.invoiceItems, 0], [TABLES.purchaseItems, 0], [TABLES.orderItems, 0], [TABLES.stockMovements, 0],
+      [TABLES.invoices, 1], [TABLES.purchases, 1], [TABLES.orders, 1],
+    ]);
+    const rank = (t) => (UPLOAD_RANK.has(t) ? UPLOAD_RANK.get(t) : 0);
+    const ops = (await outboxAll()).sort((a, b) => rank(a.table) - rank(b.table) || a.seq - b.seq);
     const failed = [];
+    // A parent whose children failed in THIS flush must not be uploaded on its own.
+    const blockedParents = new Set();
+    const parentOf = (op) => (op.table === TABLES.invoiceItems ? op.row?.invoiceId
+      : op.table === TABLES.purchaseItems ? op.row?.purchaseId
+        : op.table === TABLES.stockMovements ? op.row?.refId
+          : op.table === TABLES.orderItems ? op.row?.orderId : null);
     for (const op of ops) {
       // Local-only tables never go to the cloud — drop their queued ops silently so
       // they don't error or clog the queue.
       if (LOCAL_ONLY.has(op.table)) { await outboxDelete(op.seq); continue; }
+      // Hold back a parent whose own children failed moments ago: uploading it now is
+      // what creates the "invoice with no materials" that every device then sees.
+      // It stays queued and goes up on the next flush, after its children succeed.
+      if (blockedParents.has(op.id)) {
+        console.warn('[sync] holding parent until its rows upload:', op.table, op.id);
+        continue;
+      }
       try {
         if (op.type === 'remove') {
           const { error } = await supabase.from(op.table).delete().eq('id', op.id);
@@ -264,6 +295,10 @@ export async function flush() {
         await outboxDelete(op.seq);
       } catch (e) {
         const msg = String(e?.message || e);
+        // A child that failed blocks its parent for the rest of this flush, so the
+        // parent cannot arrive in the cloud ahead of the rows that explain it.
+        const pid = parentOf(op);
+        if (pid) blockedParents.add(pid);
         // Rows whose loss would destroy history: an invoice line that never uploads is
         // an invoice with a total and no materials. These are NEVER dropped from the
         // queue — they keep retrying, and the failure is surfaced to the user rather
