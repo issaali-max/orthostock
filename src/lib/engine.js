@@ -1260,9 +1260,25 @@ export function invoiceLinesNow(data, invoiceId) {
   // Among the rows that count, only the newest build is current. Two live sets can
   // coexist briefly — lines added by hand plus late originals — and the newest save is
   // the one the owner meant.
+  // Choosing a build is only meaningful when the rows genuinely come from DIFFERENT
+  // saves of the same invoice. Two other shapes look similar and must not be pruned:
+  //   • a mix of stamped and unstamped rows — an old invoice with lines added since
+  //     stamping began. The unstamped ones are still part of it, and discarding them
+  //     silently deleted materials from invoices that had been fine.
+  //   • rows that together already reconcile with the invoice total — whatever their
+  //     stamps, that IS the invoice.
   const pickBuild = (rows) => {
     const builds = rows.map((r) => num(r.lineBuild)).filter((b) => b > 0);
-    if (!builds.length) return rows;
+    if (!builds.length) return rows;                        // nothing stamped: keep all
+    if (builds.length !== rows.length) return rows;         // mixed: keep all
+    const distinct = new Set(builds);
+    if (distinct.size <= 1) return rows;                    // one save: keep all
+    // Several distinct builds. If the whole set already matches the invoice total, the
+    // stamps are describing one invoice split across saves — keep everything.
+    if (invoiceTotalHint > 0) {
+      const whole = round2(rows.reduce((s, r) => s + num(r.netTotal != null ? r.netTotal : r.total), 0));
+      if (Math.abs(whole - invoiceTotalHint) < 0.05) return rows;
+    }
     const newest = Math.max(...builds);
     return rows.filter((r) => num(r.lineBuild) === newest);
   };

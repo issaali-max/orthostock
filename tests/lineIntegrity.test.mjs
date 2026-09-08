@@ -500,6 +500,48 @@ console.log('\n─── 15. A wholly duplicated line set must not double the in
   ok('stamped invoices still resolve by build', stamped.lines.length === 1 && sum(stamped) === 500);
 }
 
+
+console.log('\n─── 16. A stamped line must not delete the unstamped ones beside it ───');
+{
+  // My own regression, caught by comparing two of Issa's screenshots: after shipping
+  // the build stamp, INV-00046 went from showing 2,310 of lines to 930, and INV-00110
+  // from 4,605 to 3,385. pickBuild kept only the newest build, so a single line added
+  // since stamping began silently discarded every older line on the same invoice —
+  // deleting materials from invoices that had been fine.
+  const mk = (items, total) => ({
+    [TABLES.invoices]: [{ id: 'x', total, isActive: true, status: 'active' }],
+    [TABLES.invoiceItems]: items.map((i) => ({ invoiceId: 'x', ...i })),
+  });
+  const sum = (r) => round2(r.lines.reduce((s, l) => s + num(l.netTotal), 0));
+
+  const mixed = E.invoiceLinesNow(mk([
+    { id: 'old', variantId: 'v1', netTotal: 1380 },                     // pre-stamp
+    { id: 'new', variantId: 'v2', netTotal: 930, lineBuild: 500 },      // added later
+  ], 2975), 'x');
+  ok('unstamped lines survive alongside stamped ones', mixed.lines.length === 2, `${mixed.lines.length}`);
+  ok('and nothing is silently dropped', sum(mixed) === 2310, `${sum(mixed)}`);
+
+  // Rows that already reconcile with the total are the invoice, whatever their stamps.
+  const reconciling = E.invoiceLinesNow(mk([
+    { id: 'a', variantId: 'v1', netTotal: 600, lineBuild: 100 },
+    { id: 'b', variantId: 'v2', netTotal: 400, lineBuild: 900 },
+  ], 1000), 'x');
+  ok('a set matching the total is kept whole', reconciling.lines.length === 2 && sum(reconciling) === 1000);
+
+  // Genuine competing generations still resolve to the newest.
+  const generations = E.invoiceLinesNow(mk([
+    { id: 'a', variantId: 'v1', netTotal: 100, lineBuild: 100 },
+    { id: 'b', variantId: 'v1', netTotal: 300, lineBuild: 900 },
+  ], 300), 'x');
+  ok('competing generations still resolve to the newest', generations.lines.length === 1 && sum(generations) === 300);
+
+  // And the duplicate collapse still works.
+  const dup = E.invoiceLinesNow(mk([
+    { id: 'a', variantId: 'v1', netTotal: 1060 }, { id: 'b', variantId: 'v1', netTotal: 1060 },
+  ], 1060), 'x');
+  ok('a duplicated set still collapses', dup.lines.length === 1 && sum(dup) === 1060);
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${pass + fail} checks · ${fail} finding(s)`);
 findings.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));
