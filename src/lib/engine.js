@@ -1228,6 +1228,8 @@ export function invoiceTotals(lines, settings, taxApplied) {
 // When the replacements do arrive the live rows take over automatically, so this heals
 // itself and never needs undoing.
 export function invoiceLinesNow(data, invoiceId) {
+  // The invoice's own total, used only to detect a wholly duplicated line set.
+  const invoiceTotalHint = round2(num((data[TABLES.invoices] || []).find((i) => i.id === invoiceId)?.total));
   const all = (data[TABLES.invoiceItems] || []).filter((it) => it.invoiceId === invoiceId);
 
   // ── A retirement only counts once its replacement exists ──
@@ -1270,16 +1272,44 @@ export function invoiceLinesNow(data, invoiceId) {
     // De-duplicate by ROW IDENTITY only. Selling the same material twice on one invoice
     // — two lines, same quantity, same price — is legitimate and must be preserved;
     // collapsing them would silently halve the invoice.
-    // Every stored row has an id, so identity is exact. Rows without one (only ever
-    // constructed in memory) are all kept: two identical lines are a legitimate way to
-    // sell the same material twice, and collapsing them would halve the invoice.
     const seen = new Set();
-    const lines = chosen.filter((it) => {
+    let lines = chosen.filter((it) => {
       if (!it.id) return true;
       if (seen.has(it.id)) return false;
       seen.add(it.id);
       return true;
     });
+
+    // ── Duplicated GENERATIONS on unstamped invoices ──
+    // Invoices saved before lineBuild existed carry no stamp, so pickBuild cannot tell
+    // their generations apart. A merge that downloads a second copy of the same lines
+    // then shows every material twice and the line sum comes to exactly double the
+    // invoice total — which is what INV-00154, 00155 and 00162 displayed (2,120 against
+    // 1,060; 1,740 against 870; 780 against 390).
+    //
+    // Detected by arithmetic, not guesswork: if the lines sum to a whole multiple of the
+    // invoice total, the set has been duplicated, and one copy is dropped. Two identical
+    // lines that genuinely belong (the same material sold twice) do NOT produce a whole
+    // multiple of the total, so they are unaffected.
+    const stamped = lines.some((l) => num(l.lineBuild) > 0);
+    if (!stamped && lines.length > 1 && invoiceTotalHint > 0) {
+      const sum = round2(lines.reduce((s, l) => s + num(l.netTotal != null ? l.netTotal : l.total), 0));
+      const factor = sum / invoiceTotalHint;
+      if (factor >= 1.98 && Math.abs(factor - Math.round(factor)) < 0.01 && lines.length % Math.round(factor) === 0) {
+        const copies = Math.round(factor);
+        const byKey = new Map();
+        for (const it of lines) {
+          const k = `${it.variantId}|${it.qty}|${it.unitPrice}|${it.gift ? 1 : 0}|${it.sortIndex ?? ''}`;
+          if (!byKey.has(k)) byKey.set(k, []);
+          byKey.get(k).push(it);
+        }
+        // Keep one of each repeated group only when EVERY group repeats the same number
+        // of times — a clean duplication, not a coincidence.
+        if ([...byKey.values()].every((g) => g.length === copies)) {
+          lines = [...byKey.values()].map((g) => g[0]);
+        }
+      }
+    }
     return { lines, recovered: lines.some((l) => l.isActive === false), superseded: live.length - chosen.length };
   }
 

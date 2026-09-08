@@ -440,6 +440,66 @@ console.log('\n─── 14. Lines must never vanish while merely browsing ─�
   ok('the total still matches its lines', Math.abs(round2(afterEdit.lines.reduce((s, l) => s + num(l.netTotal), 0)) - 200) < 0.02);
 }
 
+
+console.log('\n─── 15. A wholly duplicated line set must not double the invoice ───');
+{
+  // After the merge, INV-00154 showed lines summing to 2,120 against a total of 1,060 —
+  // exactly double. Same for 00155 (1,740 vs 870) and 00162 (780 vs 390). Those are not
+  // MISSING lines, they are a second copy of the whole set, downloaded on top of the
+  // one already present. Invoices saved before lineBuild existed carry no stamp, so
+  // nothing could tell the two generations apart.
+  const mk = (items, total) => ({
+    [TABLES.invoices]: [{ id: 'x', total, isActive: true, status: 'active' }],
+    [TABLES.invoiceItems]: items.map((i) => ({ invoiceId: 'x', ...i })),
+  });
+  const sum = (r) => round2(r.lines.reduce((s, l) => s + num(l.netTotal), 0));
+
+  const dup = E.invoiceLinesNow(mk([
+    { id: 'a', variantId: 'v1', qty: 10, unitPrice: 106, netTotal: 1060 },
+    { id: 'b', variantId: 'v1', qty: 10, unitPrice: 106, netTotal: 1060 },
+  ], 1060), 'x');
+  ok('a doubled set collapses to one copy', dup.lines.length === 1, `${dup.lines.length}`);
+  ok('and the invoice reconciles again', sum(dup) === 1060, `${sum(dup)}`);
+
+  // Three copies must also collapse.
+  const triple = E.invoiceLinesNow(mk([
+    { id: 'a', variantId: 'v1', qty: 5, unitPrice: 60, netTotal: 300 },
+    { id: 'b', variantId: 'v1', qty: 5, unitPrice: 60, netTotal: 300 },
+    { id: 'c', variantId: 'v1', qty: 5, unitPrice: 60, netTotal: 300 },
+  ], 300), 'x');
+  ok('a tripled set collapses too', triple.lines.length === 1 && sum(triple) === 300, `${sum(triple)}`);
+
+  // Selling the same material twice on one invoice is legitimate and must survive:
+  // it does NOT sum to a whole multiple of the total.
+  const legit = E.invoiceLinesNow(mk([
+    { id: 'a', variantId: 'v1', qty: 5, unitPrice: 100, netTotal: 500, sortIndex: 0 },
+    { id: 'b', variantId: 'v1', qty: 5, unitPrice: 100, netTotal: 500, sortIndex: 1 },
+  ], 1000), 'x');
+  ok('two genuinely sold identical lines are kept', legit.lines.length === 2, `${legit.lines.length}`);
+  ok('and the total is not halved', sum(legit) === 1000, `${sum(legit)}`);
+
+  // A healthy multi-material invoice is untouched.
+  const healthy = E.invoiceLinesNow(mk([
+    { id: 'a', variantId: 'v1', netTotal: 600 }, { id: 'b', variantId: 'v2', netTotal: 400 },
+  ], 1000), 'x');
+  ok('a normal invoice is unaffected', healthy.lines.length === 2 && sum(healthy) === 1000);
+
+  // Partially duplicated (one line doubled, another not) is NOT a clean duplication and
+  // must be left alone for the owner to judge.
+  const messy = E.invoiceLinesNow(mk([
+    { id: 'a', variantId: 'v1', netTotal: 600 }, { id: 'b', variantId: 'v1', netTotal: 600 },
+    { id: 'c', variantId: 'v2', netTotal: 400 },
+  ], 1000), 'x');
+  ok('a partial duplication is not silently altered', messy.lines.length === 3, `${messy.lines.length}`);
+
+  // Stamped invoices keep using the build stamp, which is exact.
+  const stamped = E.invoiceLinesNow(mk([
+    { id: 'a', variantId: 'v1', netTotal: 500, lineBuild: 100 },
+    { id: 'b', variantId: 'v1', netTotal: 500, lineBuild: 900 },
+  ], 500), 'x');
+  ok('stamped invoices still resolve by build', stamped.lines.length === 1 && sum(stamped) === 500);
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${pass + fail} checks · ${fail} finding(s)`);
 findings.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));
