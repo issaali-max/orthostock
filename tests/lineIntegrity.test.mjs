@@ -348,6 +348,54 @@ console.log('\n─── 12. The healing reader must never duplicate a line ─�
   ok('and it is the live one', withLive.lines[0].variantId === 'b');
 }
 
+
+console.log('\n─── 13. Manually re-added lines, then the originals arrive ───');
+{
+  // Issa's sequence: an invoice looked empty, he added its materials by hand, and later
+  // the ORIGINAL lines came down from the cloud — the same materials twice. The two
+  // sets have different ids, so only the build stamp can relate them.
+  const inv = await db.insert(TABLES.invoices, { invoiceNumber: 'INV-REDO', date: '2026-09-07', customerId: 'c1', currency: 'AED', status: 'active', total: 640, paidAmount: 0, paymentStatus: 'unpaid', payments: [] });
+  await all();
+
+  // The owner re-enters the materials by hand through the normal save path.
+  await save({ id: inv.id, lines: [
+    { variantId: 'a', qty: 8, unitPrice: 50 },
+    { variantId: 'b', qty: 8, unitPrice: 30 },
+  ] });
+  await all();
+  const manual = E.invoiceLinesNow(app.data, inv.id);
+  ok('the manual lines are shown', manual.lines.length === 2, `${manual.lines.length}`);
+
+  // Now the ORIGINALS arrive from the cloud: live rows, different ids, older build.
+  const olderBuild = Math.min(...(await itemsOf(inv.id)).map((i) => num(i.lineBuild))) - 1000;
+  await db.insert(TABLES.invoiceItems, { invoiceId: inv.id, variantId: 'a', qty: 8, unitPrice: 50, netUnitPrice: 50, total: 400, netTotal: 400, lineBuild: olderBuild });
+  await db.insert(TABLES.invoiceItems, { invoiceId: inv.id, variantId: 'b', qty: 8, unitPrice: 30, netUnitPrice: 30, total: 240, netTotal: 240, lineBuild: olderBuild });
+  await all();
+
+  const raw = (await db.getAll(TABLES.invoiceItems)).filter((i) => i.invoiceId === inv.id && i.isActive !== false);
+  ok('both sets are physically present (nothing was lost)', raw.length === 4, `${raw.length}`);
+
+  const shown = E.invoiceLinesNow(app.data, inv.id);
+  ok('but only ONE set is shown', shown.lines.length === 2, `${shown.lines.length}`);
+  ok('no material appears twice', new Set(shown.lines.map((l) => l.variantId)).size === shown.lines.length);
+  ok('the set shown is the newest save, not the late arrival',
+    shown.lines.every((l) => num(l.lineBuild) > olderBuild), JSON.stringify(shown.lines.map((l) => l.lineBuild)));
+  ok('it reports how many rows it set aside', shown.superseded === 2, `${shown.superseded}`);
+  const sum = round2(shown.lines.reduce((s, l) => s + num(l.netTotal), 0));
+  ok('the shown lines reconcile with the invoice total', Math.abs(sum - 640) < 0.02, `${sum}`);
+
+  // The health detector must agree — this invoice is not damaged.
+  const flagged = E.invoiceLineMismatches(app.data).find((x) => x.id === inv.id);
+  ok('the invoice is not reported as damaged', !flagged, JSON.stringify(flagged));
+
+  // A later genuine edit still wins over everything before it.
+  await save({ id: inv.id, lines: [{ variantId: 'a', qty: 3, unitPrice: 50 }] });
+  await all();
+  const after = E.invoiceLinesNow(app.data, inv.id);
+  ok('a genuine later edit supersedes both sets', after.lines.length === 1, `${after.lines.length}`);
+  ok('and it is the edited quantity', num(after.lines[0].qty) === 3);
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${pass + fail} checks · ${fail} finding(s)`);
 findings.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));

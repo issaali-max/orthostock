@@ -269,6 +269,12 @@ export async function saveInvoiceAtomic(app, { editingId, invoiceData, lines, in
   const ensure = (id) => { if (!stock.has(id)) stock.set(id, num(vById.get(id)?.stockQty)); return stock.get(id); };
 
   const invId = editingId || newId();
+  // Every save stamps its lines with ONE build id. Lines from an older build are
+  // superseded by definition, whenever they arrive. Without this, adding lines by hand
+  // to an invoice whose originals were merely late created TWO live sets: the manual
+  // ones, and the originals once sync caught up — the same materials twice, which is
+  // what Issa saw. Ids differ between the sets, so nothing else could relate them.
+  const lineBuild = nextTimestamp();
   const specs = [];
   let oldItems = [], oldMoves = [];
   if (editingId) {
@@ -361,7 +367,7 @@ export async function saveInvoiceAtomic(app, { editingId, invoiceData, lines, in
       discountAmount: lineDisc, discountPct: isGift ? 0 : (listPrice > 0 ? round2((1 - rawUnit / listPrice) * 100) : 0),
       avgCostAtSale: avgCost, lineProfit: round2(netTotal - avgCost * qty),
       total: round2(rawUnit * qty), netTotal,
-      gift: isGift,
+      gift: isGift, lineBuild,
     } });
     // Validation above guarantees v exists, so a sale ALWAYS moves stock. This used to
     // be conditional, which is how a sale could be billed without ever leaving the shelf.
@@ -1224,22 +1230,32 @@ export function invoiceTotals(lines, settings, taxApplied) {
 export function invoiceLinesNow(data, invoiceId) {
   const all = (data[TABLES.invoiceItems] || []).filter((it) => it.invoiceId === invoiceId);
   const live = all.filter((it) => it.isActive !== false);
-  if (live.length) return { lines: live, recovered: false };
-  const retired = all.filter((it) => it.isActive === false);
-  if (!retired.length) return { lines: [], recovered: false };
 
-  // Pick exactly ONE generation — the rows retired together by a single save.
-  //
-  // An invoice edited several times has several retired generations. Returning more
-  // than one shows the same material twice, which is what INV-00152 displayed. The
-  // previous version compared timestamps and, when nothing matched, fell back to ALL
-  // retired rows — every generation at once, guaranteeing duplicates.
-  //
-  // Rows retired by the same save share a supersededAt. Rows retired before that field
-  // existed have only updatedAt, and two generations can carry the same value, so
-  // grouping is done on the best stamp available and the LARGEST group wins a tie —
-  // a complete generation is always at least as large as a partial one.
-  const stamp = (it) => String(num(it.supersededAt) || num(it.updatedAt) || 0);
+  // Among LIVE rows, only the newest build counts. Two live sets can legitimately
+  // coexist for a while: lines added by hand to an invoice whose originals were merely
+  // late, and then the originals arriving. They have different ids, so nothing else
+  // relates them — the build stamp does. The newest save is the one the owner meant.
+  const pickBuild = (rows) => {
+    const builds = rows.map((r) => num(r.lineBuild)).filter((b) => b > 0);
+    if (!builds.length) return rows;                 // all pre-date the stamp: nothing to choose
+    const newest = Math.max(...builds);
+    const stamped = rows.filter((r) => num(r.lineBuild) === newest);
+    // Unstamped rows are older than any stamped row by definition, so once a stamped
+    // build exists it wins outright.
+    return stamped;
+  };
+
+  if (live.length) {
+    const chosen = pickBuild(live);
+    return { lines: chosen, recovered: false, superseded: live.length - chosen.length };
+  }
+
+  const retired = all.filter((it) => it.isActive === false);
+  if (!retired.length) return { lines: [], recovered: false, superseded: 0 };
+
+  // No live rows: fall back to ONE retired generation — the rows retired together by a
+  // single save. Returning more than one shows every material once per generation.
+  const stamp = (it) => String(num(it.lineBuild) || num(it.supersededAt) || num(it.updatedAt) || 0);
   const groups = new Map();
   for (const it of retired) {
     const k = stamp(it);
@@ -1250,9 +1266,8 @@ export function invoiceLinesNow(data, invoiceId) {
   let chosen = groups.get(keys[0]) || [];
   for (const k of keys) {
     if ((groups.get(k) || []).length > chosen.length) chosen = groups.get(k);
-    else break;                       // only look past the newest while groups grow
+    else break;
   }
-  // Whatever happens, never return the same material twice from one generation.
   const seen = new Set();
   const lines = chosen.filter((it) => {
     const k = `${it.variantId}|${it.qty}|${it.unitPrice}|${it.gift ? 1 : 0}`;
@@ -1260,7 +1275,7 @@ export function invoiceLinesNow(data, invoiceId) {
     seen.add(k);
     return true;
   });
-  return { lines, recovered: true };
+  return { lines, recovered: true, superseded: 0 };
 }
 
 export function invoiceBreakdown(invoice, items, settings) {
