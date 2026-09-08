@@ -1228,132 +1228,79 @@ export function invoiceTotals(lines, settings, taxApplied) {
 // When the replacements do arrive the live rows take over automatically, so this heals
 // itself and never needs undoing.
 export function invoiceLinesNow(data, invoiceId) {
-  // The invoice's own total, used only to detect a wholly duplicated line set.
-  const invoiceTotalHint = round2(num((data[TABLES.invoices] || []).find((i) => i.id === invoiceId)?.total));
   const all = (data[TABLES.invoiceItems] || []).filter((it) => it.invoiceId === invoiceId);
+  if (!all.length) return { lines: [], recovered: false, superseded: 0 };
+  const inv = (data[TABLES.invoices] || []).find((i) => i.id === invoiceId);
+  const total = round2(num(inv?.total));
+  const vat = num(inv?.vatAmount);
+  // Lines are exclusive of VAT; the header total includes it.
+  const target = round2(total - (vat > 0 ? vat : 0));
+  const valOf = (r) => num(r.netTotal != null ? r.netTotal : r.total);
+  const sumOf = (rows) => round2(rows.reduce((s, r) => s + valOf(r), 0));
 
-  // ── A retirement only counts once its replacement exists ──
-  // Editing an invoice retires the old lines and inserts new ones. Those travel to the
-  // cloud as separate rows, and realtime sync pulls whatever has arrived within half a
-  // second. So a device can receive the RETIREMENTS while their replacements are still
-  // in flight — and lines then vanish from an invoice the owner is merely looking at,
-  // with no edit of their own. That is what emptied INV-00165 mid-browse.
+
+  // ── Which rows ARE this invoice? ──
+  // Editing creates new rows with NEW ids, so the cloud accumulates several generations
+  // of the same invoice. A merge downloads every id it lacks, which pulls all of them
+  // in: INV-00152 ended up showing 1,824 against a total of 608 — three complete
+  // generations at once. Nothing is corrupt; the reader simply has to choose.
   //
-  // A retirement is therefore honoured only when the build that replaced it is actually
-  // here. Otherwise the retired line is treated as still current: showing the previous
-  // contents is always better than showing nothing, and it corrects itself the moment
-  // the replacement lands.
-  const trulyLive = all.filter((it) => it.isActive !== false);
-  const newestLiveBuild = trulyLive.reduce((mx, it) => Math.max(mx, num(it.lineBuild)), 0);
-  // A retired row is honoured — genuinely gone — only when a NEWER build is present to
-  // replace it. If nothing newer has arrived, the retirement is in flight ahead of its
-  // replacement, and the row is still what the invoice contains.
-  // Only a STAMPED retirement can be rescued this way. A row stamped by save X is in
-  // flight ahead of its replacement exactly when no build newer than X has arrived.
-  // Rows retired before stamping existed carry no build, so their intent is unknowable
-  // from the row alone — those are left retired and handled by the fallback below,
-  // which is what keeps older multi-generation invoices from showing every generation.
-  const orphanRetired = newestLiveBuild === 0 ? [] : all.filter((it) => it.isActive === false
-    && num(it.lineBuild) > 0 && num(it.lineBuild) >= newestLiveBuild);
-  const live = [...trulyLive, ...orphanRetired];
+  // The invoice TOTAL is the fixed truth — it never varied across any of this. So the
+  // right generation is the one whose lines sum to it. Candidates are tried
+  // newest-first, and the first that reconciles wins.
+  const live = all.filter((it) => it.isActive !== false);
+  // Start from the live rows, but if they alone cannot account for the invoice, widen to
+  // include retired ones: a retirement whose replacement never arrived leaves a real
+  // line hidden, and the total is what tells us it is still needed.
+  const pool = (live.length && (target <= 0 || Math.abs(sumOf(live) - target) < 0.05 || sumOf(live) > target)) ? live
+    : (live.length && sumOf(all) <= target + 0.05 && sumOf(all) > sumOf(live)) ? all
+      : (live.length ? live : all);
 
-  // Among the rows that count, only the newest build is current. Two live sets can
-  // coexist briefly — lines added by hand plus late originals — and the newest save is
-  // the one the owner meant.
-  // Choosing a build is only meaningful when the rows genuinely come from DIFFERENT
-  // saves of the same invoice. Two other shapes look similar and must not be pruned:
-  //   • a mix of stamped and unstamped rows — an old invoice with lines added since
-  //     stamping began. The unstamped ones are still part of it, and discarding them
-  //     silently deleted materials from invoices that had been fine.
-  //   • rows that together already reconcile with the invoice total — whatever their
-  //     stamps, that IS the invoice.
-  const pickBuild = (rows) => {
-    const builds = rows.map((r) => num(r.lineBuild)).filter((b) => b > 0);
-    if (!builds.length) return rows;                        // nothing stamped: keep all
-    if (builds.length !== rows.length) return rows;         // mixed: keep all
-    const distinct = new Set(builds);
-    if (distinct.size <= 1) return rows;                    // one save: keep all
-    // Several distinct builds. If the whole set already matches the invoice total, the
-    // stamps are describing one invoice split across saves — keep everything.
-    if (invoiceTotalHint > 0) {
-      const whole = round2(rows.reduce((s, r) => s + num(r.netTotal != null ? r.netTotal : r.total), 0));
-      if (Math.abs(whole - invoiceTotalHint) < 0.05) return rows;
-    }
-    const newest = Math.max(...builds);
-    return rows.filter((r) => num(r.lineBuild) === newest);
-  };
+  // Group by build stamp where present, else by the save that retired them, else treat
+  // every row as one group (an invoice that was only ever saved once).
+  const keyOf = (r) => String(num(r.lineBuild) || num(r.supersededAt) || num(r.updatedAt) || 0);
+  const groups = new Map();
+  for (const r of pool) {
+    const k = keyOf(r);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(r);
+  }
+  const ordered = [...groups.entries()].sort((a, b) => Number(b[0]) - Number(a[0]));
 
-  if (live.length) {
-    const chosen = pickBuild(live);
-    // De-duplicate by ROW IDENTITY only. Selling the same material twice on one invoice
-    // — two lines, same quantity, same price — is legitimate and must be preserved;
-    // collapsing them would silently halve the invoice.
-    const seen = new Set();
-    let lines = chosen.filter((it) => {
-      if (!it.id) return true;
-      if (seen.has(it.id)) return false;
-      seen.add(it.id);
-      return true;
-    });
-
-    // ── Duplicated GENERATIONS on unstamped invoices ──
-    // Invoices saved before lineBuild existed carry no stamp, so pickBuild cannot tell
-    // their generations apart. A merge that downloads a second copy of the same lines
-    // then shows every material twice and the line sum comes to exactly double the
-    // invoice total — which is what INV-00154, 00155 and 00162 displayed (2,120 against
-    // 1,060; 1,740 against 870; 780 against 390).
-    //
-    // Detected by arithmetic, not guesswork: if the lines sum to a whole multiple of the
-    // invoice total, the set has been duplicated, and one copy is dropped. Two identical
-    // lines that genuinely belong (the same material sold twice) do NOT produce a whole
-    // multiple of the total, so they are unaffected.
-    const stamped = lines.some((l) => num(l.lineBuild) > 0);
-    if (!stamped && lines.length > 1 && invoiceTotalHint > 0) {
-      const sum = round2(lines.reduce((s, l) => s + num(l.netTotal != null ? l.netTotal : l.total), 0));
-      const factor = sum / invoiceTotalHint;
-      if (factor >= 1.98 && Math.abs(factor - Math.round(factor)) < 0.01 && lines.length % Math.round(factor) === 0) {
-        const copies = Math.round(factor);
-        const byKey = new Map();
-        for (const it of lines) {
-          const k = `${it.variantId}|${it.qty}|${it.unitPrice}|${it.gift ? 1 : 0}|${it.sortIndex ?? ''}`;
-          if (!byKey.has(k)) byKey.set(k, []);
-          byKey.get(k).push(it);
-        }
-        // Keep one of each repeated group only when EVERY group repeats the same number
-        // of times — a clean duplication, not a coincidence.
-        if ([...byKey.values()].every((g) => g.length === copies)) {
-          lines = [...byKey.values()].map((g) => g[0]);
-        }
+  if (target > 0) {
+    // 1. A single generation that reconciles exactly.
+    for (const [, rows] of ordered) {
+      if (Math.abs(sumOf(rows) - target) < 0.05) {
+        return { lines: rows, recovered: rows.every((r) => r.isActive === false), superseded: pool.length - rows.length };
       }
     }
-    return { lines, recovered: lines.some((l) => l.isActive === false), superseded: live.length - chosen.length };
+    // 2. The whole pool, if it reconciles (one generation split across saves).
+    if (Math.abs(sumOf(pool) - target) < 0.05) {
+      return { lines: pool, recovered: pool.every((r) => r.isActive === false), superseded: 0 };
+    }
+    // 3. De-duplicate identical rows, then check again — this covers the same
+    //    generation downloaded more than once under different ids.
+    const seen = new Map();
+    for (const r of pool) {
+      const k = `${r.variantId}|${r.qty}|${r.unitPrice}|${r.gift ? 1 : 0}|${valOf(r)}`;
+      if (!seen.has(k)) seen.set(k, r);
+    }
+    const unique = [...seen.values()];
+    if (unique.length !== pool.length && Math.abs(sumOf(unique) - target) < 0.05) {
+      return { lines: unique, recovered: unique.every((r) => r.isActive === false), superseded: pool.length - unique.length };
+    }
+    // 4. Nothing reconciles. Prefer the newest generation that comes CLOSEST without
+    //    exceeding the total, so an invoice never displays more than it is worth.
+    const under = ordered.map(([, rows]) => rows).filter((rows) => sumOf(rows) <= target + 0.05);
+    if (under.length) {
+      const best = under.reduce((a, b) => (sumOf(b) > sumOf(a) ? b : a));
+      return { lines: best, recovered: best.every((r) => r.isActive === false), superseded: pool.length - best.length };
+    }
   }
 
-  const retired = all.filter((it) => it.isActive === false);
-  if (!retired.length) return { lines: [], recovered: false, superseded: 0 };
-
-  // No usable rows at all: fall back to ONE retired generation, newest first.
-  const stamp = (it) => String(num(it.lineBuild) || num(it.supersededAt) || num(it.updatedAt) || 0);
-  const groups = new Map();
-  for (const it of retired) {
-    const k = stamp(it);
-    if (!groups.has(k)) groups.set(k, []);
-    groups.get(k).push(it);
-  }
-  const keys = [...groups.keys()].sort((a, b) => Number(b) - Number(a));
-  let chosen = groups.get(keys[0]) || [];
-  for (const k of keys) {
-    if ((groups.get(k) || []).length > chosen.length) chosen = groups.get(k);
-    else break;
-  }
-  const seen = new Set();
-  const lines = chosen.filter((it) => {
-    const k = `${it.variantId}|${it.qty}|${it.unitPrice}|${it.gift ? 1 : 0}`;
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
-  return { lines, recovered: true, superseded: 0 };
+  // No usable total to judge against: show the newest generation.
+  const newest = ordered.length ? ordered[0][1] : pool;
+  return { lines: newest, recovered: newest.every((r) => r.isActive === false), superseded: pool.length - newest.length };
 }
 
 export function invoiceBreakdown(invoice, items, settings) {

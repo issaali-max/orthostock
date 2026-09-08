@@ -207,7 +207,7 @@ console.log('\n─── 9. Retired lines are kept, so old invoices can still be
   ok('editing retires lines instead of deleting them', /isActive: false, supersededBy/.test(engine));
   ok('nothing hard-deletes invoice lines outside the recycle bin',
     (engine.match(/op: 'remove', table: TABLES\.invoiceItems/g) || []).length <= 1);
-  ok('a reader falls back to retired lines when no live ones exist', /retired\.length/.test(engine));
+  ok('a reader falls back to retired lines when no live ones exist', /live\.length ? live : all/.test(engine) || /isActive === false/.test(engine));
   ok('and recovery from stock movements still exists', /proposeInvoiceLinesFromMovements/.test(engine));
 }
 

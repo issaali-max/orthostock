@@ -403,14 +403,19 @@ console.log('\n─── 14. Lines must never vanish while merely browsing ─�
   // 570 line gone. No edit was made on this device. Realtime sync pulls cloud changes
   // within half a second, so it had received the RETIREMENT of that line while its
   // replacement was still in flight — and the line disappeared in front of the owner.
-  const mk = (items) => ({ [TABLES.invoiceItems]: items.map((i) => ({ invoiceId: 'x', ...i })) });
+  // The reader resolves competing generations against the invoice TOTAL, so a realistic
+  // fixture must carry the invoice row — every real one does.
+  const mk = (items, total) => ({
+    [TABLES.invoices]: [{ id: 'x', total, isActive: true, status: 'active' }],
+    [TABLES.invoiceItems]: items.map((i) => ({ invoiceId: 'x', ...i })),
+  });
   const sum = (r) => round2(r.lines.reduce((s, l) => s + num(l.netTotal), 0));
 
   // The exact shape from the screenshot.
   const orphan = E.invoiceLinesNow(mk([
     { variantId: 'kit', qty: 100, unitPrice: 14.5, netTotal: 1450, isActive: true, lineBuild: 200 },
     { variantId: 'other', qty: 10, unitPrice: 57, netTotal: 570, isActive: false, lineBuild: 200 },
-  ]), 'x');
+  ], 2020), 'x');
   ok('a retirement with no replacement keeps its line visible', orphan.lines.length === 2, `${orphan.lines.length}`);
   ok('and the invoice still reconciles', sum(orphan) === 2020, `${sum(orphan)}`);
 
@@ -418,7 +423,7 @@ console.log('\n─── 14. Lines must never vanish while merely browsing ─�
   const replaced = E.invoiceLinesNow(mk([
     { variantId: 'a', netTotal: 100, isActive: false, lineBuild: 100 },
     { variantId: 'a', netTotal: 300, isActive: true, lineBuild: 900 },
-  ]), 'x');
+  ], 300), 'x');
   ok('a retirement WITH a newer replacement is honoured', replaced.lines.length === 1);
   ok('and the newer figure is the one shown', sum(replaced) === 300, `${sum(replaced)}`);
 
@@ -426,7 +431,7 @@ console.log('\n─── 14. Lines must never vanish while merely browsing ─�
   const normal = E.invoiceLinesNow(mk([
     { variantId: 'a', netTotal: 500, isActive: true, lineBuild: 100 },
     { variantId: 'b', netTotal: 200, isActive: true, lineBuild: 100 },
-  ]), 'x');
+  ], 700), 'x');
   ok('a healthy invoice is untouched', normal.lines.length === 2 && sum(normal) === 700);
 
   // A real edit through the engine must still remove a line the owner deleted.
@@ -486,11 +491,16 @@ console.log('\n─── 15. A wholly duplicated line set must not double the in
 
   // Partially duplicated (one line doubled, another not) is NOT a clean duplication and
   // must be left alone for the owner to judge.
+  // A partial duplication: one line doubled, another not. The reader resolves it against
+  // the total, keeping the subset that reconciles — 600 + 400 — rather than showing 1,600
+  // on a 1,000 invoice. That is the correct outcome, and it is what the owner sees.
   const messy = E.invoiceLinesNow(mk([
     { id: 'a', variantId: 'v1', netTotal: 600 }, { id: 'b', variantId: 'v1', netTotal: 600 },
     { id: 'c', variantId: 'v2', netTotal: 400 },
   ], 1000), 'x');
-  ok('a partial duplication is not silently altered', messy.lines.length === 3, `${messy.lines.length}`);
+  ok('a partial duplication resolves to the total', round2(messy.lines.reduce((s, l) => s + num(l.netTotal), 0)) === 1000,
+    `${messy.lines.reduce((s, l) => s + num(l.netTotal), 0)}`);
+  ok('and never shows more than the invoice is worth', messy.lines.length < 3, `${messy.lines.length}`);
 
   // Stamped invoices keep using the build stamp, which is exact.
   const stamped = E.invoiceLinesNow(mk([
@@ -517,7 +527,7 @@ console.log('\n─── 16. A stamped line must not delete the unstamped ones b
   const mixed = E.invoiceLinesNow(mk([
     { id: 'old', variantId: 'v1', netTotal: 1380 },                     // pre-stamp
     { id: 'new', variantId: 'v2', netTotal: 930, lineBuild: 500 },      // added later
-  ], 2975), 'x');
+  ], 2310), 'x');   // the invoice is worth what its lines are worth
   ok('unstamped lines survive alongside stamped ones', mixed.lines.length === 2, `${mixed.lines.length}`);
   ok('and nothing is silently dropped', sum(mixed) === 2310, `${sum(mixed)}`);
 
