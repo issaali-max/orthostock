@@ -249,6 +249,40 @@ console.log('\n─── 10. Merge must add what is missing and delete nothing �
   ok('merge keeps every line', runMerge({ overwrite: false }).keptLines === 2);
 }
 
+
+console.log('\n─── 11. The merge must work in BOTH directions ───');
+{
+  // Issa's brother merged, then Issa merged, and nothing changed on Issa's device.
+  // mergeLocalIntoCloud only uploads rows the CLOUD lacks — but Issa's gap ran the
+  // other way: the cloud had rows his device did not. Half the tool was missing.
+  ok('the download direction exists', /export async function mergeCloudIntoLocal/.test(sync));
+  ok('it downloads rows absent locally', /if \(!local\) return true;/.test(sync));
+  ok('it also refreshes rows the cloud has a newer copy of',
+    /mergeCloudIntoLocal[\s\S]{0,1600}Number\(k\.updatedAt \|\| 0\) > Number\(local\.updatedAt \|\| 0\)/.test(sync));
+  ok('it deletes nothing', !/mergeCloudIntoLocal[\s\S]{0,1600}idbDelete/.test(sync));
+  ok('it preserves local fields the cloud left empty', /mergeCloudIntoLocal[\s\S]{0,1800}mergePreserve/.test(sync));
+  ok('it ignores the watermark, which is the point',
+    !/mergeCloudIntoLocal[\s\S]{0,1200}pullWatermark/.test(sync));
+
+  const settings = fs.readFileSync(new URL('../src/features/settings/Settings.jsx', import.meta.url), 'utf8');
+  ok('one button runs both directions', /mergeLocalIntoCloud\(\)[\s\S]{0,300}mergeCloudIntoLocal\(\)/.test(settings));
+  ok('and the UI reloads so repairs appear at once', /refresh\(tb\)/.test(settings));
+
+  // Simulate the two-device gap running in both directions at once.
+  const converge = ({ bothWays }) => {
+    const cloud = new Set(['inv1', 'lineA']);           // has lineA
+    const mine = new Set(['inv1', 'lineB']);            // has lineB, missing lineA
+    for (const id of mine) cloud.add(id);               // upload direction (always ran)
+    if (bothWays) for (const id of cloud) mine.add(id); // download direction (was missing)
+    return { mineHasA: mine.has('lineA'), cloudHasB: cloud.has('lineB') };
+  };
+  const before = converge({ bothWays: false });
+  ok('upload alone left this device still missing lines', !before.mineHasA);
+  ok('though the cloud did gain the other device\'s rows', before.cloudHasB);
+  const after = converge({ bothWays: true });
+  ok('both directions converge the device with the cloud', after.mineHasA && after.cloudHasB);
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${pass + fail} checks · ${fail} finding(s)`);
 findings.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));

@@ -187,6 +187,64 @@ export async function mergeLocalIntoCloud(onProgress) {
   return { ok: errors.length === 0, added, perTable, errors };
 }
 
+// ── Pull anything the cloud has that this device is missing ──
+//
+// mergeLocalIntoCloud handles one direction: rows here but not in the cloud. The
+// opposite gap is just as real — a device whose local database was rebuilt from an
+// incomplete snapshot, or which dropped rows during an earlier fault, is MISSING rows
+// the cloud holds. The routine pull normally fixes that, but only for rows whose
+// updatedAt beats the local copy; a row absent locally is fetched, yet a row present
+// locally in a STALE form (say retired here, live in the cloud) is only replaced when
+// the cloud's stamp is newer, and a device that has since written its own rows can
+// carry a higher watermark that suppresses the comparison entirely.
+//
+// This forces the question: compare every id, download everything the cloud has that is
+// missing here, and re-download anything whose cloud copy differs. Deletes nothing.
+export async function mergeCloudIntoLocal(onProgress) {
+  if (!supabase) return { ok: false, added: 0, errors: ['cloud_not_configured'] };
+  let added = 0; const errors = []; const perTable = {};
+  for (const table of Object.values(TABLES)) {
+    if (LOCAL_ONLY.has(table)) continue;
+    let localRows = [];
+    try { localRows = await idbGetAll(table); } catch { /* empty table is fine */ }
+    const localById = new Map(localRows.map((r) => [r.id, r]));
+
+    let keys = [];
+    try {
+      const { data, error } = await supabase.from(table).select('id,"updatedAt"');
+      if (error) { if (!isMissingTable(error)) errors.push(`${table}: ${error.message}`); continue; }
+      keys = data || [];
+    } catch (e) { errors.push(`${table}: ${e?.message || e}`); continue; }
+
+    // Everything the cloud has that we do not, plus anything the cloud has a newer
+    // version of. Ignores the watermark deliberately — that is the point.
+    const need = keys.filter((k) => {
+      const local = localById.get(k.id);
+      if (!local) return true;
+      return Number(k.updatedAt || 0) > Number(local.updatedAt || 0);
+    }).map((k) => k.id);
+    if (!need.length) continue;
+
+    for (let i = 0; i < need.length; i += 100) {
+      const chunk = need.slice(i, i + 100);
+      try {
+        const { data: bodies, error } = await supabase.from(table).select('*').in('id', chunk);
+        if (error || !Array.isArray(bodies)) { errors.push(`${table}: ${error?.message || 'fetch failed'}`); continue; }
+        const rows = bodies.map(fromCloud).map((rec) => {
+          const local = localById.get(rec.id);
+          return local ? mergePreserve(local, rec) : rec;
+        });
+        if (rows.length) {
+          await idbBulkPut(table, rows);
+          added += rows.length; perTable[table] = (perTable[table] || 0) + rows.length;
+        }
+      } catch (e) { errors.push(`${table}: ${e?.message || e}`); }
+      onProgress?.({ table, added });
+    }
+  }
+  return { ok: errors.length === 0, added, perTable, errors };
+}
+
 export async function forcePushOverwrite(onProgress) {
   if (!supabase) return { ok: false, pushed: 0, errors: ['cloud_not_configured'] };
   for (const table of Object.values(TABLES)) {
