@@ -396,6 +396,50 @@ console.log('\n─── 13. Manually re-added lines, then the originals arrive 
   ok('and it is the edited quantity', num(after.lines[0].qty) === 3);
 }
 
+
+console.log('\n─── 14. Lines must never vanish while merely browsing ───');
+{
+  // INV-00165 emptied itself mid-browse: subtotal 1,450 against a total of 2,020, a
+  // 570 line gone. No edit was made on this device. Realtime sync pulls cloud changes
+  // within half a second, so it had received the RETIREMENT of that line while its
+  // replacement was still in flight — and the line disappeared in front of the owner.
+  const mk = (items) => ({ [TABLES.invoiceItems]: items.map((i) => ({ invoiceId: 'x', ...i })) });
+  const sum = (r) => round2(r.lines.reduce((s, l) => s + num(l.netTotal), 0));
+
+  // The exact shape from the screenshot.
+  const orphan = E.invoiceLinesNow(mk([
+    { variantId: 'kit', qty: 100, unitPrice: 14.5, netTotal: 1450, isActive: true, lineBuild: 200 },
+    { variantId: 'other', qty: 10, unitPrice: 57, netTotal: 570, isActive: false, lineBuild: 200 },
+  ]), 'x');
+  ok('a retirement with no replacement keeps its line visible', orphan.lines.length === 2, `${orphan.lines.length}`);
+  ok('and the invoice still reconciles', sum(orphan) === 2020, `${sum(orphan)}`);
+
+  // A genuine replacement still supersedes.
+  const replaced = E.invoiceLinesNow(mk([
+    { variantId: 'a', netTotal: 100, isActive: false, lineBuild: 100 },
+    { variantId: 'a', netTotal: 300, isActive: true, lineBuild: 900 },
+  ]), 'x');
+  ok('a retirement WITH a newer replacement is honoured', replaced.lines.length === 1);
+  ok('and the newer figure is the one shown', sum(replaced) === 300, `${sum(replaced)}`);
+
+  // Ordinary invoices are unaffected.
+  const normal = E.invoiceLinesNow(mk([
+    { variantId: 'a', netTotal: 500, isActive: true, lineBuild: 100 },
+    { variantId: 'b', netTotal: 200, isActive: true, lineBuild: 100 },
+  ]), 'x');
+  ok('a healthy invoice is untouched', normal.lines.length === 2 && sum(normal) === 700);
+
+  // A real edit through the engine must still remove a line the owner deleted.
+  const res = await save({ lines: [{ variantId: 'a', qty: 4, unitPrice: 50 }, { variantId: 'b', qty: 2, unitPrice: 30 }] });
+  const id = typeof res === 'string' ? res : res?.id;
+  await save({ id, lines: [{ variantId: 'a', qty: 4, unitPrice: 50 }] });     // b removed on purpose
+  await all();
+  const afterEdit = E.invoiceLinesNow(app.data, id);
+  ok('a deliberately removed line stays removed', afterEdit.lines.length === 1, `${afterEdit.lines.length}`);
+  ok('and it is the kept material', afterEdit.lines[0].variantId === 'a');
+  ok('the total still matches its lines', Math.abs(round2(afterEdit.lines.reduce((s, l) => s + num(l.netTotal), 0)) - 200) < 0.02);
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${pass + fail} checks · ${fail} finding(s)`);
 findings.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));

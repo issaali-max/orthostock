@@ -1229,32 +1229,64 @@ export function invoiceTotals(lines, settings, taxApplied) {
 // itself and never needs undoing.
 export function invoiceLinesNow(data, invoiceId) {
   const all = (data[TABLES.invoiceItems] || []).filter((it) => it.invoiceId === invoiceId);
-  const live = all.filter((it) => it.isActive !== false);
 
-  // Among LIVE rows, only the newest build counts. Two live sets can legitimately
-  // coexist for a while: lines added by hand to an invoice whose originals were merely
-  // late, and then the originals arriving. They have different ids, so nothing else
-  // relates them — the build stamp does. The newest save is the one the owner meant.
+  // ── A retirement only counts once its replacement exists ──
+  // Editing an invoice retires the old lines and inserts new ones. Those travel to the
+  // cloud as separate rows, and realtime sync pulls whatever has arrived within half a
+  // second. So a device can receive the RETIREMENTS while their replacements are still
+  // in flight — and lines then vanish from an invoice the owner is merely looking at,
+  // with no edit of their own. That is what emptied INV-00165 mid-browse.
+  //
+  // A retirement is therefore honoured only when the build that replaced it is actually
+  // here. Otherwise the retired line is treated as still current: showing the previous
+  // contents is always better than showing nothing, and it corrects itself the moment
+  // the replacement lands.
+  const trulyLive = all.filter((it) => it.isActive !== false);
+  const newestLiveBuild = trulyLive.reduce((mx, it) => Math.max(mx, num(it.lineBuild)), 0);
+  // A retired row is honoured — genuinely gone — only when a NEWER build is present to
+  // replace it. If nothing newer has arrived, the retirement is in flight ahead of its
+  // replacement, and the row is still what the invoice contains.
+  // Only a STAMPED retirement can be rescued this way. A row stamped by save X is in
+  // flight ahead of its replacement exactly when no build newer than X has arrived.
+  // Rows retired before stamping existed carry no build, so their intent is unknowable
+  // from the row alone — those are left retired and handled by the fallback below,
+  // which is what keeps older multi-generation invoices from showing every generation.
+  const orphanRetired = newestLiveBuild === 0 ? [] : all.filter((it) => it.isActive === false
+    && num(it.lineBuild) > 0 && num(it.lineBuild) >= newestLiveBuild);
+  const live = [...trulyLive, ...orphanRetired];
+
+  // Among the rows that count, only the newest build is current. Two live sets can
+  // coexist briefly — lines added by hand plus late originals — and the newest save is
+  // the one the owner meant.
   const pickBuild = (rows) => {
     const builds = rows.map((r) => num(r.lineBuild)).filter((b) => b > 0);
-    if (!builds.length) return rows;                 // all pre-date the stamp: nothing to choose
+    if (!builds.length) return rows;
     const newest = Math.max(...builds);
-    const stamped = rows.filter((r) => num(r.lineBuild) === newest);
-    // Unstamped rows are older than any stamped row by definition, so once a stamped
-    // build exists it wins outright.
-    return stamped;
+    return rows.filter((r) => num(r.lineBuild) === newest);
   };
 
   if (live.length) {
     const chosen = pickBuild(live);
-    return { lines: chosen, recovered: false, superseded: live.length - chosen.length };
+    // De-duplicate by ROW IDENTITY only. Selling the same material twice on one invoice
+    // — two lines, same quantity, same price — is legitimate and must be preserved;
+    // collapsing them would silently halve the invoice.
+    // Every stored row has an id, so identity is exact. Rows without one (only ever
+    // constructed in memory) are all kept: two identical lines are a legitimate way to
+    // sell the same material twice, and collapsing them would halve the invoice.
+    const seen = new Set();
+    const lines = chosen.filter((it) => {
+      if (!it.id) return true;
+      if (seen.has(it.id)) return false;
+      seen.add(it.id);
+      return true;
+    });
+    return { lines, recovered: lines.some((l) => l.isActive === false), superseded: live.length - chosen.length };
   }
 
   const retired = all.filter((it) => it.isActive === false);
   if (!retired.length) return { lines: [], recovered: false, superseded: 0 };
 
-  // No live rows: fall back to ONE retired generation — the rows retired together by a
-  // single save. Returning more than one shows every material once per generation.
+  // No usable rows at all: fall back to ONE retired generation, newest first.
   const stamp = (it) => String(num(it.lineBuild) || num(it.supersededAt) || num(it.updatedAt) || 0);
   const groups = new Map();
   for (const it of retired) {
@@ -1262,7 +1294,7 @@ export function invoiceLinesNow(data, invoiceId) {
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(it);
   }
-  const keys = [...groups.keys()].sort((a, b) => Number(b) - Number(a));   // newest first
+  const keys = [...groups.keys()].sort((a, b) => Number(b) - Number(a));
   let chosen = groups.get(keys[0]) || [];
   for (const k of keys) {
     if ((groups.get(k) || []).length > chosen.length) chosen = groups.get(k);
