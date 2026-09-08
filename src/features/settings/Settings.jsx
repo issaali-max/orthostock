@@ -4,7 +4,7 @@ import { C, TABLES } from '../../lib/constants.js';
 import { Badge, Btn, Card, Field, Input, Modal, PageHeader, Select } from '../../ui/components.jsx';
 import { resetStore, dbMode } from '../../db/db.js';
 import { isHashed, makeHashedPassword } from '../../lib/auth.js';
-import { subscribeSync, pushAllLocal, pull, cloudReady, wipeCloud, forcePushOverwrite, restoreSnapshotToCloud, fullRestoreFromBackup } from '../../db/sync.js';
+import { subscribeSync, pushAllLocal, pull, cloudReady, wipeCloud, forcePushOverwrite, mergeLocalIntoCloud, restoreSnapshotToCloud, fullRestoreFromBackup } from '../../db/sync.js';
 import { exportBackup } from '../../lib/backup.js';
 import { exportExcel, importExcel } from '../../lib/excel.js';
 import { resizeImageToDataUrl } from '../../lib/image.js';
@@ -185,9 +185,22 @@ export default function Settings() {
     } catch (e) { showToast(`${e.message || e}`, 'error'); setSyncing(false); }
   };
   // RECOVERY — make THIS device the source of truth (overwrites cloud + every other device).
+  // Uploads only what the cloud is missing. Deletes nothing, on either side.
+  const doMergeToCloud = async () => {
+    if (!cloudReady() || syncing) return;
+    if (!window.confirm(t('mergeCloudConfirm'))) return;
+    setSyncing(true);
+    try {
+      const r = await mergeLocalIntoCloud();
+      if (r.errors?.length) showToast(`⬆ ${r.added} · ⚠ ${r.errors[0]}`, 'error');
+      else showToast(`🔗 ${r.added} ✓`, 'success');
+    } catch (e) { showToast(`${e.message || e}`, 'error'); }
+    finally { setSyncing(false); }
+  };
+
   const doOverwriteCloud = async () => {
     if (!cloudReady() || syncing) return;
-    const word = window.prompt('☁️⬆ خطر: يكتب بيانات هذا الجهاز فوق السحابة وكل الأجهزة الأخرى.\nOVERWRITES the cloud (and every other device) with THIS device only.\n\nاستخدمه فقط على الجهاز الذي يحمل البيانات الصحيحة.\nاكتب  تأكيد  أو  OVERWRITE  للمتابعة:');
+    const word = window.prompt(t('overwritePrompt'));
     if (word !== 'تأكيد' && word !== 'OVERWRITE') return;
     setSyncing(true);
     try {
@@ -339,7 +352,13 @@ export default function Settings() {
             <div style={{ fontSize: 11, fontWeight: 800, color: C.textMid, marginBottom: 6 }}>🛟 {t('recoveryTools') || 'أدوات الاسترجاع / Recovery'}</div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <Btn size="sm" variant="light" onClick={doRebuildFromCloud} disabled={syncing}>☁️⬇ {t('rebuildFromCloud') || 'إعادة بناء من السحابة'}</Btn>
-              <Btn size="sm" variant="outline" onClick={doOverwriteCloud} disabled={syncing} style={{ color: C.danger }}>☁️⬆ {t('overwriteCloud') || 'كتابة فوق السحابة من هذا الجهاز'}</Btn>
+              {/* The SAFE way to make the cloud complete: add what it lacks, delete
+                  nothing. Placed before the destructive one and described plainly,
+                  because overwriting is almost never what the situation calls for. */}
+              <Btn size="sm" onClick={doMergeToCloud} disabled={syncing}>🔗 {t('mergeToCloud')}</Btn>
+              <div style={{ fontSize: 11, color: C.textMuted, lineHeight: 1.6, marginTop: 4 }}>{t('mergeToCloudNote')}</div>
+              <Btn size="sm" variant="outline" onClick={doOverwriteCloud} disabled={syncing} style={{ color: C.danger, marginTop: 8 }}>☁️⬆ {t('overwriteCloud') || 'كتابة فوق السحابة من هذا الجهاز'}</Btn>
+              <div style={{ fontSize: 11, color: C.danger, lineHeight: 1.6, marginTop: 4 }}>{t('overwriteCloudWarn')}</div>
             </div>
             <div style={{ fontSize: 10.5, color: C.textMuted, marginTop: 6, lineHeight: 1.5 }}>
               {t('recoveryHint') || 'الجهاز الذي يحمل البيانات الصحيحة: «كتابة فوق السحابة». بقية الأجهزة: «إعادة بناء من السحابة».'}
@@ -601,7 +620,7 @@ export default function Settings() {
                           </div>
                         ))}
                         <Btn size="sm" variant="light" style={{ marginTop: 6 }} onClick={async () => {
-                          if (!window.confirm(t('mergeConfirm'))) return;
+                          if (!window.confirm(t('mergeCloudConfirm'))) return;
                           const r = await mergeCustomers({ data }, g[0].id, g.slice(1).map((x) => x.id));
                           await Promise.all([refresh(TABLES.customers), refresh(TABLES.invoices)]);
                           showToast(`✓ ${r.merged} → 1 · ${r.moved} ${t('invoices')}`, 'success');

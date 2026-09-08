@@ -145,6 +145,48 @@ export const cloudReady = () => !!supabase;
 // fresh, top-ranking timestamp (so the good data out-ranks any stale copy still sitting on
 // another device), wipes the cloud, then uploads everything. Use on the device that holds
 // the correct data (after restoring a good snapshot there if needed).
+// ── Merge this device INTO the cloud, deleting nothing ──
+//
+// forcePushOverwrite wipes the cloud and uploads one device. That is correct when a
+// device is known to hold the truth, and catastrophic otherwise: rows this device has
+// and the other lacks are erased for everyone. Issa's brother ran it while Issa's
+// device held invoice lines his did not, and 66 invoices lost their materials.
+//
+// This is the safe counterpart. It uploads only rows the cloud is MISSING, leaves every
+// cloud row alone, and deletes nothing anywhere. Run it on the device that has data the
+// other lacks — running it on both devices makes the cloud the union of the two, which
+// is what "merge" should always have meant.
+export async function mergeLocalIntoCloud(onProgress) {
+  if (!supabase) return { ok: false, added: 0, errors: ['cloud_not_configured'] };
+  let added = 0; const errors = []; const perTable = {};
+  for (const table of Object.values(TABLES)) {
+    if (LOCAL_ONLY.has(table)) continue;
+    let rows = [];
+    try { rows = await idbGetAll(table); } catch { continue; }
+    if (!rows.length) continue;
+    // Which ids does the cloud already have? Only the keys — a few bytes each.
+    let cloudIds = new Set();
+    try {
+      const { data: keys, error } = await supabase.from(table).select('id');
+      if (error) { if (!isMissingTable(error)) errors.push(`${table}: ${error.message}`); continue; }
+      cloudIds = new Set((keys || []).map((k) => k.id));
+    } catch (e) { errors.push(`${table}: ${e?.message || e}`); continue; }
+
+    const missing = rows.filter((r) => !cloudIds.has(r.id));
+    if (!missing.length) continue;
+    for (let i = 0; i < missing.length; i += 200) {
+      const chunk = missing.slice(i, i + 200).map(toCloud);
+      try {
+        const { error } = await supabase.from(table).upsert(chunk);
+        if (error) { if (!isMissingTable(error)) errors.push(`${table}: ${error.message}`); }
+        else { added += chunk.length; perTable[table] = (perTable[table] || 0) + chunk.length; }
+      } catch (e) { errors.push(`${table}: ${e?.message || e}`); }
+      onProgress?.({ table, added });
+    }
+  }
+  return { ok: errors.length === 0, added, perTable, errors };
+}
+
 export async function forcePushOverwrite(onProgress) {
   if (!supabase) return { ok: false, pushed: 0, errors: ['cloud_not_configured'] };
   for (const table of Object.values(TABLES)) {

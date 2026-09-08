@@ -211,6 +211,44 @@ console.log('\n─── 9. Retired lines are kept, so old invoices can still be
   ok('and recovery from stock movements still exists', /proposeInvoiceLinesFromMovements/.test(engine));
 }
 
+
+console.log('\n─── 10. Merge must add what is missing and delete nothing ───');
+{
+  // Issa's brother ran "overwrite cloud" while Issa's device held invoice lines his did
+  // not. wipeCloud() removed them, Issa then rebuilt FROM that cloud, and 66 invoices
+  // lost their materials. The two devices were never merged — one replaced the other.
+  ok('a merge that deletes nothing exists', /export async function mergeLocalIntoCloud/.test(sync));
+  ok('it never wipes the cloud', !/mergeLocalIntoCloud[\s\S]{0,1200}wipeCloud/.test(sync));
+  ok('it asks the cloud only for ids, not whole rows', /mergeLocalIntoCloud[\s\S]{0,900}select\('id'\)/.test(sync));
+  ok('it uploads only rows the cloud lacks', /const missing = rows\.filter\(\(r\) => !cloudIds\.has\(r\.id\)\)/.test(sync));
+  ok('it reports what it added per table', /perTable\[table\]/.test(sync));
+
+  // The destructive path must still exist, but be clearly marked.
+  ok('overwrite still exists for when it is genuinely wanted', /export async function forcePushOverwrite/.test(sync));
+
+  const settings = fs.readFileSync(new URL('../src/features/settings/Settings.jsx', import.meta.url), 'utf8');
+  ok('the safe merge is offered in Settings', /doMergeToCloud/.test(settings));
+  ok('and it is placed before the destructive option', settings.indexOf('doMergeToCloud}') < settings.indexOf('doOverwriteCloud}'));
+  ok('overwrite carries an explicit warning', /overwriteCloudWarn/.test(settings));
+  ok('its prompt spells out the consequence', /overwritePrompt/.test(settings));
+
+  const i18n = fs.readFileSync(new URL('../src/lib/i18n.js', import.meta.url), 'utf8');
+  ok('the warning names the real risk', /سيُفقد نهائياً/.test(i18n));
+  ok('and points to the merge instead', /دمج بيانات هذا الجهاز/.test(i18n));
+
+  // Simulate the union property: merging from both devices loses nothing.
+  const runMerge = ({ overwrite }) => {
+    const deviceA = new Set(['inv1', 'line1', 'line2']);      // Issa: has the lines
+    const deviceB = new Set(['inv1']);                         // brother: does not
+    let cloud = new Set(['inv1', 'line1', 'line2']);
+    if (overwrite) { cloud = new Set(deviceB); }               // wipe + upload B only
+    else { for (const id of deviceB) cloud.add(id); }          // merge B in
+    return { cloudSize: cloud.size, keptLines: ['line1', 'line2'].filter((l) => cloud.has(l)).length };
+  };
+  ok('overwrite destroys the other device\'s lines', runMerge({ overwrite: true }).keptLines === 0);
+  ok('merge keeps every line', runMerge({ overwrite: false }).keptLines === 2);
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${pass + fail} checks · ${fail} finding(s)`);
 findings.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));
