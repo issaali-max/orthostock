@@ -1009,10 +1009,19 @@ export function invoiceLineMismatches(data) {
     //   lines    — a material difference between the total and its lines
     //   rounding — under one dirham: a unit price rounded to two decimals, not a fault
     //   stock    — totals agree, but a line never moved stock
+    // A shortfall whose LINES are newer than the invoice header is an edit in transit,
+    // not damage: the owner removed a line, the shortened set arrived, and the header
+    // carrying the smaller total has not caught up. Reporting it as "missing lines"
+    // tells the other device to re-add materials that were deliberately deleted.
+    const newestLineStamp = mine.reduce((mx, it) => Math.max(mx, num(it.lineBuild), num(it.updatedAt)), 0);
+    const headerStamp = num(inv.updatedAt);
+    const linesAheadOfHeader = newestLineStamp > headerStamp && gap > 1;
+
     const severity = mine.length === 0 && total > 0.005 ? 'empty'
-      : Math.abs(gap) > 1 ? 'lines'
-        : Math.abs(gap) > 0.005 ? 'rounding'
-          : noMove.length ? 'stock' : null;
+      : linesAheadOfHeader ? 'pending'
+        : Math.abs(gap) > 1 ? 'lines'
+          : Math.abs(gap) > 0.005 ? 'rounding'
+            : noMove.length ? 'stock' : null;
     if (!severity) continue;
     out.push({
       id: inv.id, invoiceNumber: inv.invoiceNumber, date: inv.date,
@@ -1023,7 +1032,7 @@ export function invoiceLineMismatches(data) {
     });
   }
   // Worst first: money problems before cosmetic ones.
-  const rank = { empty: 0, lines: 1, stock: 2, rounding: 3 };
+  const rank = { empty: 0, lines: 1, stock: 2, pending: 3, rounding: 4 };
   return out.sort((a, b) => rank[a.severity] - rank[b.severity] || Math.abs(b.gap) - Math.abs(a.gap) || (a.date || '').localeCompare(b.date || ''));
 }
 

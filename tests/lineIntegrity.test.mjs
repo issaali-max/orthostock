@@ -557,6 +557,47 @@ console.log('\n─── 16. A stamped line must not delete the unstamped ones b
   ok('a duplicated set still collapses', dup.lines.length === 1 && sum(dup) === 1060);
 }
 
+
+console.log('\n─── 17. A deliberate deletion must not be reported as missing lines ───');
+{
+  // Issa deletes a line on purpose. The shortened line set uploads; the header carrying
+  // the smaller total lags. His brother's device then shows a large total against small
+  // lines and reports "missing lines" — telling him to re-add materials Issa had just
+  // removed. The two halves of one edit must be distinguishable from real damage.
+  const inv = await db.insert(TABLES.invoices, {
+    invoiceNumber: 'INV-DEL', date: '2026-09-08', customerId: 'c1', currency: 'AED', status: 'active',
+    total: 1000, paidAmount: 0, paymentStatus: 'unpaid', payments: [], updatedAt: 100,
+  });
+  // Lines are NEWER than the header: the edit's line half arrived first.
+  await db.insert(TABLES.invoiceItems, { invoiceId: inv.id, variantId: 'a', qty: 4, unitPrice: 100, netUnitPrice: 100, total: 400, netTotal: 400, lineBuild: 900, updatedAt: 900 });
+  await all();
+
+  const hit = E.invoiceLineMismatches(app.data).find((x) => x.invoiceNumber === 'INV-DEL');
+  ok('it is classed as an edit in transit, not damage', hit && hit.severity === 'pending', `${hit && hit.severity}`);
+  ok('it is not reported as missing lines', hit && !hit.issues.includes('lines'));
+
+  // Once the header catches up, the invoice reconciles and disappears from the report.
+  await db.update(TABLES.invoices, inv.id, { total: 400, updatedAt: 1200 });
+  await all();
+  ok('once the header lands it is not reported at all',
+    !E.invoiceLineMismatches(app.data).some((x) => x.invoiceNumber === 'INV-DEL'));
+
+  // A genuinely damaged invoice — header newer than its lines — is still reported.
+  const dmg = await db.insert(TABLES.invoices, {
+    invoiceNumber: 'INV-REALGAP', date: '2026-09-08', customerId: 'c1', currency: 'AED', status: 'active',
+    total: 1000, paidAmount: 0, paymentStatus: 'unpaid', payments: [],
+  });
+  const dmgLine = await db.insert(TABLES.invoiceItems, { invoiceId: dmg.id, variantId: 'a', qty: 4, unitPrice: 100, netUnitPrice: 100, total: 400, netTotal: 400 });
+  // db.insert stamps updatedAt itself, so force the order the scenario needs: the header
+  // is NEWER than its lines, which is real damage rather than an edit in transit.
+  await db.update(TABLES.invoiceItems, dmgLine.id, { lineBuild: 100 });
+  await db.update(TABLES.invoices, dmg.id, { total: 1000 });
+  await all();
+  const real = E.invoiceLineMismatches(app.data).find((x) => x.invoiceNumber === 'INV-REALGAP');
+  ok('a real shortfall is still reported as missing lines', real && real.severity === 'lines', `${real && real.severity}`);
+  ok('and it still names the amount', real && real.gap === 600, `${real && real.gap}`);
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${pass + fail} checks · ${fail} finding(s)`);
 findings.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));

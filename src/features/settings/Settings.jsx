@@ -539,27 +539,28 @@ export default function Settings() {
                   {(() => {
                     // Grouped by severity so a few fils of rounding never sits beside
                     // thousands of missing lines. Only the first group is a real problem.
-                    const bySev = { empty: [], lines: [], stock: [], rounding: [] };
+                    const bySev = { empty: [], lines: [], stock: [], pending: [], rounding: [] };
                     for (const g of lineGaps) bySev[g.severity].push(g);
                     const groups = [
                       ['empty', C.danger, t('sevEmpty'), t('sevEmptyHint')],
                       ['lines', C.danger, t('sevLines'), t('sevLinesHint')],
                       ['stock', C.warning, t('sevStock'), t('sevStockHint')],
+                      ['pending', C.textMuted, t('sevPending'), t('sevPendingHint')],
                       ['rounding', C.textMuted, t('sevRounding'), t('sevRoundingHint')],
                     ];
                     return groups.filter(([k]) => bySev[k].length).map(([k, color, title, hint]) => (
                       <div key={k}>
                         <div style={{ fontSize: 12, fontWeight: 800, color, marginBottom: 4 }}>
-                          {k === 'rounding' ? 'ℹ️' : '⚠'} {title} ({bySev[k].length})
+                          {(k === 'rounding' || k === 'pending') ? 'ℹ️' : '⚠'} {title} ({bySev[k].length})
                         </div>
                         <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 6 }}>{hint}</div>
-                        <div style={{ display: 'grid', gap: 4 }}>{bySev[k].slice(0, k === 'rounding' ? 5 : 100).map((g) => {
+                        <div style={{ display: 'grid', gap: 4 }}>{bySev[k].slice(0, (k === 'rounding' || k === 'pending') ? 5 : 100).map((g) => {
                           // Only the money faults can be recovered, and only when the
                           // stock movements survived to rebuild the lines from.
                           const prop = (k === 'empty' || k === 'lines') ? proposeInvoiceLinesFromMovements(data, g.id) : null;
                           const canFix = prop && prop.recoverable && prop.exact;
                           return (
-                            <Row key={g.id} tone={k === 'rounding' ? 'muted' : 'bad'}>
+                            <Row key={g.id} tone={(k === 'rounding' || k === 'pending') ? 'muted' : 'bad'}>
                               <div><b>{g.invoiceNumber}</b> · {t('total')} {cur(g.total)}
                                 {k !== 'stock' && <> · {t('lines')} {cur(g.lineSum)} · <b>{g.gap > 0 ? '+' : ''}{cur(g.gap)}</b></>}
                                 {k === 'stock' && <> · {g.missingMovements} {t('linesNoStock')}</>}

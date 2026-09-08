@@ -374,6 +374,8 @@ export async function flush() {
     const blockedParents = new Set();
     // Invoices whose replacement lines failed in this flush: their retirements wait.
     const blockedRetires = new Set();
+    // Invoices whose HEADER failed: their line rows must not go up without it.
+    const blockedChildren = new Set();
     const parentOf = (op) => (op.table === TABLES.invoiceItems ? op.row?.invoiceId
       : op.table === TABLES.purchaseItems ? op.row?.purchaseId
         : op.table === TABLES.stockMovements ? op.row?.refId
@@ -394,6 +396,18 @@ export async function flush() {
       // leave the invoice empty on every device.
       if (isRetire(op) && blockedRetires.has(parentOf(op))) {
         console.warn('[sync] holding retirement until replacements upload:', op.table, op.id);
+        continue;
+      }
+      // An invoice and its lines describe ONE fact and must land together. Ordering the
+      // children first protects the create case (an invoice never appears without its
+      // materials), but the DELETE case fails the other way: the shortened line set
+      // uploads, the header carrying the smaller total does not, and the other device
+      // sees a large total against small lines — reported as "missing lines" when the
+      // owner had deliberately removed them. So if the header failed, its children wait
+      // too, and the whole edit is retried as a unit on the next flush.
+      const myParent = parentOf(op);
+      if (myParent && blockedChildren.has(myParent)) {
+        console.warn('[sync] holding line until its invoice uploads:', op.table, op.id);
         continue;
       }
       try {
@@ -426,6 +440,10 @@ export async function flush() {
         if (pid) {
           blockedParents.add(pid);
           if (!isRetire(op)) blockedRetires.add(pid);   // a failed INSERT holds back the retires
+        } else if (op.table === TABLES.invoices || op.table === TABLES.purchases || op.table === TABLES.orders) {
+          // The header itself failed: hold its remaining children so the two halves of
+          // the edit stay together.
+          blockedChildren.add(op.id);
         }
         // Rows whose loss would destroy history: an invoice line that never uploads is
         // an invoice with a total and no materials. These are NEVER dropped from the
