@@ -252,10 +252,28 @@ export async function flush() {
       [TABLES.invoices, 1], [TABLES.purchases, 1], [TABLES.orders, 1],
     ]);
     const rank = (t) => (UPLOAD_RANK.has(t) ? UPLOAD_RANK.get(t) : 0);
-    const ops = (await outboxAll()).sort((a, b) => rank(a.table) - rank(b.table) || a.seq - b.seq);
+    // ── And within the child tables: NEW ROWS BEFORE RETIREMENTS ──
+    // Editing an invoice produces two kinds of child op: retire the old lines
+    // (isActive:false) and insert the new ones. Uploaded in queue order the retire can
+    // reach the cloud while its replacements do not — and then BOTH devices pull an
+    // invoice whose lines are all hidden and none replaced. That matches exactly what
+    // was reported: sync working fine, deletions propagating instantly, yet lines
+    // disappearing on both devices at once. Nothing was deleted; the replacements were
+    // simply not there yet.
+    //
+    // Sending the inserts first means a failure leaves the OLD lines still visible —
+    // an invoice showing its previous contents, which is recoverable and obvious,
+    // rather than one showing nothing.
+    const isRetire = (op) => op.row?.isActive === false;
+    const ops = (await outboxAll()).sort((a, b) =>
+      rank(a.table) - rank(b.table)
+      || (isRetire(a) ? 1 : 0) - (isRetire(b) ? 1 : 0)
+      || a.seq - b.seq);
     const failed = [];
     // A parent whose children failed in THIS flush must not be uploaded on its own.
     const blockedParents = new Set();
+    // Invoices whose replacement lines failed in this flush: their retirements wait.
+    const blockedRetires = new Set();
     const parentOf = (op) => (op.table === TABLES.invoiceItems ? op.row?.invoiceId
       : op.table === TABLES.purchaseItems ? op.row?.purchaseId
         : op.table === TABLES.stockMovements ? op.row?.refId
@@ -269,6 +287,13 @@ export async function flush() {
       // It stays queued and goes up on the next flush, after its children succeed.
       if (blockedParents.has(op.id)) {
         console.warn('[sync] holding parent until its rows upload:', op.table, op.id);
+        continue;
+      }
+      // A retirement must never travel without the lines that replace it. If any
+      // insert for this invoice failed moments ago, hiding the old lines now would
+      // leave the invoice empty on every device.
+      if (isRetire(op) && blockedRetires.has(parentOf(op))) {
+        console.warn('[sync] holding retirement until replacements upload:', op.table, op.id);
         continue;
       }
       try {
@@ -298,7 +323,10 @@ export async function flush() {
         // A child that failed blocks its parent for the rest of this flush, so the
         // parent cannot arrive in the cloud ahead of the rows that explain it.
         const pid = parentOf(op);
-        if (pid) blockedParents.add(pid);
+        if (pid) {
+          blockedParents.add(pid);
+          if (!isRetire(op)) blockedRetires.add(pid);   // a failed INSERT holds back the retires
+        }
         // Rows whose loss would destroy history: an invoice line that never uploads is
         // an invoice with a total and no materials. These are NEVER dropped from the
         // queue — they keep retrying, and the failure is surfaced to the user rather

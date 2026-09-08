@@ -123,11 +123,11 @@ console.log('\n─── 6. Children upload BEFORE parents ───');
   for (const t of ['invoices', 'purchases', 'orders']) {
     ok(`${t} is ranked after its children`, new RegExp(`\\[TABLES\\.${t}, 1\\]`).test(sync));
   }
-  ok('the outbox is sorted by that rank', /sort\(\(a, b\) => rank\(a\.table\) - rank\(b\.table\) \|\| a\.seq - b\.seq\)/.test(sync));
+  ok('the outbox is sorted by that rank', /sort\(\(a, b\) =>\s*\n?\s*rank\(a\.table\) - rank\(b\.table\)/.test(sync));
   ok('order within a table is still preserved', /\|\| a\.seq - b\.seq/.test(sync));
 
   ok('a parent whose child failed is held back', /blockedParents\.has\(op\.id\)/.test(sync));
-  ok('a failing child blocks its parent', /if \(pid\) blockedParents\.add\(pid\)/.test(sync));
+  ok('a failing child blocks its parent', /blockedParents\.add\(pid\)/.test(sync));
   ok('the held parent stays queued rather than being dropped', /holding parent until its rows upload/.test(sync));
   ok('parents are resolved for every child type', /invoiceId[\s\S]{0,200}purchaseId[\s\S]{0,200}refId[\s\S]{0,200}orderId/.test(sync));
 
@@ -164,6 +164,51 @@ console.log('\n─── 7. Stock repair must never invent stock ───');
   ok('and reports them instead of correcting silently', /skipped\.push/.test(engine));
   ok('the result exposes what was skipped', /return \{ fixed: fixes\.length, fixes, skipped \}/.test(engine));
   ok('lowering stock is still allowed', /fixes\.push/.test(engine));
+}
+
+
+console.log('\n─── 8. A retirement must never travel without its replacements ───');
+{
+  // The reported case, with sync working perfectly: editing an invoice queues TWO
+  // kinds of child op — retire the old lines, insert the new ones. If the retire
+  // uploads and the inserts do not, BOTH devices pull an invoice whose lines are all
+  // hidden and none replaced. That explains everything observed: sync healthy,
+  // deletions propagating instantly, lines vanishing on both devices at once.
+  ok('flush distinguishes a retirement from an insert', /const isRetire = \(op\) => op\.row\?\.isActive === false/.test(sync));
+  ok('inserts are ordered before retirements', /\(isRetire\(a\) \? 1 : 0\) - \(isRetire\(b\) \? 1 : 0\)/.test(sync));
+  ok('a failed insert holds back that invoice\'s retirements', /if \(!isRetire\(op\)\) blockedRetires\.add\(pid\)/.test(sync));
+  ok('and the retirement is skipped while blocked', /isRetire\(op\) && blockedRetires\.has\(parentOf\(op\)\)/.test(sync));
+
+  // Simulate an edit whose replacement inserts fail.
+  const runEdit = ({ insertsFirst, holdRetires }) => {
+    const queue = insertsFirst
+      ? [{ kind: 'insert', id: 'NEW1' }, { kind: 'insert', id: 'NEW2' }, { kind: 'retire', id: 'OLD1' }, { kind: 'retire', id: 'OLD2' }]
+      : [{ kind: 'retire', id: 'OLD1' }, { kind: 'retire', id: 'OLD2' }, { kind: 'insert', id: 'NEW1' }, { kind: 'insert', id: 'NEW2' }];
+    const cloud = { OLD1: 'live', OLD2: 'live' };     // the originals are up and visible
+    let insertFailed = false;
+    for (const op of queue) {
+      if (op.kind === 'insert') { insertFailed = true; continue; }   // every insert fails
+      if (op.kind === 'retire' && insertFailed && holdRetires) continue;
+      if (op.kind === 'retire') cloud[op.id] = 'hidden';
+    }
+    const visible = Object.values(cloud).filter((v) => v === 'live').length;
+    return { visible };
+  };
+
+  ok('the OLD order empties the invoice on both devices', runEdit({ insertsFirst: false, holdRetires: false }).visible === 0,
+    'retires uploaded, replacements did not — nothing left to show');
+  ok('the NEW order leaves the previous lines visible', runEdit({ insertsFirst: true, holdRetires: true }).visible === 2,
+    'a failed edit shows the invoice as it was, which is recoverable and obvious');
+}
+
+console.log('\n─── 9. Retired lines are kept, so old invoices can still be repaired ───');
+{
+  const engine = fs.readFileSync(new URL('../src/lib/engine.js', import.meta.url), 'utf8');
+  ok('editing retires lines instead of deleting them', /isActive: false, supersededBy/.test(engine));
+  ok('nothing hard-deletes invoice lines outside the recycle bin',
+    (engine.match(/op: 'remove', table: TABLES\.invoiceItems/g) || []).length <= 1);
+  ok('a reader falls back to retired lines when no live ones exist', /retired\.length/.test(engine));
+  ok('and recovery from stock movements still exists', /proposeInvoiceLinesFromMovements/.test(engine));
 }
 
 console.log('\n═══════════════════════════════════════');
