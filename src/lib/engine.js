@@ -1289,18 +1289,32 @@ export function invoiceLinesNow(data, invoiceId) {
     if (unique.length !== pool.length && Math.abs(sumOf(unique) - target) < 0.05) {
       return { lines: unique, recovered: unique.every((r) => r.isActive === false), superseded: pool.length - unique.length };
     }
-    // 4. Nothing reconciles. Prefer the newest generation that comes CLOSEST without
-    //    exceeding the total, so an invoice never displays more than it is worth.
-    const under = ordered.map(([, rows]) => rows).filter((rows) => sumOf(rows) <= target + 0.05);
-    if (under.length) {
-      const best = under.reduce((a, b) => (sumOf(b) > sumOf(a) ? b : a));
-      return { lines: best, recovered: best.every((r) => r.isActive === false), superseded: pool.length - best.length };
+    // 4. Nothing reconciles. This is a genuinely incomplete invoice — lines really were
+    //    lost — so SHOW EVERYTHING AVAILABLE. Picking the "closest" generation was worse
+    //    than useless here: it discarded most of what survived (INV-00156 dropped from
+    //    8,735 of lines to 958), hiding materials the owner still had. When the data
+    //    cannot be reconciled, the owner needs to see all of it, not a tidy subset.
+    //    Only exact duplicates are removed, since showing the same row twice helps nobody.
+    const seenAll = new Map();
+    for (const r of pool) {
+      const k = `${r.variantId}|${r.qty}|${r.unitPrice}|${r.gift ? 1 : 0}|${valOf(r)}`;
+      if (!seenAll.has(k)) seenAll.set(k, r);
     }
+    const everything = [...seenAll.values()];
+    return { lines: everything, recovered: everything.every((r) => r.isActive === false), superseded: pool.length - everything.length };
   }
 
-  // No usable total to judge against: show the newest generation.
+  // No usable total to judge against (an invoice with no total recorded). Fall back to
+  // the newest generation — with several generations present and no arithmetic to
+  // choose between them, showing them all would repeat every material.
   const newest = ordered.length ? ordered[0][1] : pool;
-  return { lines: newest, recovered: newest.every((r) => r.isActive === false), superseded: pool.length - newest.length };
+  const seenN = new Map();
+  for (const r of newest) {
+    const k = `${r.variantId}|${r.qty}|${r.unitPrice}|${r.gift ? 1 : 0}`;
+    if (!seenN.has(k)) seenN.set(k, r);
+  }
+  const lines = [...seenN.values()];
+  return { lines, recovered: lines.every((r) => r.isActive === false), superseded: pool.length - lines.length };
 }
 
 export function invoiceBreakdown(invoice, items, settings) {
