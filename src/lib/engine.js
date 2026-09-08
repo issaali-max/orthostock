@@ -1227,10 +1227,40 @@ export function invoiceLinesNow(data, invoiceId) {
   if (live.length) return { lines: live, recovered: false };
   const retired = all.filter((it) => it.isActive === false);
   if (!retired.length) return { lines: [], recovered: false };
-  // The newest retired generation: the rows retired by the most recent save.
-  const newest = retired.reduce((mx, it) => Math.max(mx, num(it.supersededAt), num(it.updatedAt)), 0);
-  const sameGen = retired.filter((it) => Math.abs(num(it.supersededAt) || num(it.updatedAt)) === newest);
-  return { lines: sameGen.length ? sameGen : retired, recovered: true };
+
+  // Pick exactly ONE generation — the rows retired together by a single save.
+  //
+  // An invoice edited several times has several retired generations. Returning more
+  // than one shows the same material twice, which is what INV-00152 displayed. The
+  // previous version compared timestamps and, when nothing matched, fell back to ALL
+  // retired rows — every generation at once, guaranteeing duplicates.
+  //
+  // Rows retired by the same save share a supersededAt. Rows retired before that field
+  // existed have only updatedAt, and two generations can carry the same value, so
+  // grouping is done on the best stamp available and the LARGEST group wins a tie —
+  // a complete generation is always at least as large as a partial one.
+  const stamp = (it) => String(num(it.supersededAt) || num(it.updatedAt) || 0);
+  const groups = new Map();
+  for (const it of retired) {
+    const k = stamp(it);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(it);
+  }
+  const keys = [...groups.keys()].sort((a, b) => Number(b) - Number(a));   // newest first
+  let chosen = groups.get(keys[0]) || [];
+  for (const k of keys) {
+    if ((groups.get(k) || []).length > chosen.length) chosen = groups.get(k);
+    else break;                       // only look past the newest while groups grow
+  }
+  // Whatever happens, never return the same material twice from one generation.
+  const seen = new Set();
+  const lines = chosen.filter((it) => {
+    const k = `${it.variantId}|${it.qty}|${it.unitPrice}|${it.gift ? 1 : 0}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  return { lines, recovered: true };
 }
 
 export function invoiceBreakdown(invoice, items, settings) {

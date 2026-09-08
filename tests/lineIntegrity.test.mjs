@@ -308,6 +308,46 @@ console.log('\n─── 11. Lines synced, then vanished after an edit ───
   ok('and there are still exactly two of them', after.lines.length === 2, `${after.lines.length}`);
 }
 
+
+console.log('\n─── 12. The healing reader must never duplicate a line ───');
+{
+  // INV-00152 showed one material twice. An invoice edited several times has several
+  // retired generations; returning more than one shows every material once per
+  // generation. Rows retired before supersededAt existed carry only updatedAt, and two
+  // generations can share it — so grouping must still resolve to ONE generation.
+  const inv = await db.insert(TABLES.invoices, { invoiceNumber: 'INV-DUP', date: '2026-09-07', customerId: 'c1', currency: 'AED', status: 'active', total: 700, paidAmount: 0, paymentStatus: 'unpaid', payments: [] });
+  // Generation 1 and generation 2, both retired, both WITHOUT supersededAt and sharing
+  // an updatedAt — the legacy shape that produced the duplicate.
+  for (const gen of [1, 2]) {
+    await db.insert(TABLES.invoiceItems, { invoiceId: inv.id, variantId: 'a', qty: 10, unitPrice: 50, netUnitPrice: 50, total: 500, netTotal: 500, isActive: false, updatedAt: 1000 });
+    await db.insert(TABLES.invoiceItems, { invoiceId: inv.id, variantId: 'b', qty: gen === 1 ? 5 : 4, unitPrice: 40, netUnitPrice: 40, total: gen === 1 ? 200 : 160, netTotal: gen === 1 ? 200 : 160, isActive: false, updatedAt: 1000 });
+  }
+  await all();
+
+  const shown = E.invoiceLinesNow(app.data, inv.id);
+  ok('it recovers something rather than showing nothing', shown.lines.length > 0);
+  ok('no material appears twice', new Set(shown.lines.map((l) => l.variantId)).size === shown.lines.length,
+    JSON.stringify(shown.lines.map((l) => [l.variantId, l.qty])));
+  ok('it never returns every retired generation at once', shown.lines.length <= 2, `${shown.lines.length}`);
+
+  // Distinct generations with distinct stamps: the NEWEST must win, cleanly.
+  const inv2 = await db.insert(TABLES.invoices, { invoiceNumber: 'INV-GEN', date: '2026-09-07', customerId: 'c1', currency: 'AED', status: 'active', total: 300, paidAmount: 0, paymentStatus: 'unpaid', payments: [] });
+  await db.insert(TABLES.invoiceItems, { invoiceId: inv2.id, variantId: 'a', qty: 99, unitPrice: 50, netUnitPrice: 50, total: 4950, netTotal: 4950, isActive: false, supersededAt: 100 });
+  await db.insert(TABLES.invoiceItems, { invoiceId: inv2.id, variantId: 'a', qty: 6, unitPrice: 50, netUnitPrice: 50, total: 300, netTotal: 300, isActive: false, supersededAt: 900 });
+  await all();
+  const g = E.invoiceLinesNow(app.data, inv2.id);
+  ok('only the newest generation is shown', g.lines.length === 1, `${g.lines.length}`);
+  ok('and it is the newest one, not the oldest', num(g.lines[0].qty) === 6, `${g.lines[0].qty}`);
+  ok('the recovered figure matches the invoice total', round2(num(g.lines[0].netTotal)) === 300);
+
+  // A live line always wins over anything retired.
+  await db.insert(TABLES.invoiceItems, { invoiceId: inv2.id, variantId: 'b', qty: 3, unitPrice: 100, netUnitPrice: 100, total: 300, netTotal: 300 });
+  await all();
+  const withLive = E.invoiceLinesNow(app.data, inv2.id);
+  ok('a live line takes precedence over retired ones', withLive.recovered === false && withLive.lines.length === 1);
+  ok('and it is the live one', withLive.lines[0].variantId === 'b');
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${pass + fail} checks · ${fail} finding(s)`);
 findings.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));
