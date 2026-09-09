@@ -64,7 +64,8 @@ const CHILD_SPEC = {
 const carriedByParent = (table, row) => table === TABLES.invoiceItems || table === TABLES.purchaseItems
   || (table === TABLES.stockMovements && (row?.refType === 'invoice' || row?.refType === 'purchase'));
 
-async function toCloud(row, table) {
+// Exported so tests can drive the REAL document round-trip rather than a model of it.
+export async function toCloud(row, table) {
   const spec = CHILD_SPEC[table];
   if (!spec) return { id: row.id, updatedAt: row.updatedAt, data: row };
   const [items, moves] = await Promise.all([idbGetAll(spec.items), idbGetAll(TABLES.stockMovements)]);
@@ -73,13 +74,17 @@ async function toCloud(row, table) {
     updatedAt: row.updatedAt,
     data: {
       ...row,
-      __lines: items.filter((it) => it[spec.itemKey] === row.id),
-      __moves: moves.filter((m) => m.refType === spec.refType && m.refId === row.id),
+      // LIVE rows only. Editing retires the previous lines rather than destroying them,
+      // so the local table still holds every past version. Shipping those would send the
+      // deleted lines to the other device and resurrect them there — the exact fault
+      // this design exists to prevent. The document describes the invoice as it is NOW.
+      __lines: items.filter((it) => it[spec.itemKey] === row.id && it.isActive !== false),
+      __moves: moves.filter((m) => m.refType === spec.refType && m.refId === row.id && m.isActive !== false),
     },
   };
 }
 
-const fromCloud = (c) => {
+export const fromCloud = (c) => {
   const rec = (c && c.data && typeof c.data === 'object') ? { ...c.data } : c;
   if (rec) { delete rec.__lines; delete rec.__moves; }
   return rec;
@@ -88,7 +93,7 @@ const fromCloud = (c) => {
 // The document is the whole truth about its own children. Replacing them alongside
 // the parent is what makes a deliberate deletion permanent: the newer version simply
 // does not contain the removed line, so it cannot come back.
-async function unpackChildren(table, cloudRow) {
+export async function unpackChildren(table, cloudRow) {
   const spec = CHILD_SPEC[table];
   const data = cloudRow?.data;
   if (!spec || !data || !Array.isArray(data.__lines)) return;
