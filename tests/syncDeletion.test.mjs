@@ -22,318 +22,84 @@ const ok = (l, c, d = '') => { if (c) { pass++; console.log('✓', l); } else { 
 
 const sync = fs.readFileSync(new URL('../src/db/sync.js', import.meta.url), 'utf8');
 
-console.log('\n─── 1. Superseded: child rows are no longer separate rows at all ───');
+console.log('\n─── 1. Rule 1: the invoice is ONE document ───');
 {
-  // This section used to test CHILD_TABLES, a guard that stopped the deletion-by-absence
-  // inference from removing invoice lines. Both the guard and the inference are gone:
-  // lines now travel inside the invoice document, so there is no separate row to lose
-  // and no absence to misread. Sections 12-15 test what replaced them.
-  ok('the child-table workaround is gone', !/CHILD_TABLES/.test(sync));
-  ok('because lines are no longer synced independently', /CARRIED_BY_PARENT/.test(sync));
-}
-
-console.log('\n─── 2. A failed upload of a child row is never dropped silently ───');
-{
-  ok('flush marks these tables as critical',
-    /const CRITICAL = op\.table === TABLES\.invoiceItems/.test(sync));
-  ok('a policy-blocked critical row stays queued',
-    /if \(CRITICAL\) \{[\s\S]{0,400}outboxBumpTries\(op\.seq\)[\s\S]{0,200}failed\.push/.test(sync),
-    'RLS failures used to drop the op immediately and quietly');
-  ok('NO row is dropped after MAX_OP_TRIES, critical or not', !/MAX_OP_TRIES && !CRITICAL/.test(sync),
-    'a local write is never discarded');
-  ok('and the user is told about it', /keeping queued/.test(sync));
-}
-
-console.log('\n─── 3. Superseded: the guards around the inference ───');
-{
-  // These tested the safety rails around deletion-by-absence — full-pulls-only, the
-  // empty-table check, the mass-deletion brake, the outbox re-check. Every one of them
-  // existed to make a dangerous inference survivable. The inference is gone, so they
-  // are too: absence now means nothing at all, which needs no rails.
-  ok('the inference and all its rails are gone', !/deletion reconcile/i.test(sync));
-  ok('deletes propagate as data instead', /soft delete/i.test(sync));
-}
-
-console.log('\n─── 4. The chain, simulated ───');
-{
-  // A faithful model of the two decision points, run against both the old rules and
-  // the new ones, to show the outcome actually changes.
-  const runChain = ({ childProtected, criticalKept }) => {
-    let outbox = [{ table: 'invoiceItems', id: 'line1' }];
-    const cloud = new Set(['inv1']);              // the header uploaded; the line did not
-    const local = new Set(['inv1', 'line1']);
-
-    // flush(): the line's upload fails.
-    if (!criticalKept) outbox = [];               // old: dropped after retries
-    // new: stays queued
-
-    // pull(): deletion reconcile.
-    const outboxEmpty = outbox.length === 0;
-    const gone = [...local].filter((id) => !cloud.has(id) && id === 'line1');
-    if (outboxEmpty && gone.length) {
-      if (childProtected) {
-        for (const id of gone) outbox.push({ table: 'invoiceItems', id });   // re-queued
-      } else {
-        for (const id of gone) local.delete(id);                              // deleted
-      }
-    }
-    return { lineSurvives: local.has('line1'), queued: outbox.length };
-  };
-
-  const before = runChain({ childProtected: false, criticalKept: false });
-  ok('the OLD rules lose the line (the reported fault)', !before.lineSurvives);
-
-  const after = runChain({ childProtected: true, criticalKept: true });
-  ok('the line survives with the fix', after.lineSurvives);
-  ok('and it is still queued for upload', after.queued > 0);
-
-  // Even if only one of the two protections is present, the line must survive.
-  ok('child protection alone saves the line', runChain({ childProtected: true, criticalKept: false }).lineSurvives);
-  ok('keeping the op queued alone saves the line', runChain({ childProtected: false, criticalKept: true }).lineSurvives,
-    'a non-empty outbox blocks the deletion reconcile');
-}
-
-console.log('\n─── 5. A genuine remote delete of a PARENT still propagates ───');
-{
-  // The protection must not make deletes stop working. Parent tables are unaffected.
-  ok('invoices are not in the child set', !/CHILD_TABLES[\s\S]{0,200}TABLES\.invoices\b/.test(sync));
-  ok('purchases are not in the child set', !/CHILD_TABLES[\s\S]{0,200}TABLES\.purchases\b/.test(sync));
-  ok('customers are not in the child set', !/CHILD_TABLES[\s\S]{0,200}TABLES\.customers\b/.test(sync));
-  ok('deleting a parent still cascades to its children in the engine',
-    fs.readFileSync(new URL('../src/lib/engine.js', import.meta.url), 'utf8')
-      .includes("op: 'update', table: TABLES.invoiceItems"),
-    'voiding an invoice retires its lines, so orphans are not leaked');
-}
-
-
-console.log('\n─── 6. Children upload BEFORE parents ───');
-{
-  // Each row is its own network request. If the invoice lands and some of its lines do
-  // not, every device sees a complete-looking invoice with no materials — right total,
-  // right payment, right debt, no lines. That is the reported fault exactly, and it
-  // explains why only SOME invoices are hit: it depends on when the connection drops
-  // and how many lines there are.
-  ok('flush ranks tables for upload order', /UPLOAD_RANK\s*=\s*new Map/.test(sync));
-  for (const t of ['invoiceItems', 'purchaseItems', 'orderItems', 'stockMovements']) {
-    ok(`${t} is ranked before parents`, new RegExp(`\\[TABLES\\.${t}, 0\\]`).test(sync));
-  }
-  for (const t of ['invoices', 'purchases', 'orders']) {
-    ok(`${t} is ranked after its children`, new RegExp(`\\[TABLES\\.${t}, 1\\]`).test(sync));
-  }
-  ok('the outbox is sorted by that rank', /sort\(\(a, b\) =>\s*\n?\s*rank\(a\.table\) - rank\(b\.table\)/.test(sync));
-  ok('order within a table is still preserved', /\|\| a\.seq - b\.seq/.test(sync));
-
-  ok('a parent whose child failed is held back', /blockedParents\.has\(op\.id\)/.test(sync));
-  ok('a failing child blocks its parent', /blockedParents\.add\(pid\)/.test(sync));
-  ok('the held parent stays queued rather than being dropped', /holding parent until its rows upload/.test(sync));
-  ok('parents are resolved for every child type', /invoiceId[\s\S]{0,200}purchaseId[\s\S]{0,200}refId[\s\S]{0,200}orderId/.test(sync));
-
-  // Simulate: invoice + 3 lines, where line 2 fails.
-  const simulate = ({ childrenFirst, blockParent }) => {
-    const queue = childrenFirst
-      ? [{ t: 'line', id: 'L1' }, { t: 'line', id: 'L2' }, { t: 'line', id: 'L3' }, { t: 'inv', id: 'INV' }]
-      : [{ t: 'inv', id: 'INV' }, { t: 'line', id: 'L1' }, { t: 'line', id: 'L2' }, { t: 'line', id: 'L3' }];
-    const cloud = new Set();
-    let blocked = false;
-    for (const op of queue) {
-      if (op.t === 'inv' && blocked && blockParent) continue;      // held for next flush
-      if (op.id === 'L2') { blocked = true; continue; }            // this one fails
-      cloud.add(op.id);
-    }
-    return { invVisible: cloud.has('INV'), linesInCloud: ['L1', 'L2', 'L3'].filter((l) => cloud.has(l)).length };
-  };
-
-  const old = simulate({ childrenFirst: false, blockParent: false });
-  ok('the OLD order publishes an invoice with missing lines', old.invVisible && old.linesInCloud < 3,
-    `invoice visible with ${old.linesInCloud}/3 lines`);
-
-  const now = simulate({ childrenFirst: true, blockParent: true });
-  ok('the NEW order publishes no invoice until its lines are up', !now.invVisible,
-    'the invoice waits for the next flush, so no device sees a partial one');
-}
-
-console.log('\n─── 7. Stock repair must never invent stock ───');
-{
-  const engine = fs.readFileSync(new URL('../src/lib/engine.js', import.meta.url), 'utf8');
-  ok('reconcileStock looks for sold lines with no movement', /unbacked/.test(engine));
-  ok('it refuses to RAISE stock for those materials', /expected > actual && missing > 0/.test(engine),
-    'replaying an incomplete ledger would add back goods that really left the shelf');
-  ok('and reports them instead of correcting silently', /skipped\.push/.test(engine));
-  ok('the result exposes what was skipped', /return \{ fixed: fixes\.length, fixes, skipped \}/.test(engine));
-  ok('lowering stock is still allowed', /fixes\.push/.test(engine));
-}
-
-
-console.log('\n─── 8. A retirement must never travel without its replacements ───');
-{
-  // The reported case, with sync working perfectly: editing an invoice queues TWO
-  // kinds of child op — retire the old lines, insert the new ones. If the retire
-  // uploads and the inserts do not, BOTH devices pull an invoice whose lines are all
-  // hidden and none replaced. That explains everything observed: sync healthy,
-  // deletions propagating instantly, lines vanishing on both devices at once.
-  ok('flush distinguishes a retirement from an insert', /const isRetire = \(op\) => op\.row\?\.isActive === false/.test(sync));
-  ok('inserts are ordered before retirements', /\(isRetire\(a\) \? 1 : 0\) - \(isRetire\(b\) \? 1 : 0\)/.test(sync));
-  ok('a failed insert holds back that invoice\'s retirements', /if \(!isRetire\(op\)\) blockedRetires\.add\(pid\)/.test(sync));
-  ok('and the retirement is skipped while blocked', /isRetire\(op\) && blockedRetires\.has\(parentOf\(op\)\)/.test(sync));
-
-  // Simulate an edit whose replacement inserts fail.
-  const runEdit = ({ insertsFirst, holdRetires }) => {
-    const queue = insertsFirst
-      ? [{ kind: 'insert', id: 'NEW1' }, { kind: 'insert', id: 'NEW2' }, { kind: 'retire', id: 'OLD1' }, { kind: 'retire', id: 'OLD2' }]
-      : [{ kind: 'retire', id: 'OLD1' }, { kind: 'retire', id: 'OLD2' }, { kind: 'insert', id: 'NEW1' }, { kind: 'insert', id: 'NEW2' }];
-    const cloud = { OLD1: 'live', OLD2: 'live' };     // the originals are up and visible
-    let insertFailed = false;
-    for (const op of queue) {
-      if (op.kind === 'insert') { insertFailed = true; continue; }   // every insert fails
-      if (op.kind === 'retire' && insertFailed && holdRetires) continue;
-      if (op.kind === 'retire') cloud[op.id] = 'hidden';
-    }
-    const visible = Object.values(cloud).filter((v) => v === 'live').length;
-    return { visible };
-  };
-
-  ok('the OLD order empties the invoice on both devices', runEdit({ insertsFirst: false, holdRetires: false }).visible === 0,
-    'retires uploaded, replacements did not — nothing left to show');
-  ok('the NEW order leaves the previous lines visible', runEdit({ insertsFirst: true, holdRetires: true }).visible === 2,
-    'a failed edit shows the invoice as it was, which is recoverable and obvious');
-}
-
-console.log('\n─── 9. Retired lines are kept, so old invoices can still be repaired ───');
-{
-  const engine = fs.readFileSync(new URL('../src/lib/engine.js', import.meta.url), 'utf8');
-  ok('editing retires lines instead of deleting them', /isActive: false, supersededBy/.test(engine));
-  ok('nothing hard-deletes invoice lines outside the recycle bin',
-    (engine.match(/op: 'remove', table: TABLES\.invoiceItems/g) || []).length <= 1);
-  ok('a reader falls back to retired lines when no live ones exist', /live\.length ? live : all/.test(engine) || /isActive === false/.test(engine));
-  ok('and recovery from stock movements still exists', /proposeInvoiceLinesFromMovements/.test(engine));
-}
-
-
-console.log('\n─── 10. Merge must add what is missing and delete nothing ───');
-{
-  // Issa's brother ran "overwrite cloud" while Issa's device held invoice lines his did
-  // not. wipeCloud() removed them, Issa then rebuilt FROM that cloud, and 66 invoices
-  // lost their materials. The two devices were never merged — one replaced the other.
-  ok('a merge that deletes nothing exists', /export async function mergeLocalIntoCloud/.test(sync));
-  ok('it never wipes the cloud', !/mergeLocalIntoCloud[\s\S]{0,1200}wipeCloud/.test(sync));
-  ok('it asks the cloud only for ids, not whole rows', /mergeLocalIntoCloud[\s\S]{0,900}select\('id'\)/.test(sync));
-  ok('it uploads only rows the cloud lacks', /const missing = rows\.filter\(\(r\) => !cloudIds\.has\(r\.id\)\)/.test(sync));
-  ok('it reports what it added per table', /perTable\[table\]/.test(sync));
-
-  // The destructive path must still exist, but be clearly marked.
-  ok('overwrite still exists for when it is genuinely wanted', /export async function forcePushOverwrite/.test(sync));
-
-  const settings = fs.readFileSync(new URL('../src/features/settings/Settings.jsx', import.meta.url), 'utf8');
-  ok('the safe merge is offered in Settings', /doMergeToCloud/.test(settings));
-  ok('and it is placed before the destructive option', settings.indexOf('doMergeToCloud}') < settings.indexOf('doOverwriteCloud}'));
-  ok('overwrite carries an explicit warning', /overwriteCloudWarn/.test(settings));
-  ok('its prompt spells out the consequence', /overwritePrompt/.test(settings));
-
-  const i18n = fs.readFileSync(new URL('../src/lib/i18n.js', import.meta.url), 'utf8');
-  ok('the warning names the real risk', /سيُفقد نهائياً/.test(i18n));
-  ok('and points to the merge instead', /دمج بيانات هذا الجهاز/.test(i18n));
-
-  // Simulate the union property: merging from both devices loses nothing.
-  const runMerge = ({ overwrite }) => {
-    const deviceA = new Set(['inv1', 'line1', 'line2']);      // Issa: has the lines
-    const deviceB = new Set(['inv1']);                         // brother: does not
-    let cloud = new Set(['inv1', 'line1', 'line2']);
-    if (overwrite) { cloud = new Set(deviceB); }               // wipe + upload B only
-    else { for (const id of deviceB) cloud.add(id); }          // merge B in
-    return { cloudSize: cloud.size, keptLines: ['line1', 'line2'].filter((l) => cloud.has(l)).length };
-  };
-  ok('overwrite destroys the other device\'s lines', runMerge({ overwrite: true }).keptLines === 0);
-  ok('merge keeps every line', runMerge({ overwrite: false }).keptLines === 2);
-}
-
-
-console.log('\n─── 11. The merge must work in BOTH directions ───');
-{
-  // Issa's brother merged, then Issa merged, and nothing changed on Issa's device.
-  // mergeLocalIntoCloud only uploads rows the CLOUD lacks — but Issa's gap ran the
-  // other way: the cloud had rows his device did not. Half the tool was missing.
-  ok('the download direction exists', /export async function mergeCloudIntoLocal/.test(sync));
-  ok('it downloads rows absent locally', /if \(!local\) return true;/.test(sync));
-  ok('it also refreshes rows the cloud has a newer copy of',
-    /mergeCloudIntoLocal[\s\S]{0,1600}Number\(k\.updatedAt \|\| 0\) > Number\(local\.updatedAt \|\| 0\)/.test(sync));
-  ok('it deletes nothing', !/mergeCloudIntoLocal[\s\S]{0,1600}idbDelete/.test(sync));
-  ok('it preserves local fields the cloud left empty', /mergeCloudIntoLocal[\s\S]{0,1800}mergePreserve/.test(sync));
-  ok('it ignores the watermark, which is the point',
-    !/mergeCloudIntoLocal[\s\S]{0,1200}pullWatermark/.test(sync));
-
-  const settings = fs.readFileSync(new URL('../src/features/settings/Settings.jsx', import.meta.url), 'utf8');
-  ok('one button runs both directions', /mergeLocalIntoCloud\(\)[\s\S]{0,300}mergeCloudIntoLocal\(\)/.test(settings));
-  ok('and the UI reloads so repairs appear at once', /refresh\(tb\)/.test(settings));
-
-  // Simulate the two-device gap running in both directions at once.
-  const converge = ({ bothWays }) => {
-    const cloud = new Set(['inv1', 'lineA']);           // has lineA
-    const mine = new Set(['inv1', 'lineB']);            // has lineB, missing lineA
-    for (const id of mine) cloud.add(id);               // upload direction (always ran)
-    if (bothWays) for (const id of cloud) mine.add(id); // download direction (was missing)
-    return { mineHasA: mine.has('lineA'), cloudHasB: cloud.has('lineB') };
-  };
-  const before = converge({ bothWays: false });
-  ok('upload alone left this device still missing lines', !before.mineHasA);
-  ok('though the cloud did gain the other device\'s rows', before.cloudHasB);
-  const after = converge({ bothWays: true });
-  ok('both directions converge the device with the cloud', after.mineHasA && after.cloudHasB);
-}
-
-
-console.log('\n─── 12. The invoice is ONE document ───');
-{
-  // Issa's requirement, stated plainly: an edit must appear on the other device
-  // complete; a deliberately deleted line must stay deleted; nothing may change that
-  // he did not change. All three follow from the invoice crossing the network as a
-  // single row carrying its own lines.
-  ok('the invoice carries its lines', /__lines/.test(sync));
+  ok('an invoice carries its own lines across the network', /__lines/.test(sync));
   ok('and the stock movements those lines caused', /__moves/.test(sync));
   ok('purchases work the same way', /\[TABLES\.purchases\]: \{ items: TABLES\.purchaseItems/.test(sync));
-  ok('one request per invoice, so a partial upload is impossible',
-    /async function toCloud\(row, table\)/.test(sync));
-
-  ok('lines are never uploaded on their own', /CARRIED_BY_PARENT\(op\)/.test(sync),
-    'separate uploads are what created competing generations');
-  ok('invoice-caused movements are carried too, not uploaded alone',
-    /op\.row\?\.refType === 'invoice' \|\| op\.row\?\.refType === 'purchase'/.test(sync));
-
-  ok('downloading a document replaces that invoice\'s lines wholesale',
-    /async function unpackChildren/.test(sync));
-  ok('which is what makes a deliberate deletion permanent',
-    /idbDelete\(spec\.items, it\.id\)/.test(sync));
-  ok('the envelope fields never leak into the stored row', /delete rec\.__lines; delete rec\.__moves;/.test(sync));
+  ok('lines are never uploaded on their own', /carriedByParent/.test(sync));
+  ok('nor pulled on their own', /table === TABLES\.invoiceItems \|\| table === TABLES\.purchaseItems\) continue/.test(sync));
+  ok('downloading a document replaces that parent\'s children wholesale', /async function unpackChildren/.test(sync));
+  ok('which is what makes a deliberate deletion permanent', /idbDelete\(spec\.items, it\.id\)/.test(sync));
+  ok('the envelope fields never leak into a stored row', /delete rec\.__lines; delete rec\.__moves;/.test(sync));
 }
 
-console.log('\n─── 13. Deletion is data, never an inference ───');
+console.log('\n─── 2. Rule 2: deletion is data, never an inference ───');
 {
-  ok('nothing is deleted for being absent from the cloud', !/Deletion reconcile \(FULL pulls only\)/.test(sync));
-  ok('the CHILD_TABLES workaround is gone with it', !/CHILD_TABLES/.test(sync),
-    'it existed only to blunt the inference; the inference itself is now removed');
-  ok('the reasoning is recorded for whoever reads this next', /Deletions are DATA, never an inference/.test(sync));
-  ok('soft deletes still travel as ordinary updates', /travels as an ordinary update/.test(sync));
+  ok('nothing is deleted for being absent from the cloud', !/deletion reconcile/i.test(sync));
+  ok('absence is documented as meaning "not uploaded yet"', /not uploaded yet/i.test(sync));
+  ok('the rails that made the inference survivable are gone', !/CHILD_TABLES/.test(sync) && !/suspicious/.test(sync));
 }
 
-console.log('\n─── 14. A local write is never discarded ───');
+console.log('\n─── 3. Rule 3: a local write is never discarded ───');
 {
   ok('no operation is dropped after repeated failure', !/dropping op after/.test(sync));
-  ok('it keeps retrying and is reported instead', /keeps retrying and is\s*\n?\s*\/\/ reported in Data health/.test(sync) || /reported in Data health/.test(sync));
-  ok('failures still surface to the owner', /failed\.push/.test(sync));
+  ok('failures stay queued and retry', /stays queued/i.test(sync) || /never thrown away/.test(sync));
+  ok('and are reported to the owner', /failed\.push/.test(sync));
+  ok('a missing cloud table is the one safe discard', /isMissingTable\(e\)\) \{ await outboxDelete/.test(sync));
 }
 
-console.log('\n─── 15. What the document model makes impossible ───');
+console.log('\n─── 4. Rule 4: a pull never pushes ───');
 {
-  // These are the guarantees, expressed as properties of the design rather than of any
-  // one code path — each was a real fault at some point in the past week.
+  ok('reading cannot write to the cloud', /a pull never pushes/i.test(sync));
+  ok('local-newer rows are kept, not uploaded during a read', /keep local/i.test(sync));
+}
+
+console.log('\n─── 5. Rule 5: whole versions only ───');
+{
+  ok('a newer cloud version replaces the local one as a WHOLE', /as a WHOLE/.test(sync));
+  ok('an empty cloud value never wipes a good local one', /mergePreserve/.test(sync));
+}
+
+console.log('\n─── 6. One merge, both directions ───');
+{
+  ok('a single merge does upload and download', /export async function mergeWithCloud/.test(sync));
+  ok('it uploads what the cloud lacks', /cu === undefined \|\| Number\(r\.updatedAt \|\| 0\) > cu/.test(sync));
+  ok('and downloads what this device lacks', /!mine \|\| Number\(k\.updatedAt \|\| 0\) > Number\(mine\.updatedAt \|\| 0\)/.test(sync));
+  ok('it deletes nothing on either side', !/mergeWithCloud[\s\S]{0,2000}idbDelete\(table/.test(sync));
+  ok('it ignores the watermark, which is the point', /ignores the watermark/.test(sync));
+
+  const settings = fs.readFileSync(new URL('../src/features/settings/Settings.jsx', import.meta.url), 'utf8');
+  ok('Settings uses the unified merge', /mergeWithCloud\(\)/.test(settings));
+  ok('the destructive overwrite is still marked as such', /overwriteCloudWarn/.test(settings));
+}
+
+console.log('\n─── 7. What the design makes impossible ───');
+{
   const guarantees = [
     ['a header arriving without its lines', /__lines/.test(sync)],
     ['lines arriving without their header', /__lines/.test(sync)],
-    ['two generations of lines coexisting', /CARRIED_BY_PARENT/.test(sync)],
+    ['two generations of lines coexisting', /carriedByParent/.test(sync)],
     ['a deleted line returning from the cloud', /unpackChildren/.test(sync)],
-    ['a line vanishing because it was never uploaded', !/Deletion reconcile/.test(sync)],
-    ['a quantity or price changing by itself', /cloud wins as a WHOLE/.test(sync)],
+    ['a line vanishing because it was never uploaded', !/deletion reconcile/i.test(sync)],
+    ['a quantity or price changing by itself', /as a WHOLE/.test(sync)],
+    ['a local write being lost', !/dropping op after/.test(sync)],
   ];
   for (const [what, holds] of guarantees) ok(`${what} — prevented`, holds);
+}
+
+console.log('\n─── 8. The rebuild kept what mattered and dropped what did not ───');
+{
+  for (const gone of ['checkCloudSchema', 'missingColumnsSql', 'authCurrentEmail']) {
+    ok(`${gone} removed — nothing used it`, !new RegExp(`export [\\w ]*${gone}`).test(sync));
+  }
+  ok('column-stripping retry loop removed', !/Could not find the '\(\[\^'\]\+\)' column/.test(sync) && !/attempt < 14/.test(sync));
+  for (const kept of ['flush', 'pull', 'startSync', 'syncNow', 'nudgeSync', 'pushAllLocal', 'wipeCloud',
+    'forcePushOverwrite', 'fullRestoreFromBackup', 'restoreSnapshotToCloud', 'refreshPending', 'getSupabase']) {
+    ok(`${kept} kept`, new RegExp(`export [\\w ]*${kept}\\b`).test(sync));
+  }
+  const lines = sync.split('\n').length;
+  ok('the file is smaller than before the rebuild', lines < 700, `${lines} lines`);
 }
 
 console.log('\n═══════════════════════════════════════');

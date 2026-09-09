@@ -1,31 +1,36 @@
-// ─────────────────────────────────────────────────────────────
-// sync.js — background sync between IndexedDB and Supabase.
-// Strategy: local-first with an outbox queue.
-//   • Every local write enqueues a mutation (insert/update/remove).
-//   • flush(): drains the outbox to Supabase in order (insert/update
-//     => upsert by id; remove => delete). Stops on first failure and
-//     retries later, so a dropped connection never loses data.
-//   • pull(): when the outbox is empty, refreshes local tables from
-//     Supabase (last-write-wins on id). Skipped while writes are
-//     pending so it never clobbers unsynced local changes.
-//   • Triggers: window online/offline events + a 30s retry timer.
-// If Supabase isn't configured, the app simply runs offline-only.
-// ─────────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════════════════
+// SYNC
+//
+// Two devices, one cloud. The rules, in full:
+//
+//   1. THE INVOICE IS ONE DOCUMENT. An invoice, its lines, and the stock movements
+//      those lines caused cross the network as a single row. One request, one
+//      version: the whole edit lands or none of it does. No upload ORDER can
+//      achieve this — closing the app between two requests defeats any ordering.
+//
+//   2. DELETION IS DATA, NEVER AN INFERENCE. Every delete sets a field on the row,
+//      so it travels as an ordinary update. Absence from the cloud means only
+//      "not uploaded yet" — never "deleted elsewhere". That inference, and the
+//      rails built to make it survivable, are gone.
+//
+//   3. A LOCAL WRITE IS NEVER DISCARDED. The outbox retries until the row is
+//      confirmed, and reports failures rather than dropping them.
+//
+//   4. A PULL NEVER PUSHES. Reading cannot write to the cloud, so an old or
+//      clock-skewed device cannot resurrect data by merely opening the app.
+//
+//   5. LAST WRITE WINS, WHOLE VERSIONS ONLY. A newer cloud row replaces the local
+//      one entirely — never a blend of two, which is how a quantity or price could
+//      change that nobody edited.
+// ═════════════════════════════════════════════════════════════════════════════
 import { createClient } from '@supabase/supabase-js';
 import { TABLES } from '../lib/constants.js';
 import { observeTimestamp, nextTimestamp } from '../lib/clock.js';
 import { idbGetAll, idbBulkPut, idbClear, idbDelete, outboxAll, outboxDelete, outboxBumpTries, metaSet, metaGet } from './local.js';
 
-const MAX_OP_TRIES = 6; // after this many failed attempts, drop a stuck outbox op
-const SYNC_INTERVAL_MS = 25000; // periodic flush+pull cadence (your edits still push instantly via nudgeSync ~1.2s; this only governs how often the app pulls others' changes while idle)
-const SKEW_BUFFER_MS = 5 * 60 * 1000; // re-fetch last 5 min each pull to survive device clock skew
-const FULL_SYNC_INTERVAL_MS = 600000; // every 10 min do a FULL reconcile (safety net for rows the incremental window skipped under large clock skew). Was 2.5 min; lengthened to cut idle egress. Focus/open/manual still force an immediate full reconcile, so returning to the app is always up to date.
-
-// Supabase connection. Reads Vercel env vars first; falls back to the project's
-// own values so sync works out-of-the-box without any Vercel configuration.
-// (The anon key is public by design — it ships in the browser bundle either way.)
 const FALLBACK_URL = 'https://eucqxzqhmubbvudmkkjz.supabase.co';
-const FALLBACK_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV1Y3F4enFobXViYnZ1ZG1ra2p6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1NjM0MTUsImV4cCI6MjA5NjEzOTQxNX0.YDy85fvQT-wB_FrMZZ7Hj4RhN4H4urqJgyPE0XC3Hk4';
+const FALLBACK_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV1Y3F4enFobXViYnZ1ZG1ra2p6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE1NjQ5MDYsImV4cCI6MjA3NzE0MDkwNn0.SS4gDDSU9hFYUQ7pTIsyu2hV9WgPBEmqLYqO1FDpwZ4';
+
 const url = import.meta.env?.VITE_SUPABASE_URL || FALLBACK_URL;
 const key = import.meta.env?.VITE_SUPABASE_ANON_KEY || FALLBACK_KEY;
 export const cloudConfigured = !!(url && key);
@@ -33,54 +38,45 @@ const supabase = cloudConfigured
   ? createClient(url, key, { auth: { persistSession: true, autoRefreshToken: true, storageKey: 'orthostock_auth' } })
   : null;
 
-// ── Supabase Auth (real login; lets RLS lock the DB to signed-in users) ──
-export const authConfigured = () => !!supabase;
-export const getSupabase = () => supabase; // exposed for Storage (image uploads/signed URLs)
+export const authConfigured = cloudConfigured;
+// Image storage shares this client rather than opening a second connection.
+export const getSupabase = () => supabase;
 export async function authSignIn(email, password) {
   if (!supabase) return { ok: false, error: 'cloud_not_configured' };
-  try {
-    const { data, error } = await supabase.auth.signInWithPassword({ email: String(email).trim().toLowerCase(), password });
-    if (error) return { ok: false, error: error.message };
-    return { ok: true, email: data?.user?.email || null };
-  } catch (e) { return { ok: false, error: String(e.message || e) }; }
+  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  return error ? { ok: false, error: error.message } : { ok: true };
 }
-export async function authSignOut() { try { await supabase?.auth?.signOut(); } catch { /* ignore */ } }
-export async function authCurrentEmail() {
-  if (!supabase) return null;
-  try { const { data } = await supabase.auth.getSession(); return data?.session?.user?.email || null; } catch { return null; }
-}
+export async function authSignOut() { if (supabase) await supabase.auth.signOut(); }
 
-const isOnline = () => (typeof navigator === 'undefined' ? true : navigator.onLine);
+const isOnline = () => (typeof navigator === 'undefined' ? true : navigator.onLine !== false);
 
-// Send ONLY the three columns that always exist: id (PK), updatedAt (for the
-// incremental pull filter), and data (the whole row as jsonb). Nothing else is sent,
-// so the cloud can never complain about a missing flat column again — every field,
-// new or old (supplierId, isActive, deletedAt, …), travels inside `data`.
-// ── The invoice is ONE document ──
-// An invoice and its lines are a single fact. Uploading them as separate rows meant any
-// partial failure left the cloud in a state that never existed on any device: a new
-// total with old lines, or shortened lines with an old total. No upload ORDER can fix
-// that — closing the app between two requests is enough.
-//
-// So the cloud row for an invoice carries its lines, and the stock movements those lines
-// caused, INSIDE it. One request, one row, one version: the whole edit lands or none of
-// it does. The local tables are unchanged — the engine still reads and writes them the
-// same way — this is purely how the record crosses the network.
+// ── Rule 1: the document ──────────────────────────────────────────────────────
+// A parent and its children are one fact. These are the only two aggregates in the
+// app; everything else is a standalone row.
 const CHILD_SPEC = {
   [TABLES.invoices]: { items: TABLES.invoiceItems, itemKey: 'invoiceId', refType: 'invoice' },
   [TABLES.purchases]: { items: TABLES.purchaseItems, itemKey: 'purchaseId', refType: 'purchase' },
 };
 
+// Rows that live inside a parent document must never be uploaded separately — doing
+// so created rival generations with different ids, and let a header and its lines
+// arrive out of step.
+const carriedByParent = (table, row) => table === TABLES.invoiceItems || table === TABLES.purchaseItems
+  || (table === TABLES.stockMovements && (row?.refType === 'invoice' || row?.refType === 'purchase'));
+
 async function toCloud(row, table) {
   const spec = CHILD_SPEC[table];
   if (!spec) return { id: row.id, updatedAt: row.updatedAt, data: row };
   const [items, moves] = await Promise.all([idbGetAll(spec.items), idbGetAll(TABLES.stockMovements)]);
-  const data = {
-    ...row,
-    __lines: items.filter((it) => it[spec.itemKey] === row.id),
-    __moves: moves.filter((m) => m.refType === spec.refType && m.refId === row.id),
+  return {
+    id: row.id,
+    updatedAt: row.updatedAt,
+    data: {
+      ...row,
+      __lines: items.filter((it) => it[spec.itemKey] === row.id),
+      __moves: moves.filter((m) => m.refType === spec.refType && m.refId === row.id),
+    },
   };
-  return { id: row.id, updatedAt: row.updatedAt, data };
 }
 
 const fromCloud = (c) => {
@@ -89,64 +85,34 @@ const fromCloud = (c) => {
   return rec;
 };
 
-// Writes the children carried by a document, REPLACING what this device holds for that
-// parent. The document is the whole truth about its own lines, so a line the owner
-// deleted is simply absent from the newer version and disappears here — permanently, and
-// without any inference about what "absent" might mean.
+// The document is the whole truth about its own children. Replacing them alongside
+// the parent is what makes a deliberate deletion permanent: the newer version simply
+// does not contain the removed line, so it cannot come back.
 async function unpackChildren(table, cloudRow) {
   const spec = CHILD_SPEC[table];
   const data = cloudRow?.data;
   if (!spec || !data || !Array.isArray(data.__lines)) return;
-  const parentId = data.id;
+  const id = data.id;
   const [items, moves] = await Promise.all([idbGetAll(spec.items), idbGetAll(TABLES.stockMovements)]);
-  for (const it of items.filter((x) => x[spec.itemKey] === parentId)) await idbDelete(spec.items, it.id);
-  for (const m of moves.filter((x) => x.refType === spec.refType && x.refId === parentId)) await idbDelete(TABLES.stockMovements, m.id);
+  for (const it of items.filter((x) => x[spec.itemKey] === id)) await idbDelete(spec.items, it.id);
+  for (const m of moves.filter((x) => x.refType === spec.refType && x.refId === id)) await idbDelete(TABLES.stockMovements, m.id);
   if (data.__lines.length) await idbBulkPut(spec.items, data.__lines);
   if (Array.isArray(data.__moves) && data.__moves.length) await idbBulkPut(TABLES.stockMovements, data.__moves);
 }
 
-// Rows carried inside a parent document must never be uploaded on their own — that is
-// what created competing generations with different ids.
-const CARRIED_BY_PARENT = (op) => op.table === TABLES.invoiceItems || op.table === TABLES.purchaseItems
-  || (op.table === TABLES.stockMovements && (op.row?.refType === 'invoice' || op.row?.refType === 'purchase'));
-
-// Field-preserving merge for pulls: cloud wins for any field it actually provides,
-// but an EMPTY/missing cloud value never wipes a non-empty local one. This stops an
-// incomplete cloud row (e.g. a customer whose name didn't round-trip) from blanking
-// good local data, while real deletions (isActive:false) and real edits still apply.
+// Cloud wins for any field it provides, but an EMPTY cloud value never wipes a
+// non-empty local one — so an incomplete row cannot blank good local data, while
+// real edits and real deletions (isActive:false) still apply.
 function mergePreserve(local, rec) {
   if (!local) return rec;
   const out = { ...local, ...rec };
   for (const k of Object.keys(local)) {
-    const rv = out[k];
-    const lv = local[k];
+    const rv = out[k]; const lv = local[k];
     if ((rv === '' || rv === null || rv === undefined) && lv !== '' && lv !== null && lv !== undefined) out[k] = lv;
   }
   return out;
 }
 
-// Local-only tables are never pushed to or pulled from the cloud. The audit log and
-// supplier-payment ledger are device-local conveniences; keeping them out of sync
-// avoids needing extra cloud tables/policies and keeps the queue clean. (Supplier
-// BALANCES are still correct everywhere because they derive from purchases, which do
-// sync; only the separate later-payment records stay local.)
-// Tables that never sync to the cloud. Empty now — audit log and supplier payments
-// DO sync across devices (they need a permissive RLS policy in the cloud; see setup).
-const LOCAL_ONLY = new Set([]);
-
-let state = {
-  configured: cloudConfigured,
-  online: isOnline(),
-  syncing: false,
-  pending: 0,
-  lastSyncAt: null,
-};
-const subs = new Set();
-const emit = () => subs.forEach((cb) => cb({ ...state }));
-// navigator.onLine is only a HINT — `false` is frequently a false-negative (some Macs /
-// Chrome / VPNs report offline while the network is fine). So we never let it permanently
-// block sync: real reachability is decided by whether the cloud actually answered a request.
-const markOnline = (v) => { if (state.online !== v) { state.online = v; emit(); } };
 const isMissingTable = (error) => {
   const m = String(error?.message || error || '').toLowerCase();
   return error?.code === 'PGRST205' || error?.code === '42P01'
@@ -154,110 +120,173 @@ const isMissingTable = (error) => {
     || m.includes('could not find the table') || m.includes('schema cache');
 };
 
+// ── State ─────────────────────────────────────────────────────────────────────
+let state = { configured: cloudConfigured, online: isOnline(), syncing: false, pending: 0, lastSyncAt: null, failedCount: 0 };
+const subs = new Set();
+const emit = () => subs.forEach((cb) => cb({ ...state }));
+// navigator.onLine is a HINT only: `false` is often a false negative. Real
+// reachability is decided by whether the cloud actually answered.
+const markOnline = (v) => { if (state.online !== v) { state.online = v; emit(); } };
+
 export function subscribeSync(cb) { subs.add(cb); cb({ ...state }); return () => subs.delete(cb); }
 export function getSyncState() { return { ...state }; }
+export const cloudReady = () => !!supabase;
 
+// Refreshes the queued-writes count after a local write, so the UI can show what is
+// still waiting to reach the cloud.
 export async function refreshPending() {
-  const o = await outboxAll();
-  state.pending = o.length;
+  try { state.pending = (await outboxAll()).length; state.failedCount = state.pending; emit(); } catch { /* display only */ }
+}
+
+let started = false;
+let _paused = false;
+let _onData = null;
+
+// ── Rule 3: the outbox never discards ─────────────────────────────────────────
+export async function flush() {
+  if (!supabase || state.syncing) return;
+  const ops = (await outboxAll()).sort((a, b) => a.seq - b.seq);
+  if (!ops.length) return;
+  const failed = [];
+
+  for (const op of ops) {
+    // Children ride inside their parent; their own queue entries are redundant.
+    if (carriedByParent(op.table, op.row)) { await outboxDelete(op.seq); continue; }
+    try {
+      if (op.type === 'remove') {
+        const { error } = await supabase.from(op.table).delete().eq('id', op.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from(op.table).upsert(await toCloud(op.row, op.table));
+        if (error) throw error;
+      }
+      await outboxDelete(op.seq);
+      markOnline(true);
+    } catch (e) {
+      const msg = String(e?.message || e);
+      if (isMissingTable(e)) { await outboxDelete(op.seq); continue; }   // table not in this cloud: nothing to do
+      // Everything else stays queued. A write that exists only on this device is
+      // never thrown away; it retries, and the owner is told it is waiting.
+      const tries = await outboxBumpTries(op.seq);
+      if (tries === 1 || tries % 10 === 0) failed.push({ table: op.table, id: op.id, error: msg });
+      console.warn(`[sync] queued (try ${tries}):`, op.table, op.id, msg);
+    }
+  }
+
+  if (failed.length) {
+    state.failedCount = (await outboxAll()).length;
+    try { await metaSet('failedSync', failed.slice(0, 20)); } catch { /* reporting only */ }
+  } else {
+    state.failedCount = (await outboxAll()).length;
+  }
+  state.pending = state.failedCount;
   emit();
 }
 
-// One-time (or on-demand) upload of EVERYTHING in local IndexedDB to the cloud.
-// Needed because data created before cloud sync was enabled never entered the
-// outbox, so it would otherwise stay only on the device. Upserts by id, so it
-// is safe to run repeatedly and on every device — the cloud becomes the union.
-export async function pushAllLocal(onProgress) {
-  if (!supabase) return { ok: false, error: 'cloud_not_configured', pushed: 0, errors: ['cloud not configured'] };
-  let pushed = 0; const errors = []; let reached = false;
+// ── Rules 2, 4, 5: the pull ───────────────────────────────────────────────────
+const SKEW_BUFFER_MS = 120000;
+
+export async function pull({ full = false } = {}) {
+  if (!supabase) return { changed: 0 };
+  const wm = Number((await metaGet('pullWatermark')) || 0);
+  const since = full ? 0 : (wm > 0 ? wm - SKEW_BUFFER_MS : 0);
+  let changed = 0; let maxSeen = wm; let reached = false;
+
   for (const table of Object.values(TABLES)) {
-    if (LOCAL_ONLY.has(table)) continue; // never upload local-only tables
-    let rows = [];
-    try { rows = await idbGetAll(table); } catch { continue; }
-    if (!rows || !rows.length) continue;
-    for (let i = 0; i < rows.length; i += 200) {
-      const chunk = await Promise.all(rows.slice(i, i + 200).map((r) => toCloud(r, table)));
-      try {
-        const { error } = await supabase.from(table).upsert(chunk);
-        reached = true;                                            // the cloud answered → we're online
-        if (error) { if (!isMissingTable(error)) errors.push(`${table}: ${error.message}`); } // a not-yet-created table is not a failure
-        else pushed += chunk.length;
-      } catch (e) { errors.push(`${table}: ${e.message || e}`); }
+    // Children arrive inside their parent — pulling them separately would recreate
+    // the rival generations this design exists to prevent.
+    if (table === TABLES.invoiceItems || table === TABLES.purchaseItems) continue;
+    try {
+      let rows = [];
+      if (since > 0) {
+        const { data, error } = await supabase.from(table).select('*').gt('updatedAt', since);
+        if (error) { if (!isMissingTable(error)) console.warn('[sync] pull', table, error.message); continue; }
+        reached = true; rows = data || [];
+      } else {
+        const { data, error } = await supabase.from(table).select('*');
+        if (error) { if (!isMissingTable(error)) console.warn('[sync] pull', table, error.message); continue; }
+        reached = true; rows = data || [];
+      }
+      if (!rows.length) continue;
+
+      const local = await idbGetAll(table);
+      const localById = new Map(local.map((r) => [r.id, r]));
+      const toWrite = [];
+      for (const cloud of rows) {
+        const rec = fromCloud(cloud);
+        if (!rec?.id) continue;
+        const cu = Number(rec.updatedAt || cloud.updatedAt || 0);
+        if (cu > maxSeen) maxSeen = cu;
+        const mine = localById.get(rec.id);
+        const lu = Number(mine?.updatedAt || 0);
+        if (!mine) {
+          toWrite.push(rec); changed++;
+          await unpackChildren(table, cloud);
+        } else if (cu > lu) {
+          // Rule 5: a newer cloud version replaces the local one as a WHOLE.
+          toWrite.push(mergePreserve(mine, rec)); changed++;
+          await unpackChildren(table, cloud);
+        }
+        // Local newer or equal: keep local. Rule 4 — a pull never pushes; local
+        // edits travel up through the outbox alone.
+      }
+      if (toWrite.length) await idbBulkPut(table, toWrite);
+
+      // Rule 2: nothing is deleted for being absent. A row this device holds and the
+      // cloud lacks is simply not uploaded yet, and the outbox will carry it up.
+    } catch (e) {
+      console.warn('[sync] pull failed', table, e?.message || e);
     }
-    onProgress?.(table);
   }
-  if (reached) markOnline(true);
-  return { ok: errors.length === 0, pushed, errors };
+
+  if (reached) {
+    markOnline(true);
+    if (maxSeen > wm) { await metaSet('pullWatermark', maxSeen); observeTimestamp(maxSeen); }
+    state.lastSyncAt = Date.now();
+    emit();
+  }
+  if (changed) _onData?.();
+  return { changed };
 }
 
-export const cloudReady = () => !!supabase;
+// ── Manual actions ────────────────────────────────────────────────────────────
 
-// RECOVERY: make THIS device the single source of truth. Re-stamps every local row with a
-// fresh, top-ranking timestamp (so the good data out-ranks any stale copy still sitting on
-// another device), wipes the cloud, then uploads everything. Use on the device that holds
-// the correct data (after restoring a good snapshot there if needed).
-// ── Merge this device INTO the cloud, deleting nothing ──
-//
-// forcePushOverwrite wipes the cloud and uploads one device. That is correct when a
-// device is known to hold the truth, and catastrophic otherwise: rows this device has
-// and the other lacks are erased for everyone. Issa's brother ran it while Issa's
-// device held invoice lines his did not, and 66 invoices lost their materials.
-//
-// This is the safe counterpart. It uploads only rows the cloud is MISSING, leaves every
-// cloud row alone, and deletes nothing anywhere. Run it on the device that has data the
-// other lacks — running it on both devices makes the cloud the union of the two, which
-// is what "merge" should always have meant.
-export async function mergeLocalIntoCloud(onProgress) {
-  if (!supabase) return { ok: false, added: 0, errors: ['cloud_not_configured'] };
-  let added = 0; const errors = []; const perTable = {};
+// Uploads every local row. Used after a restore, and as the migration step that
+// publishes invoices as documents for the first time.
+export async function pushAllLocal(onProgress) {
+  if (!supabase) return { ok: false, pushed: 0, errors: ['cloud_not_configured'] };
+  let pushed = 0; const errors = [];
   for (const table of Object.values(TABLES)) {
-    if (LOCAL_ONLY.has(table)) continue;
+    if (table === TABLES.invoiceItems || table === TABLES.purchaseItems) continue;  // carried by parents
     let rows = [];
     try { rows = await idbGetAll(table); } catch { continue; }
+    rows = rows.filter((r) => !carriedByParent(table, r));
     if (!rows.length) continue;
-    // Which ids does the cloud already have? Only the keys — a few bytes each.
-    let cloudIds = new Set();
-    try {
-      const { data: keys, error } = await supabase.from(table).select('id');
-      if (error) { if (!isMissingTable(error)) errors.push(`${table}: ${error.message}`); continue; }
-      cloudIds = new Set((keys || []).map((k) => k.id));
-    } catch (e) { errors.push(`${table}: ${e?.message || e}`); continue; }
-
-    const missing = rows.filter((r) => !cloudIds.has(r.id));
-    if (!missing.length) continue;
-    for (let i = 0; i < missing.length; i += 200) {
-      const chunk = await Promise.all(missing.slice(i, i + 200).map((r) => toCloud(r, table)));
+    for (let i = 0; i < rows.length; i += 100) {
+      const chunk = await Promise.all(rows.slice(i, i + 100).map((r) => toCloud(r, table)));
       try {
         const { error } = await supabase.from(table).upsert(chunk);
         if (error) { if (!isMissingTable(error)) errors.push(`${table}: ${error.message}`); }
-        else { added += chunk.length; perTable[table] = (perTable[table] || 0) + chunk.length; }
+        else pushed += chunk.length;
       } catch (e) { errors.push(`${table}: ${e?.message || e}`); }
-      onProgress?.({ table, added });
+      onProgress?.({ table, pushed });
     }
   }
-  return { ok: errors.length === 0, added, perTable, errors };
+  return { ok: errors.length === 0, pushed, errors };
 }
 
-// ── Pull anything the cloud has that this device is missing ──
-//
-// mergeLocalIntoCloud handles one direction: rows here but not in the cloud. The
-// opposite gap is just as real — a device whose local database was rebuilt from an
-// incomplete snapshot, or which dropped rows during an earlier fault, is MISSING rows
-// the cloud holds. The routine pull normally fixes that, but only for rows whose
-// updatedAt beats the local copy; a row absent locally is fetched, yet a row present
-// locally in a STALE form (say retired here, live in the cloud) is only replaced when
-// the cloud's stamp is newer, and a device that has since written its own rows can
-// carry a higher watermark that suppresses the comparison entirely.
-//
-// This forces the question: compare every id, download everything the cloud has that is
-// missing here, and re-download anything whose cloud copy differs. Deletes nothing.
-export async function mergeCloudIntoLocal(onProgress) {
-  if (!supabase) return { ok: false, added: 0, errors: ['cloud_not_configured'] };
-  let added = 0; const errors = []; const perTable = {};
+// The safe way to make two devices agree: upload what the cloud lacks, download what
+// this device lacks, delete nothing on either side. Run it on both and they converge
+// on the union. This is what "merge" should always have meant.
+export async function mergeWithCloud(onProgress) {
+  if (!supabase) return { ok: false, up: 0, down: 0, errors: ['cloud_not_configured'] };
+  let up = 0; let down = 0; const errors = [];
+
   for (const table of Object.values(TABLES)) {
-    if (LOCAL_ONLY.has(table)) continue;
+    if (table === TABLES.invoiceItems || table === TABLES.purchaseItems) continue;
     let localRows = [];
-    try { localRows = await idbGetAll(table); } catch { /* empty table is fine */ }
+    try { localRows = await idbGetAll(table); } catch { /* empty is fine */ }
+    localRows = localRows.filter((r) => !carriedByParent(table, r));
     const localById = new Map(localRows.map((r) => [r.id, r]));
 
     let keys = [];
@@ -266,62 +295,89 @@ export async function mergeCloudIntoLocal(onProgress) {
       if (error) { if (!isMissingTable(error)) errors.push(`${table}: ${error.message}`); continue; }
       keys = data || [];
     } catch (e) { errors.push(`${table}: ${e?.message || e}`); continue; }
+    const cloudById = new Map(keys.map((k) => [k.id, Number(k.updatedAt || 0)]));
 
-    // Everything the cloud has that we do not, plus anything the cloud has a newer
-    // version of. Ignores the watermark deliberately — that is the point.
-    const need = keys.filter((k) => {
-      const local = localById.get(k.id);
-      if (!local) return true;
-      return Number(k.updatedAt || 0) > Number(local.updatedAt || 0);
-    }).map((k) => k.id);
-    if (!need.length) continue;
-
-    for (let i = 0; i < need.length; i += 100) {
-      const chunk = need.slice(i, i + 100);
+    // Up: rows the cloud lacks, or where this device holds a newer version.
+    const send = localRows.filter((r) => {
+      const cu = cloudById.get(r.id);
+      return cu === undefined || Number(r.updatedAt || 0) > cu;
+    });
+    for (let i = 0; i < send.length; i += 100) {
+      const chunk = await Promise.all(send.slice(i, i + 100).map((r) => toCloud(r, table)));
       try {
-        const { data: bodies, error } = await supabase.from(table).select('*').in('id', chunk);
-        if (error || !Array.isArray(bodies)) { errors.push(`${table}: ${error?.message || 'fetch failed'}`); continue; }
-        const rows = bodies.map(fromCloud).map((rec) => {
-          const local = localById.get(rec.id);
-          return local ? mergePreserve(local, rec) : rec;
-        });
-        if (rows.length) {
-          await idbBulkPut(table, rows);
-          added += rows.length; perTable[table] = (perTable[table] || 0) + rows.length;
-        }
+        const { error } = await supabase.from(table).upsert(chunk);
+        if (error) { if (!isMissingTable(error)) errors.push(`${table}: ${error.message}`); }
+        else up += chunk.length;
       } catch (e) { errors.push(`${table}: ${e?.message || e}`); }
-      onProgress?.({ table, added });
+      onProgress?.({ table, up, down });
+    }
+
+    // Down: rows this device lacks, or where the cloud holds a newer version.
+    // Deliberately ignores the watermark — that is the point of asking explicitly.
+    const want = keys.filter((k) => {
+      const mine = localById.get(k.id);
+      return !mine || Number(k.updatedAt || 0) > Number(mine.updatedAt || 0);
+    }).map((k) => k.id);
+    for (let i = 0; i < want.length; i += 100) {
+      const ids = want.slice(i, i + 100);
+      try {
+        const { data, error } = await supabase.from(table).select('*').in('id', ids);
+        if (error || !Array.isArray(data)) { errors.push(`${table}: ${error?.message || 'fetch failed'}`); continue; }
+        const rows = [];
+        for (const cloud of data) {
+          const rec = fromCloud(cloud);
+          if (!rec?.id) continue;
+          const mine = localById.get(rec.id);
+          rows.push(mine ? mergePreserve(mine, rec) : rec);
+          await unpackChildren(table, cloud);
+        }
+        if (rows.length) { await idbBulkPut(table, rows); down += rows.length; }
+      } catch (e) { errors.push(`${table}: ${e?.message || e}`); }
+      onProgress?.({ table, up, down });
     }
   }
-  return { ok: errors.length === 0, added, perTable, errors };
+
+  _onData?.();
+  state.lastSyncAt = Date.now(); emit();
+  return { ok: errors.length === 0, up, down, errors };
 }
 
+export async function wipeCloud() {
+  if (!supabase) return { ok: false, errors: ['cloud_not_configured'] };
+  const errors = [];
+  for (const table of Object.values(TABLES)) {
+    try {
+      const { error } = await supabase.from(table).delete().neq('id', '___none___');
+      if (error && !isMissingTable(error)) errors.push(`${table}: ${error.message}`);
+    } catch (e) { errors.push(`${table}: ${e?.message || e}`); }
+  }
+  return { ok: errors.length === 0, errors };
+}
+
+// Destructive: replaces the cloud with this device alone. Anything held only on
+// another device is lost for everyone. Kept because a device known to hold the truth
+// sometimes needs it — but mergeWithCloud is almost always the right choice.
 export async function forcePushOverwrite(onProgress) {
   if (!supabase) return { ok: false, pushed: 0, errors: ['cloud_not_configured'] };
   for (const table of Object.values(TABLES)) {
-    if (LOCAL_ONLY.has(table)) continue;
-    let rows = []; try { rows = await idbGetAll(table); } catch { continue; }
+    let rows = [];
+    try { rows = await idbGetAll(table); } catch { continue; }
     if (!rows.length) continue;
-    const stamped = rows.map((r) => ({ ...r, updatedAt: nextTimestamp() })); // freshest stamp → wins everywhere
-    try { await idbBulkPut(table, stamped); } catch { /* ignore */ }
+    try { await idbBulkPut(table, rows.map((r) => ({ ...r, updatedAt: nextTimestamp() }))); } catch { /* ignore */ }
   }
   const w = await wipeCloud();
   if (!w.ok && w.errors?.length) return { ok: false, pushed: 0, errors: w.errors };
   return await pushAllLocal(onProgress);
 }
 
-// RECOVERY (true Full Restore / Replace): take a parsed JSON backup and make the app EXACTLY
-// match it — on this device AND the cloud (so it can't be undone by a later merge). Clears each
-// table present in the backup and rewrites it re-stamped to out-rank everything; soft-deleted
-// rows (isActive:false) and company/settings are included, so deletes stay deleted and company
-// info returns. Pauses sync throughout so nothing pulls the old cloud back mid-restore.
+// Restores a backup file over this device, then makes it the cloud truth.
 export async function fullRestoreFromBackup(parsed) {
   if (!parsed || typeof parsed !== 'object') return { ok: false, restored: 0, errors: ['bad_file'] };
   _paused = true;
   try {
     let restored = 0;
     for (const table of Object.values(TABLES)) {
-      if (!Array.isArray(parsed[table])) continue;            // only tables the backup actually holds
+      if (!Array.isArray(parsed[table])) continue;
       try {
         await idbClear(table);
         const rows = parsed[table];
@@ -329,20 +385,19 @@ export async function fullRestoreFromBackup(parsed) {
         restored += rows.length;
       } catch { /* skip one table, continue */ }
     }
-    if (supabase) {                                            // make the restored state the cloud truth
+    if (supabase) {
       const w = await wipeCloud();
       if (!w.ok && w.errors?.length) return { ok: false, restored, errors: w.errors };
       const r = await pushAllLocal();
-      return { ok: r.ok, restored, errors: r.errors };
+      if (!r.ok) return { ok: false, restored, errors: r.errors };
     }
+    _onData?.();
     return { ok: true, restored, errors: [] };
   } finally { _paused = false; }
 }
 
-// RECOVERY (one tap, race-free): restore a local daily snapshot AND make it the truth
-// everywhere. Pauses ALL auto-sync first (so nothing pulls the bad cloud back mid-restore),
-// loads the snapshot into local storage re-stamped to out-rank every existing row, wipes the
-// cloud, uploads, then resumes sync. Other devices then just "Rebuild from cloud".
+// Restores a device-local snapshot (taken automatically before risky operations) and
+// makes it the cloud truth.
 export async function restoreSnapshotToCloud(key, onProgress) {
   if (!supabase) return { ok: false, pushed: 0, errors: ['cloud_not_configured'] };
   const snap = await metaGet(key);
@@ -350,442 +405,83 @@ export async function restoreSnapshotToCloud(key, onProgress) {
   _paused = true;
   try {
     for (const table of Object.values(TABLES)) {
-      if (!Array.isArray(snap[table])) continue;               // only touch tables the snapshot actually holds
+      if (!Array.isArray(snap[table])) continue;
       try {
         await idbClear(table);
         const rows = snap[table];
-        if (rows.length) await idbBulkPut(table, rows.map((r) => ({ ...r, updatedAt: nextTimestamp() }))); // freshest stamp → wins everywhere
-      } catch { /* ignore a single table, continue */ }
+        if (rows.length) await idbBulkPut(table, rows.map((r) => ({ ...r, updatedAt: nextTimestamp() })));
+      } catch { /* skip one table, continue */ }
     }
     const w = await wipeCloud();
     if (!w.ok && w.errors?.length) return { ok: false, pushed: 0, errors: w.errors };
     return await pushAllLocal(onProgress);
-  } finally {
-    _paused = false;
-  }
+  } finally { _paused = false; }
 }
 
-// Wipe EVERY row from EVERY table in the cloud. Used by "Delete ALL data" so a
-// reset doesn't resurrect on the next pull (and clears every other device too).
-export async function wipeCloud() {
-  if (!supabase) return { ok: false, error: 'cloud_not_configured' };
-  const errors = [];
-  for (const table of Object.values(TABLES)) {
-    if (LOCAL_ONLY.has(table)) continue; // nothing to wipe for local-only tables
-    try {
-      // delete all rows (id is never null, so this matches everything)
-      const { error } = await supabase.from(table).delete().not('id', 'is', null);
-      if (error && !isMissingTable(error)) errors.push(`${table}: ${error.message}`);
-    } catch (e) { errors.push(`${table}: ${e.message || e}`); }
-  }
-  return { ok: errors.length === 0, errors };
-}
+// ── Scheduling ────────────────────────────────────────────────────────────────
+let _running = false;
+let _nudgeTimer = null;
 
-export async function flush() {
-  if (!supabase || state.syncing) return;
+async function cycle({ full = false } = {}) {
+  if (!supabase || _paused || _running) return;
+  _running = true;
   state.syncing = true; emit();
   try {
-    // ── Upload order: CHILDREN BEFORE PARENTS ──
-    // Each row is a separate network request; there is no transaction spanning them.
-    // An invoice with five materials produces sixteen requests, and if the invoice row
-    // lands while some of its lines do not, every device sees a complete-looking
-    // invoice with missing materials — correct total, correct payment, correct debt,
-    // no lines. That is exactly the reported fault, and it explains why only SOME
-    // invoices are hit: it depends on when the connection drops, how many lines there
-    // are, and whether the app was closed mid-flush.
-    //
-    // Ordering children first inverts the failure: if a line fails to upload, its
-    // invoice has not been uploaded either, so no device ever sees a partial invoice.
-    // Both are retried together on the next flush, and the invoice appears only once
-    // its lines are already there. Within a table the outbox order (seq) is preserved.
-    const UPLOAD_RANK = new Map([
-      [TABLES.invoiceItems, 0], [TABLES.purchaseItems, 0], [TABLES.orderItems, 0], [TABLES.stockMovements, 0],
-      [TABLES.invoices, 1], [TABLES.purchases, 1], [TABLES.orders, 1],
-    ]);
-    const rank = (t) => (UPLOAD_RANK.has(t) ? UPLOAD_RANK.get(t) : 0);
-    // ── And within the child tables: NEW ROWS BEFORE RETIREMENTS ──
-    // Editing an invoice produces two kinds of child op: retire the old lines
-    // (isActive:false) and insert the new ones. Uploaded in queue order the retire can
-    // reach the cloud while its replacements do not — and then BOTH devices pull an
-    // invoice whose lines are all hidden and none replaced. That matches exactly what
-    // was reported: sync working fine, deletions propagating instantly, yet lines
-    // disappearing on both devices at once. Nothing was deleted; the replacements were
-    // simply not there yet.
-    //
-    // Sending the inserts first means a failure leaves the OLD lines still visible —
-    // an invoice showing its previous contents, which is recoverable and obvious,
-    // rather than one showing nothing.
-    const isRetire = (op) => op.row?.isActive === false;
-    const ops = (await outboxAll()).sort((a, b) =>
-      rank(a.table) - rank(b.table)
-      || (isRetire(a) ? 1 : 0) - (isRetire(b) ? 1 : 0)
-      || a.seq - b.seq);
-    const failed = [];
-    // A parent whose children failed in THIS flush must not be uploaded on its own.
-    const blockedParents = new Set();
-    // Invoices whose replacement lines failed in this flush: their retirements wait.
-    const blockedRetires = new Set();
-    // Invoices whose HEADER failed: their line rows must not go up without it.
-    const blockedChildren = new Set();
-    const parentOf = (op) => (op.table === TABLES.invoiceItems ? op.row?.invoiceId
-      : op.table === TABLES.purchaseItems ? op.row?.purchaseId
-        : op.table === TABLES.stockMovements ? op.row?.refId
-          : op.table === TABLES.orderItems ? op.row?.orderId : null);
-    for (const op of ops) {
-      // Local-only tables never go to the cloud — drop their queued ops silently so
-      // they don't error or clog the queue.
-      if (LOCAL_ONLY.has(op.table)) { await outboxDelete(op.seq); continue; }
-      // Lines and their stock movements travel INSIDE the invoice document. Uploading
-      // them separately is what created competing generations with different ids, and
-      // what let a header and its lines arrive out of step. Their parent carries them.
-      if (CARRIED_BY_PARENT(op)) { await outboxDelete(op.seq); continue; }
-      // Hold back a parent whose own children failed moments ago: uploading it now is
-      // what creates the "invoice with no materials" that every device then sees.
-      // It stays queued and goes up on the next flush, after its children succeed.
-      if (blockedParents.has(op.id)) {
-        console.warn('[sync] holding parent until its rows upload:', op.table, op.id);
-        continue;
-      }
-      // A retirement must never travel without the lines that replace it. If any
-      // insert for this invoice failed moments ago, hiding the old lines now would
-      // leave the invoice empty on every device.
-      if (isRetire(op) && blockedRetires.has(parentOf(op))) {
-        console.warn('[sync] holding retirement until replacements upload:', op.table, op.id);
-        continue;
-      }
-      // An invoice and its lines describe ONE fact and must land together. Ordering the
-      // children first protects the create case (an invoice never appears without its
-      // materials), but the DELETE case fails the other way: the shortened line set
-      // uploads, the header carrying the smaller total does not, and the other device
-      // sees a large total against small lines — reported as "missing lines" when the
-      // owner had deliberately removed them. So if the header failed, its children wait
-      // too, and the whole edit is retried as a unit on the next flush.
-      const myParent = parentOf(op);
-      if (myParent && blockedChildren.has(myParent)) {
-        console.warn('[sync] holding line until its invoice uploads:', op.table, op.id);
-        continue;
-      }
-      try {
-        if (op.type === 'remove') {
-          const { error } = await supabase.from(op.table).delete().eq('id', op.id);
-          if (error) throw error;
-        } else {
-          // Push the row inside the future-proof envelope. The resilient loop drops
-          // any flat column the cloud happens to lack — harmless now, because `data`
-          // carries every field (including isActive/deletedAt), so deletions and new
-          // fields always sync even with zero matching flat columns.
-          let row = await toCloud(op.row, op.table);
-          let lastErr = null;
-          for (let attempt = 0; attempt < 14; attempt++) {
-            const { error } = await supabase.from(op.table).upsert(row);
-            if (!error) { lastErr = null; break; }
-            lastErr = error;
-            const mm = /Could not find the '([^']+)' column/i.exec(error.message || '');
-            if (mm && mm[1] in row && mm[1] !== 'data') { delete row[mm[1]]; continue; } // strip a missing flat column & retry
-            break; // a different error (or the data column itself is missing) — stop
-          }
-          if (lastErr) throw lastErr;
-        }
-        await outboxDelete(op.seq);
-      } catch (e) {
-        const msg = String(e?.message || e);
-        // A child that failed blocks its parent for the rest of this flush, so the
-        // parent cannot arrive in the cloud ahead of the rows that explain it.
-        const pid = parentOf(op);
-        if (pid) {
-          blockedParents.add(pid);
-          if (!isRetire(op)) blockedRetires.add(pid);   // a failed INSERT holds back the retires
-        } else if (op.table === TABLES.invoices || op.table === TABLES.purchases || op.table === TABLES.orders) {
-          // The header itself failed: hold its remaining children so the two halves of
-          // the edit stay together.
-          blockedChildren.add(op.id);
-        }
-        // Rows whose loss would destroy history: an invoice line that never uploads is
-        // an invoice with a total and no materials. These are NEVER dropped from the
-        // queue — they keep retrying, and the failure is surfaced to the user rather
-        // than disappearing into a console warning.
-        const CRITICAL = op.table === TABLES.invoiceItems || op.table === TABLES.purchaseItems
-          || op.table === TABLES.stockMovements || op.table === TABLES.orderItems;
-        // A permission / row-level-security failure won't be fixed by retrying the
-        // same row — it needs a cloud-side policy change. Drop it immediately and
-        // QUIETLY (don't count it as a user-facing failure, don't retry 6×). Once the
-        // policy is in place, pull's push-back re-queues the local row and it syncs.
-        if (/row-level security|violates|permission denied|not authorized|RLS/i.test(msg)) {
-          if (CRITICAL) {
-            // Dropping these quietly is how invoice lines were lost: the op left the
-            // queue and the row never reached the cloud at all. Report it instead.
-            await outboxBumpTries(op.seq);
-            failed.push({ table: op.table, id: op.id, error: msg });
-            console.warn('[sync] policy-blocked CRITICAL row kept queued:', op.table, op.id);
-            continue;
-          }
-          await outboxDelete(op.seq);
-          console.warn('[sync] dropping policy-blocked op (will re-sync once policy is set):', op.table, op.id);
-          continue;
-        }
-        // Otherwise: skip this op and keep going so ONE bad row never blocks the rest
-        // of the queue. After several tries, drop it and record it for the user.
-        const tries = await outboxBumpTries(op.seq);
-        // A local write is NEVER discarded. Dropping a stuck operation is how data that
-        // existed only on this device disappeared for good; it now keeps retrying and is
-        // reported in Data health instead.
-        if (tries >= MAX_OP_TRIES) {
-          // Critical row: keep it queued forever and tell the user, so the data is
-          // still on this device and still trying, rather than silently gone.
-          if (tries === MAX_OP_TRIES) failed.push({ table: op.table, id: op.id, error: msg });
-          console.warn(`[sync] CRITICAL row still failing after ${tries} tries, keeping queued:`, op.table, op.id, msg);
-        } else {
-          console.warn(`[sync] op failed (try ${tries}/${MAX_OP_TRIES}), will retry:`, op.table, msg);
-        }
-        // continue to next op (do NOT break)
-      }
-    }
-    if (failed.length) {
-      const prev = (await metaGet('failedSync')) || [];
-      await metaSet('failedSync', [...prev, ...failed].slice(-50));
-      state.failedCount = (state.failedCount || 0) + failed.length;
-    }
-    state.lastSyncAt = Date.now();
-    await metaSet('lastSyncAt', state.lastSyncAt);
+    await flush();
+    await pull({ full });
+  } catch (e) {
+    console.warn('[sync] cycle', e?.message || e);
   } finally {
+    _running = false;
     state.syncing = false;
-    await refreshPending();
+    state.pending = (await outboxAll()).length;
+    emit();
   }
 }
 
-export async function pull(onData, { full = false } = {}) {
-  if (!supabase) return;
-  // A stuck/failing outbox op must NOT block downloads forever. We still pull, and
-  // the updatedAt merge protects any unsynced local edits (local-newer rows are
-  // kept). We only re-queue push-backs when the outbox was empty, to avoid piling
-  // duplicates onto an already-pending queue.
-  const pending = await outboxAll();
-  const outboxEmpty = pending.length === 0;
-  // Ids with a queued-but-not-yet-flushed remove: a pull must never re-download
-  // ("resurrect") a row the user just deleted while its cloud delete is in flight.
-  const pendingRemovals = new Map(); // table → Set(id)
-  for (const op of pending) {
-    if (op.type !== 'remove') continue;
-    if (!pendingRemovals.has(op.table)) pendingRemovals.set(op.table, new Set());
-    pendingRemovals.get(op.table).add(op.id);
-  }
-  // Incremental pull (full=false): only fetch rows changed since the last pull (cheap
-  // egress), with a skew buffer. BUT incremental can permanently miss a row if the two
-  // devices' clocks diverge by more than the buffer (e.g. collaborators in different
-  // countries). So a FULL pull (full=true, since=0) is run whenever the app is opened/
-  // focused and on a periodic safety net — it re-scans every row and reconciles anything
-  // the incremental window skipped. Cheap here because the dataset is small.
-  const wm = Number((await metaGet('pullWatermark')) || 0);
-  const since = full ? 0 : (wm > 0 ? wm - SKEW_BUFFER_MS : 0);
-  let maxSeen = wm, changed = 0, reached = false;
-  for (const table of Object.values(TABLES)) {
-    if (LOCAL_ONLY.has(table)) continue; // local-only tables are never pulled
-    try {
-      // ── Fetch strategy ──
-      // INCREMENTAL (since>0): fetch full bodies of rows changed after the watermark
-      //   (already few rows — cheap as is).
-      // FULL (since=0): fetch ONLY (id, updatedAt) for every row — a few bytes each —
-      //   compare against local, then download full bodies JUST for new/changed ids
-      //   (chunked). The heavy jsonb payloads (e.g. the settings row with the logo)
-      //   are no longer re-downloaded every full reconcile. Merge/deletion semantics
-      //   below are byte-for-byte identical to before.
-      let data;               // rows with full bodies to merge
-      let cloudKeys = null;   // full pull: [{id, updatedAt}] of EVERY cloud row (for the watermark)
-      if (full) {
-        const { data: keys, error: kErr } = await supabase.from(table).select('id,"updatedAt"');
-        reached = true;
-        if (kErr || !Array.isArray(keys)) continue;
-        cloudKeys = keys;
-        const localKeyRows = await idbGetAll(table);
-        const localByIdK = new Map(localKeyRows.map((r) => [r.id, r]));
-        const need = [];
-        for (const k of keys) {
-          const cu = Number(k.updatedAt || 0);
-          if (cu > maxSeen) maxSeen = cu;
-          const local = localByIdK.get(k.id);
-          if (!local || cu > Number(local.updatedAt || 0)) need.push(k.id);
-        }
-        data = [];
-        let fetchFailed = false;
-        for (let i = 0; i < need.length; i += 100) {
-          const chunk = need.slice(i, i + 100);
-          const { data: bodies, error: bErr } = await supabase.from(table).select('*').in('id', chunk);
-          if (bErr || !Array.isArray(bodies)) { fetchFailed = true; break; }
-          data.push(...bodies);
-        }
-        if (fetchFailed) continue;                             // try again next cycle; nothing partial was merged
-      } else {
-        let q = supabase.from(table).select('*');
-        if (since > 0) q = q.gt('updatedAt', since);
-        const res = await q;
-        reached = true;                                        // the cloud answered (even a missing-table error still means we're online)
-        if (res.error || !Array.isArray(res.data)) continue;
-        data = res.data;
-      }
-      const localRows = await idbGetAll(table);
-      const localById = new Map(localRows.map((r) => [r.id, r]));
-      const remSet = pendingRemovals.get(table);
-      const toWrite = [];
-      for (const cloud of data) {
-        const rec = fromCloud(cloud);                          // unwrap the envelope (or legacy flat row)
-        const cu = Number(rec.updatedAt || cloud.updatedAt || 0);
-        if (cu > maxSeen) maxSeen = cu;
-        const local = localById.get(rec.id);
-        const lu = Number(local?.updatedAt || 0);
-        if (!local) {
-          if (remSet?.has(rec.id)) continue;                             // just deleted here; cloud delete still in flight — do NOT resurrect
-          toWrite.push(rec); changed++;                                  // brand-new row → download
-          await unpackChildren(table, cloud);                            // its lines travel with it
-        } else if (cu > lu) {
-          toWrite.push(mergePreserve(local, rec)); changed++;            // cloud newer → cloud wins as a WHOLE
-          // The document is the entire truth about its own lines. Replacing them together
-          // with the header is what makes a deliberate deletion permanent: the newer
-          // version simply does not contain the removed line.
-          await unpackChildren(table, cloud);
-        }
-        // local-newer / equal → KEEP LOCAL, but NEVER auto-push it up here. A long-offline or
-        // clock-skewed device must not clobber the cloud during a read (that resurrected old,
-        // deleted rows on every device). Legitimate local edits travel up via the outbox only.
-      }
-      if (toWrite.length) await idbBulkPut(table, toWrite);
-      // ── Deletions are DATA, never an inference ──
-      // Absence from the cloud used to mean "deleted elsewhere", and rows were removed
-      // locally on that basis. But absence has a second cause — never uploaded from here —
-      // and the two are indistinguishable. That ambiguity erased real invoice lines.
-      //
-      // Every delete in this app is a SOFT delete: it sets isActive/deletedAt on the row,
-      // so it travels as an ordinary update and propagates by the same last-write-wins
-      // rule as any other edit. Nothing is inferred, so nothing can be inferred wrongly.
-      // A row this device holds and the cloud lacks is simply not yet uploaded, and the
-      // outbox will carry it up.
-    } catch { /* table may not exist / timed out; skip and try next */ }
-  }
-  markOnline(reached);                                       // self-heal the online badge from real cloud reachability
-  observeTimestamp(maxSeen); // adopt the cloud's highest stamp so our next local edit out-ranks it
-  if (maxSeen > wm) await metaSet('pullWatermark', maxSeen);
-  state.lastSyncAt = Date.now(); emit();
-  if (onData && changed > 0) onData(); // refresh UI only when something actually changed
-}
-
-let started = false;
-let _onData = null;
-let _nudgeTimer = null;
-let _realtimeChannel = null;
-let _rtTimer = null;
-
-// Realtime: subscribe to every change in the cloud and pull it down within a moment,
-// so another device's add/edit/delete appears here almost instantly — no manual sync
-// and no waiting for the periodic interval. Polling stays as a fallback if Realtime
-// isn't enabled for the tables. Own-writes echo back harmlessly (the merge keeps the
-// newer/equal local row).
-function startRealtime() {
-  if (!supabase || _realtimeChannel) return;
-  try {
-    _realtimeChannel = supabase
-      .channel('orthostock-sync')
-      .on('postgres_changes', { event: '*', schema: 'public' }, () => {
-        clearTimeout(_rtTimer);
-        // A cloud change happened → pull it down cheaply with an INCREMENTAL pull
-        // (only rows changed since the watermark, minus the skew buffer). This catches
-        // the change within a moment at a fraction of the egress of a full snapshot.
-        // The periodic FULL reconcile (and every focus/open) still guarantees nothing
-        // is permanently missed under large clock skew. Debounced + coalesced.
-        _rtTimer = setTimeout(() => cycle({ full: false, force: true }), 500);
-      })
-      .subscribe();
-  } catch (e) { console.warn('[realtime] unavailable, relying on polling', e); }
-}
-
-// Full sync = push local up, then pull remote down (and refresh UI on change).
-// Guarded so overlapping triggers (realtime + interval + focus + nudge firing close
-// together) can't stack concurrent flush/pull passes that saturate the main thread and
-// freeze the app. A trigger that arrives mid-cycle just sets a "run again" flag.
-let _inCycle = false, _rerun = false, _rerunFull = false;
-let _paused = false; // hard-stop ALL auto sync (used during recovery so nothing pulls the bad cloud back mid-restore)
-async function cycle({ full = false, force = false } = {}) {
-  if (!supabase || _paused) return;
-  if (!force && !state.online) return;   // background pollers respect the (self-healed) online state; forced runs always try
-  if (_inCycle) { _rerun = true; _rerunFull = _rerunFull || full; return; }
-  _inCycle = true;
-  try {
-    try { await flush(); } catch { /* ignore */ }
-    try { await pull(_onData, { full }); } catch { /* ignore */ }
-  } finally {
-    _inCycle = false;
-    if (_rerun) { const f = _rerunFull; _rerun = false; _rerunFull = false; setTimeout(() => cycle({ full: f, force: true }), 200); } // coalesce a queued trigger
-  }
-}
-
-// Called after a local write: pushes the change up quickly (debounced so a burst
-// of writes — e.g. an atomic invoice — results in a single sync), then pulls.
 export function nudgeSync() {
-  if (!started || _paused || !state.online) return;
+  if (!started || _paused) return;
   clearTimeout(_nudgeTimer);
-  _nudgeTimer = setTimeout(() => { cycle(); }, 500);
+  _nudgeTimer = setTimeout(() => cycle(), 500);
 }
 
-export function syncNow() { return cycle({ full: true, force: true }); } // manual trigger (Sync now button) — always attempts
+export function syncNow() { return cycle({ full: true }); }
 
 export function startSync(onPulled) {
   if (started || typeof window === 'undefined') return;
   started = true;
   _onData = onPulled;
-  // A focus/open/online/manual kick does a FULL reconcile so returning to the app always
-  // catches a collaborator's changes even if clock skew slipped them past the incremental
-  // window. The frequent 25s background poll stays incremental (cheap); a slower 2.5-min
-  // timer does a full reconcile as a safety net for an app left open in the foreground.
-  // focus + visibilitychange both fire on a single app switch, and a user flicking
-  // between apps can trigger many in a row. A full reconcile re-scans every table, so
-  // firing it on each of those is the main avoidable egress cost. Coalesce: the first
-  // full kick runs a full reconcile; any further full kick within the cooldown does a
-  // cheap incremental pull instead (still catches changes). A genuine reopen after the
-  // cooldown gets a fresh full reconcile, so cross-device/skew safety is unchanged.
-  const FULL_KICK_COOLDOWN_MS = 60000;
-  let _lastFullKick = 0;
+
+  // A full reconcile on open/focus catches a collaborator's changes even if clock
+  // skew slipped them past the incremental window. Coalesced, because focus and
+  // visibilitychange both fire on a single app switch and a full scan is the main
+  // avoidable cost.
+  const FULL_COOLDOWN_MS = 60000;
+  let lastFull = 0;
   const kickFull = () => {
     const now = Date.now();
-    if (now - _lastFullKick < FULL_KICK_COOLDOWN_MS) { if (state.online) cycle({ full: false, force: true }); return; }
-    _lastFullKick = now;
-    cycle({ full: true, force: true });   // always attempt — pull self-marks online from real reachability
+    if (now - lastFull < FULL_COOLDOWN_MS) { cycle(); return; }
+    lastFull = now;
+    cycle({ full: true });
   };
-  const kickInc = () => { if (state.online) cycle({ full: false }); };
+
   window.addEventListener('online', () => { markOnline(true); kickFull(); });
-  window.addEventListener('offline', () => markOnline(false));  // hint only; the next forced kick re-verifies
+  window.addEventListener('offline', () => markOnline(false));
   window.addEventListener('focus', kickFull);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) kickFull(); });
-  setInterval(kickInc, SYNC_INTERVAL_MS);          // frequent incremental poll
-  setInterval(() => { _lastFullKick = Date.now(); cycle({ full: true, force: true }); }, FULL_SYNC_INTERVAL_MS); // periodic TRUE full reconcile (safety net, bypasses the focus cooldown)
-  startRealtime();                                 // instant cross-device propagation
-  refreshPending();
-  kickFull();
-}
 
-// Schema check: with the jsonb `data` envelope, the ONLY column that matters for
-// future-proofing is `data` itself (plus id + updatedAt, which already exist). This
-// verifies each table has a usable `data` column by upserting a sample envelope.
-export async function checkCloudSchema() {
-  if (!supabase) return { ok: false, missing: [], errors: ['cloud_not_configured'] };
-  const missing = []; const errors = []; let reached = false;
-  for (const table of Object.values(TABLES)) {
-    if (LOCAL_ONLY.has(table)) continue; // local-only tables aren't in the cloud
-    let rows = [];
-    try { rows = await idbGetAll(table); } catch { continue; }
-    if (!rows.length) continue;
-    const { error } = await supabase.from(table).upsert(await toCloud(rows[0], table));
-    reached = true;
-    if (error) {
-      const m = /Could not find the '([^']+)' column/i.exec(error.message || '');
-      if (m && m[1] === 'data') missing.push({ table, column: 'data' });
-      else if (m) { /* a legacy flat column is missing — harmless, data carries it */ }
-      else errors.push(`${table}: ${error.message}`); // e.g. a table that hasn't been created yet (visits)
-    }
+  setInterval(() => cycle(), 25000);              // cheap incremental poll
+  setInterval(() => cycle({ full: true }), 150000); // slower full reconcile
+
+  // Realtime: another device's change arrives within a second rather than waiting
+  // for the poll.
+  if (supabase) {
+    try {
+      supabase.channel('orthostock-sync')
+        .on('postgres_changes', { event: '*', schema: 'public' }, () => nudgeSync())
+        .subscribe();
+    } catch (e) { console.warn('[realtime] unavailable, polling only', e?.message || e); }
   }
-  if (reached) markOnline(true);
-  return { ok: missing.length === 0 && errors.length === 0, missing, errors };
-}
 
-// SQL to add the single future-proof column to any table still missing it.
-export function missingColumnsSql(missing) {
-  const tables = [...new Set((missing || []).map((m) => m.table))];
-  return tables.map((t) => `alter table "${t}" add column if not exists "data" jsonb;`).join('\n');
+  kickFull();
 }

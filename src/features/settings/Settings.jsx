@@ -4,7 +4,7 @@ import { C, TABLES } from '../../lib/constants.js';
 import { Badge, Btn, Card, Field, Input, Modal, PageHeader, Select } from '../../ui/components.jsx';
 import { resetStore, dbMode } from '../../db/db.js';
 import { isHashed, makeHashedPassword } from '../../lib/auth.js';
-import { subscribeSync, pushAllLocal, pull, cloudReady, wipeCloud, forcePushOverwrite, mergeLocalIntoCloud, mergeCloudIntoLocal, restoreSnapshotToCloud, fullRestoreFromBackup } from '../../db/sync.js';
+import { subscribeSync, pushAllLocal, pull, cloudReady, wipeCloud, forcePushOverwrite, mergeWithCloud, restoreSnapshotToCloud, fullRestoreFromBackup } from '../../db/sync.js';
 import { exportBackup } from '../../lib/backup.js';
 import { exportExcel, importExcel } from '../../lib/excel.js';
 import { resizeImageToDataUrl } from '../../lib/image.js';
@@ -193,8 +193,9 @@ export default function Settings() {
     try {
       // BOTH directions. The owner should never have to work out which way the gap
       // runs — and in practice it runs both ways at once across two devices.
-      const up = await mergeLocalIntoCloud();
-      const down = await mergeCloudIntoLocal();
+      const r = await mergeWithCloud();
+      const up = { added: r.up, errors: r.errors };
+      const down = { added: r.down, errors: [] };
       // Reload every table so the repaired rows appear immediately.
       await Promise.all(Object.values(TABLES).map((tb) => refresh(tb).catch(() => {})));
       const errs = [...(up.errors || []), ...(down.errors || [])];
