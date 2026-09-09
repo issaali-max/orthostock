@@ -1625,7 +1625,19 @@ export function pnl(data, opts = {}) {
   // a non-zero gap means invoice totals and their lines have drifted apart, which is a
   // data fault worth surfacing rather than silently absorbing into profit.
   const lineProfitSum = round2(items.reduce((s, it) => s + num(it.lineProfit), 0));
-  const lineIntegrityGap = round2(salesProfit - lineProfitSum);
+  // This compares the PROFIT the statement computes (revenue − COGS) against the
+  // lineProfit stamped on each line when it was sold. The two drift apart for ordinary
+  // reasons — a line's stored profit is frozen at sale time while COGS is recomputed —
+  // so a non-zero value here does NOT mean lines are missing. That is the separate
+  // question invoiceLineMismatches answers, by comparing an invoice's total against
+  // the sum of its lines. Reporting this one as "missing lines" sent the owner hunting
+  // for materials that were never absent.
+  const lineProfitGap = round2(salesProfit - lineProfitSum);
+  // Kept under the old name for callers, but the dashboard now uses the real detector.
+  const lineIntegrityGap = round2(data[TABLES.invoices] === undefined ? 0
+    : invoiceLineMismatches(data)
+      .filter((x) => (x.severity === 'lines' || x.severity === 'empty') && inRange(x.date))
+      .reduce((s, x) => s + Math.abs(num(x.gap)), 0));
 
   // Free restocks (استرجاع مجاني) are pieces billed on an invoice but kept in stock — a
   // real gain (recovered inventory at cost) that the sale's COGS over-charged for. Add
@@ -1653,7 +1665,7 @@ export function pnl(data, opts = {}) {
     margin: revenue > 0 ? round2((grossProfit / revenue) * 100) : 0,
     // Non-zero when invoice totals and their line items disagree — a data fault, not a
     // business result. Surfaced so it can be seen and repaired rather than hidden.
-    lineProfitSum, lineIntegrityGap,
+    lineProfitSum, lineProfitGap, lineIntegrityGap,
   };
 }
 

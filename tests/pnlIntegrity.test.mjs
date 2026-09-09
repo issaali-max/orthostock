@@ -3,7 +3,7 @@
 // like. Every relationship printed on the screen is asserted here as an identity, and
 // each is then re-tested against deliberately damaged data — because a statement that
 // only adds up when the data is clean is the one that misleads you.
-import { pnl } from '../src/lib/engine.js';
+import { pnl, invoiceLineMismatches } from '../src/lib/engine.js';
 import { TABLES } from '../src/lib/constants.js';
 import { round2, num } from '../src/lib/money.js';
 
@@ -208,6 +208,37 @@ console.log('\n─── 10. VAT is never revenue and never profit ───');
   ok('a mixed period nets only the taxed invoice', pm.revenue === 1500, `${pm.revenue}`);
   ok('and still satisfies its arithmetic', round2(pm.revenue - pm.cogs) === pm.salesProfit);
   ok('no line-integrity gap is introduced by netting VAT', Math.abs(pm.lineIntegrityGap) < 0.05, `${pm.lineIntegrityGap}`);
+}
+
+
+console.log('\n─── 11. The P&L banner must agree with Data health ───');
+{
+  // Issa saw "invoices with missing lines — 3,536.22" on the P&L while Data health
+  // reported none. The two screens were answering different questions: the banner
+  // compared the profit the statement computes against the lineProfit frozen on each
+  // line at sale time, which drift apart for ordinary reasons and say nothing about
+  // whether any line is absent.
+  const healthy = mk({
+    invoices: [{ id: 'a', date: '2026-09-05', status: 'active', currency: 'AED', total: 1000 }],
+    items: [{ invoiceId: 'a', variantId: 'v1', qty: 10, unitPrice: 100, total: 1000, netTotal: 1000, avgCostAtSale: 30, lineProfit: 600 }],
+  });
+  const p = pnl(healthy, B);
+  ok('a healthy invoice raises no missing-lines warning', p.lineIntegrityGap === 0, `${p.lineIntegrityGap}`);
+  ok('even when its stored line profit has drifted', p.lineProfitGap !== 0, `${p.lineProfitGap}`);
+  ok('the drift is reported separately, not as missing lines', typeof p.lineProfitGap === 'number');
+  ok('and Data health agrees there is nothing wrong', invoiceLineMismatches(healthy).length === 0);
+
+  // A genuine shortfall still raises it, and both screens now say the same thing.
+  const short = mk({
+    invoices: [{ id: 'b', invoiceNumber: 'INV-B', date: '2026-09-05', status: 'active', currency: 'AED', total: 2000, updatedAt: 9999 }],
+    items: [{ invoiceId: 'b', variantId: 'v1', qty: 5, unitPrice: 100, total: 500, netTotal: 500, avgCostAtSale: 30, lineProfit: 350, updatedAt: 1 }],
+  });
+  const ps = pnl(short, B);
+  ok('a real shortfall still warns', ps.lineIntegrityGap === 1500, `${ps.lineIntegrityGap}`);
+  const flagged = invoiceLineMismatches(short).filter((x) => x.severity === 'lines');
+  ok('and Data health flags the same invoice', flagged.length === 1 && flagged[0].invoiceNumber === 'INV-B');
+  ok('with the same amount', Math.abs(flagged[0].gap - ps.lineIntegrityGap) < 0.05,
+    `${flagged[0].gap} vs ${ps.lineIntegrityGap}`);
 }
 
 console.log('\n═══════════════════════════════════════');
