@@ -22,18 +22,14 @@ const ok = (l, c, d = '') => { if (c) { pass++; console.log('✓', l); } else { 
 
 const sync = fs.readFileSync(new URL('../src/db/sync.js', import.meta.url), 'utf8');
 
-console.log('\n─── 1. Child rows are never deleted for being absent from the cloud ───');
+console.log('\n─── 1. Superseded: child rows are no longer separate rows at all ───');
 {
-  ok('the deletion reconcile knows which tables are children',
-    /CHILD_TABLES\s*=\s*new Set\(\[/.test(sync));
-  for (const t of ['invoiceItems', 'purchaseItems', 'stockMovements', 'orderItems']) {
-    ok(`${t} is treated as a child`, new RegExp(`CHILD_TABLES[\\s\\S]{0,200}${t}`).test(sync));
-  }
-  ok('a missing child row is RE-QUEUED for upload, not deleted',
-    /CHILD_TABLES\.has\(table\)\)[\s\S]{0,300}enqueueMutation\(\{ type: 'insert'/.test(sync),
-    'the reconcile must repair the unsynced row rather than remove it');
-  ok('the local delete is confined to the non-child branch',
-    /CHILD_TABLES\.has\(table\)\)[\s\S]{0,400}\} else \{[\s\S]{0,600}idbDelete\(table, r\.id\)/.test(sync));
+  // This section used to test CHILD_TABLES, a guard that stopped the deletion-by-absence
+  // inference from removing invoice lines. Both the guard and the inference are gone:
+  // lines now travel inside the invoice document, so there is no separate row to lose
+  // and no absence to misread. Sections 12-15 test what replaced them.
+  ok('the child-table workaround is gone', !/CHILD_TABLES/.test(sync));
+  ok('because lines are no longer synced independently', /CARRIED_BY_PARENT/.test(sync));
 }
 
 console.log('\n─── 2. A failed upload of a child row is never dropped silently ───');
@@ -43,18 +39,19 @@ console.log('\n─── 2. A failed upload of a child row is never dropped sile
   ok('a policy-blocked critical row stays queued',
     /if \(CRITICAL\) \{[\s\S]{0,400}outboxBumpTries\(op\.seq\)[\s\S]{0,200}failed\.push/.test(sync),
     'RLS failures used to drop the op immediately and quietly');
-  ok('a critical row is not dropped after MAX_OP_TRIES',
-    /tries >= MAX_OP_TRIES && !CRITICAL/.test(sync),
-    'the drop branch must exclude critical rows');
+  ok('NO row is dropped after MAX_OP_TRIES, critical or not', !/MAX_OP_TRIES && !CRITICAL/.test(sync),
+    'a local write is never discarded');
   ok('and the user is told about it', /keeping queued/.test(sync));
 }
 
-console.log('\n─── 3. The guards that were already right are still in place ───');
+console.log('\n─── 3. Superseded: the guards around the inference ───');
 {
-  ok('deletion reconcile still runs on FULL pulls only', /if \(full && outboxEmpty && cloudKeys/.test(sync));
-  ok('an empty cloud table cannot wipe local data', /cloudKeys\.length > 0/.test(sync));
-  ok('the mass-deletion brake survives', /suspicious/.test(sync));
-  ok('the outbox is re-checked at delete time', /stillEmpty/.test(sync));
+  // These tested the safety rails around deletion-by-absence — full-pulls-only, the
+  // empty-table check, the mass-deletion brake, the outbox re-check. Every one of them
+  // existed to make a dangerous inference survivable. The inference is gone, so they
+  // are too: absence now means nothing at all, which needs no rails.
+  ok('the inference and all its rails are gone', !/deletion reconcile/i.test(sync));
+  ok('deletes propagate as data instead', /soft delete/i.test(sync));
 }
 
 console.log('\n─── 4. The chain, simulated ───');
@@ -281,6 +278,62 @@ console.log('\n─── 11. The merge must work in BOTH directions ───');
   ok('though the cloud did gain the other device\'s rows', before.cloudHasB);
   const after = converge({ bothWays: true });
   ok('both directions converge the device with the cloud', after.mineHasA && after.cloudHasB);
+}
+
+
+console.log('\n─── 12. The invoice is ONE document ───');
+{
+  // Issa's requirement, stated plainly: an edit must appear on the other device
+  // complete; a deliberately deleted line must stay deleted; nothing may change that
+  // he did not change. All three follow from the invoice crossing the network as a
+  // single row carrying its own lines.
+  ok('the invoice carries its lines', /__lines/.test(sync));
+  ok('and the stock movements those lines caused', /__moves/.test(sync));
+  ok('purchases work the same way', /\[TABLES\.purchases\]: \{ items: TABLES\.purchaseItems/.test(sync));
+  ok('one request per invoice, so a partial upload is impossible',
+    /async function toCloud\(row, table\)/.test(sync));
+
+  ok('lines are never uploaded on their own', /CARRIED_BY_PARENT\(op\)/.test(sync),
+    'separate uploads are what created competing generations');
+  ok('invoice-caused movements are carried too, not uploaded alone',
+    /op\.row\?\.refType === 'invoice' \|\| op\.row\?\.refType === 'purchase'/.test(sync));
+
+  ok('downloading a document replaces that invoice\'s lines wholesale',
+    /async function unpackChildren/.test(sync));
+  ok('which is what makes a deliberate deletion permanent',
+    /idbDelete\(spec\.items, it\.id\)/.test(sync));
+  ok('the envelope fields never leak into the stored row', /delete rec\.__lines; delete rec\.__moves;/.test(sync));
+}
+
+console.log('\n─── 13. Deletion is data, never an inference ───');
+{
+  ok('nothing is deleted for being absent from the cloud', !/Deletion reconcile \(FULL pulls only\)/.test(sync));
+  ok('the CHILD_TABLES workaround is gone with it', !/CHILD_TABLES/.test(sync),
+    'it existed only to blunt the inference; the inference itself is now removed');
+  ok('the reasoning is recorded for whoever reads this next', /Deletions are DATA, never an inference/.test(sync));
+  ok('soft deletes still travel as ordinary updates', /travels as an ordinary update/.test(sync));
+}
+
+console.log('\n─── 14. A local write is never discarded ───');
+{
+  ok('no operation is dropped after repeated failure', !/dropping op after/.test(sync));
+  ok('it keeps retrying and is reported instead', /keeps retrying and is\s*\n?\s*\/\/ reported in Data health/.test(sync) || /reported in Data health/.test(sync));
+  ok('failures still surface to the owner', /failed\.push/.test(sync));
+}
+
+console.log('\n─── 15. What the document model makes impossible ───');
+{
+  // These are the guarantees, expressed as properties of the design rather than of any
+  // one code path — each was a real fault at some point in the past week.
+  const guarantees = [
+    ['a header arriving without its lines', /__lines/.test(sync)],
+    ['lines arriving without their header', /__lines/.test(sync)],
+    ['two generations of lines coexisting', /CARRIED_BY_PARENT/.test(sync)],
+    ['a deleted line returning from the cloud', /unpackChildren/.test(sync)],
+    ['a line vanishing because it was never uploaded', !/Deletion reconcile/.test(sync)],
+    ['a quantity or price changing by itself', /cloud wins as a WHOLE/.test(sync)],
+  ];
+  for (const [what, holds] of guarantees) ok(`${what} — prevented`, holds);
 }
 
 console.log('\n═══════════════════════════════════════');

@@ -263,6 +263,11 @@ console.log('\n─── 7. The detector finds a damaged invoice and clears a he
   // Fabricate the reported damage directly in the store: right total, missing lines.
   const broken = await db.insert(TABLES.invoices, { invoiceNumber: 'INV-DMG', date: '2026-09-02', customerId: 'c1', currency: 'AED', status: 'active', total: 2458, paidAmount: 0, paymentStatus: 'unpaid', payments: [] });
   await db.insert(TABLES.invoiceItems, { invoiceId: broken.id, variantId: 'w16', qty: 10, listPrice: 39, unitPrice: 39, netUnitPrice: 39, total: 390, netTotal: 390 });
+  // Real damage has the HEADER newer than its lines. Lines newer than the header is the
+  // opposite case — an edit whose line half has arrived and whose total has not — and is
+  // classed as pending rather than reported as a fault. Touch the header so this fixture
+  // is the damaged shape it means to be.
+  await db.update(TABLES.invoices, broken.id, { total: 2458 });
   await all();
   const found2 = invoiceLineMismatches(app.data);
   const hit = found2.find((f) => f.invoiceNumber === 'INV-DMG');
