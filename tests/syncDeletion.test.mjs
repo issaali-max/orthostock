@@ -71,7 +71,11 @@ console.log('\n─── 6. One merge, both directions ───');
 
   const settings = fs.readFileSync(new URL('../src/features/settings/Settings.jsx', import.meta.url), 'utf8');
   ok('Settings uses the unified merge', /mergeWithCloud\(\)/.test(settings));
-  ok('the destructive overwrite is still marked as such', /overwriteCloudWarn/.test(settings));
+  ok('the destructive overwrite button is gone', !/doOverwriteCloud/.test(settings),
+    'it wiped the cloud with one device and destroyed lines the other held');
+  ok('rebuild-from-cloud is gone too', !/doRebuildFromCloud/.test(settings),
+    'it wiped a device from an incomplete cloud — the second half of the same disaster');
+  ok('merge is the only recovery action offered', /doMergeToCloud/.test(settings));
 }
 
 console.log('\n─── 7. What the design makes impossible ───');
@@ -94,8 +98,9 @@ console.log('\n─── 8. The rebuild kept what mattered and dropped what did 
     ok(`${gone} removed — nothing used it`, !new RegExp(`export [\\w ]*${gone}`).test(sync));
   }
   ok('column-stripping retry loop removed', !/Could not find the '\(\[\^'\]\+\)' column/.test(sync) && !/attempt < 14/.test(sync));
+  ok('forcePushOverwrite removed with its button', !/export async function forcePushOverwrite/.test(sync));
   for (const kept of ['flush', 'pull', 'startSync', 'syncNow', 'nudgeSync', 'pushAllLocal', 'wipeCloud',
-    'forcePushOverwrite', 'fullRestoreFromBackup', 'restoreSnapshotToCloud', 'refreshPending', 'getSupabase']) {
+    'fullRestoreFromBackup', 'restoreSnapshotToCloud', 'refreshPending', 'getSupabase']) {
     ok(`${kept} kept`, new RegExp(`export [\\w ]*${kept}\\b`).test(sync));
   }
   const lines = sync.split('\n').length;

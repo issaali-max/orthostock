@@ -4,7 +4,7 @@ import { C, TABLES } from '../../lib/constants.js';
 import { Badge, Btn, Card, Field, Input, Modal, PageHeader, Select } from '../../ui/components.jsx';
 import { resetStore, dbMode } from '../../db/db.js';
 import { isHashed, makeHashedPassword } from '../../lib/auth.js';
-import { subscribeSync, pushAllLocal, pull, cloudReady, wipeCloud, forcePushOverwrite, mergeWithCloud, restoreSnapshotToCloud, fullRestoreFromBackup } from '../../db/sync.js';
+import { subscribeSync, pushAllLocal, pull, cloudReady, wipeCloud, mergeWithCloud, restoreSnapshotToCloud, fullRestoreFromBackup } from '../../db/sync.js';
 import { exportBackup } from '../../lib/backup.js';
 import { exportExcel, importExcel } from '../../lib/excel.js';
 import { resizeImageToDataUrl } from '../../lib/image.js';
@@ -172,18 +172,6 @@ export default function Settings() {
     window.location.reload();
   };
 
-  // RECOVERY — pull a clean copy down to THIS device (use on devices showing stale data).
-  const doRebuildFromCloud = async () => {
-    if (!cloudReady() || syncing) return;
-    if (!window.confirm('☁️⬇ سيمسح بيانات هذا الجهاز ويُنزّل نسخة نظيفة من السحابة.\nClears THIS device, then downloads a fresh copy from the cloud.\n\nاستخدمه على الأجهزة التي تعرض بيانات قديمة. متابعة؟')) return;
-    setSyncing(true);
-    try {
-      await resetStore();
-      await pull(() => {}, { full: true });
-      showToast('☁️⬇ ✓', 'success');
-      setTimeout(() => window.location.reload(), 600);
-    } catch (e) { showToast(`${e.message || e}`, 'error'); setSyncing(false); }
-  };
   // RECOVERY — make THIS device the source of truth (overwrites cloud + every other device).
   // Uploads only what the cloud is missing. Deletes nothing, on either side.
   const doMergeToCloud = async () => {
@@ -205,18 +193,6 @@ export default function Settings() {
     finally { setSyncing(false); }
   };
 
-  const doOverwriteCloud = async () => {
-    if (!cloudReady() || syncing) return;
-    const word = window.prompt(t('overwritePrompt'));
-    if (word !== 'تأكيد' && word !== 'OVERWRITE') return;
-    setSyncing(true);
-    try {
-      const r = await forcePushOverwrite();
-      if (r.errors && r.errors.length) showToast(`⬆ ${r.pushed} · ⚠ ${r.errors[0]}`, 'error');
-      else showToast(`☁️⬆ ${r.pushed} ✓`, 'success');
-    } catch (e) { showToast(`${e.message || e}`, 'error'); }
-    finally { setSyncing(false); }
-  };
 
   const doExportExcel = async () => {
     try {
@@ -356,20 +332,17 @@ export default function Settings() {
         </Btn>
         {cloudReady() && (
           <div style={{ marginTop: 12, borderTop: `1px solid ${C.surfaceAlt}`, paddingTop: 10 }}>
-            <div style={{ fontSize: 11, fontWeight: 800, color: C.textMid, marginBottom: 6 }}>🛟 {t('recoveryTools') || 'أدوات الاسترجاع / Recovery'}</div>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <Btn size="sm" variant="light" onClick={doRebuildFromCloud} disabled={syncing}>☁️⬇ {t('rebuildFromCloud') || 'إعادة بناء من السحابة'}</Btn>
-              {/* The SAFE way to make the cloud complete: add what it lacks, delete
-                  nothing. Placed before the destructive one and described plainly,
-                  because overwriting is almost never what the situation calls for. */}
-              <Btn size="sm" onClick={doMergeToCloud} disabled={syncing}>🔗 {t('mergeToCloud')}</Btn>
-              <div style={{ fontSize: 11, color: C.textMuted, lineHeight: 1.6, marginTop: 4 }}>{t('mergeToCloudNote')}</div>
-              <Btn size="sm" variant="outline" onClick={doOverwriteCloud} disabled={syncing} style={{ color: C.danger, marginTop: 8 }}>☁️⬆ {t('overwriteCloud') || 'كتابة فوق السحابة من هذا الجهاز'}</Btn>
-              <div style={{ fontSize: 11, color: C.danger, lineHeight: 1.6, marginTop: 4 }}>{t('overwriteCloudWarn')}</div>
-            </div>
-            <div style={{ fontSize: 10.5, color: C.textMuted, marginTop: 6, lineHeight: 1.5 }}>
-              {t('recoveryHint') || 'الجهاز الذي يحمل البيانات الصحيحة: «كتابة فوق السحابة». بقية الأجهزة: «إعادة بناء من السحابة».'}
-            </div>
+            {/* ── One recovery action, because one is all that is needed ──
+                "Overwrite cloud" and "Rebuild from cloud" were removed. Together they
+                destroyed a week of invoice lines: one device overwrote the cloud with a
+                copy that lacked lines the other device held, and the other then rebuilt
+                itself from that incomplete cloud. Merge covers every case they covered,
+                deletes nothing, and cannot produce that outcome. Where a genuine reset
+                is needed, restoring a backup is safer — it starts from a file known to
+                be good rather than from whatever this device happens to hold. */}
+            <div style={{ fontSize: 11, fontWeight: 800, color: C.textMid, marginBottom: 6 }}>🛟 {t('recoveryTools')}</div>
+            <Btn size="sm" onClick={doMergeToCloud} disabled={syncing}>🔗 {t('mergeToCloud')}</Btn>
+            <div style={{ fontSize: 11, color: C.textMuted, lineHeight: 1.6, marginTop: 6 }}>{t('mergeToCloudNote')}</div>
           </div>
         )}
       </Card>

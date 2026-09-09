@@ -354,21 +354,6 @@ export async function wipeCloud() {
   return { ok: errors.length === 0, errors };
 }
 
-// Destructive: replaces the cloud with this device alone. Anything held only on
-// another device is lost for everyone. Kept because a device known to hold the truth
-// sometimes needs it — but mergeWithCloud is almost always the right choice.
-export async function forcePushOverwrite(onProgress) {
-  if (!supabase) return { ok: false, pushed: 0, errors: ['cloud_not_configured'] };
-  for (const table of Object.values(TABLES)) {
-    let rows = [];
-    try { rows = await idbGetAll(table); } catch { continue; }
-    if (!rows.length) continue;
-    try { await idbBulkPut(table, rows.map((r) => ({ ...r, updatedAt: nextTimestamp() }))); } catch { /* ignore */ }
-  }
-  const w = await wipeCloud();
-  if (!w.ok && w.errors?.length) return { ok: false, pushed: 0, errors: w.errors };
-  return await pushAllLocal(onProgress);
-}
 
 // Restores a backup file over this device, then makes it the cloud truth.
 export async function fullRestoreFromBackup(parsed) {
