@@ -107,6 +107,27 @@ console.log('\n─── 8. The rebuild kept what mattered and dropped what did 
   ok('the file is smaller than before the rebuild', lines < 700, `${lines} lines`);
 }
 
+
+console.log('\n─── 9. Cloud queries must be valid for every column type ───');
+{
+  // Importing a backup failed with: categories: invalid input syntax for type uuid:
+  // "___none___". wipeCloud used a sentinel string as a "match everything" predicate,
+  // which Postgres rejects outright wherever id is a uuid column — so the wipe failed
+  // and the restore stopped half-way.
+  ok('no sentinel string is compared against an id column', !/___none___/.test(sync),
+    'it is not a valid uuid and the query is rejected before it runs');
+  ok('the wipe uses a predicate valid for any column type', /\.not\('id', 'is', null\)/.test(sync));
+  ok('and the reason is recorded for whoever reads this next', /valid for any column type/.test(sync));
+
+  // A failed wipe must never be reported as a successful restore.
+  ok('restore aborts when the wipe fails', /const w = await wipeCloud\(\);\s*\n\s*if \(!w\.ok/.test(sync));
+  ok('and surfaces the real error', /return \{ ok: false, restored, errors: w\.errors \}/.test(sync));
+
+  // Nothing else should be building queries from hand-written literals either.
+  const literals = [...sync.matchAll(/\.(eq|neq|gt|lt|in)\('id',\s*'([^']+)'/g)].map((m) => m[2]);
+  ok('no other hand-written id literal remains', literals.length === 0, literals.join(', '));
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${pass + fail} checks · ${fail} finding(s)`);
 findings.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));

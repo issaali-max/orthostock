@@ -352,7 +352,12 @@ export async function wipeCloud() {
   const errors = [];
   for (const table of Object.values(TABLES)) {
     try {
-      const { error } = await supabase.from(table).delete().neq('id', '___none___');
+      // "Delete every row" needs a predicate that matches everything. A sentinel string
+      // compared against id fails wherever id is a uuid column — Postgres rejects the
+      // literal before it ever runs, so the wipe silently failed and any restore that
+      // depended on it stopped half-way. `not is null` on the primary key is true for
+      // every row and valid for any column type.
+      const { error } = await supabase.from(table).delete().not('id', 'is', null);
       if (error && !isMissingTable(error)) errors.push(`${table}: ${error.message}`);
     } catch (e) { errors.push(`${table}: ${e?.message || e}`); }
   }
