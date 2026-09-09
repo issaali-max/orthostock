@@ -128,6 +128,24 @@ console.log('\n─── 9. Cloud queries must be valid for every column type �
   ok('no other hand-written id literal remains', literals.length === 0, literals.join(', '));
 }
 
+
+console.log('\n─── 10. The upload must actually run ───');
+{
+  // Issa's edits stopped reaching his brother and eight rows sat queued. cycle() sets
+  // state.syncing to show a spinner, then calls flush() — and flush refused on that
+  // same flag, so it never ran from the cycle at all. Pulls worked, pushes did not.
+  ok('flush has its own re-entry guard', /let _flushing = false/.test(sync));
+  ok('and does not refuse on the spinner flag', !/export async function flush\(\) \{\s*\n\s*if \(!supabase \|\| state\.syncing\)/.test(sync));
+  ok('the guard is released even if the upload throws', /finally \{ _flushing = false; \}/.test(sync));
+  ok('the reason is recorded for whoever reads this next', /outbox never emptied and edits never left/.test(sync));
+
+  // A queued row is not a failed row.
+  ok('pending counts everything queued', /state\.pending = (?:remaining|q)\.length/.test(sync));
+  ok('failed counts only rows already rejected', /filter\(\(o\) => Number\(o\.tries \|\| 0\) > 0\)/.test(sync));
+  const spots = (sync.match(/Number\(o\.tries \|\| 0\) > 0/g) || []).length;
+  ok('every place that reports the count agrees', spots >= 3, `${spots} of 3`);
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${pass + fail} checks · ${fail} finding(s)`);
 findings.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));

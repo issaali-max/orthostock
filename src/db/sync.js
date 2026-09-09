@@ -140,7 +140,12 @@ export const cloudReady = () => !!supabase;
 // Refreshes the queued-writes count after a local write, so the UI can show what is
 // still waiting to reach the cloud.
 export async function refreshPending() {
-  try { state.pending = (await outboxAll()).length; state.failedCount = state.pending; emit(); } catch { /* display only */ }
+  try {
+    const q = await outboxAll();
+    state.pending = q.length;
+    state.failedCount = q.filter((o) => Number(o.tries || 0) > 0).length;
+    emit();
+  } catch { /* display only */ }
 }
 
 let started = false;
@@ -148,8 +153,19 @@ let _paused = false;
 let _onData = null;
 
 // ── Rule 3: the outbox never discards ─────────────────────────────────────────
+// `_flushing` guards only against two flushes overlapping. It must NOT be the same flag
+// cycle() sets to show a spinner: cycle sets state.syncing before calling flush, so
+// checking that here made flush refuse every time it was called from the cycle — the
+// outbox never emptied and edits never left the device.
+let _flushing = false;
+
 export async function flush() {
-  if (!supabase || state.syncing) return;
+  if (!supabase || _flushing) return;
+  _flushing = true;
+  try { await flushInner(); } finally { _flushing = false; }
+}
+
+async function flushInner() {
   const ops = (await outboxAll()).sort((a, b) => a.seq - b.seq);
   if (!ops.length) return;
   const failed = [];
@@ -178,13 +194,13 @@ export async function flush() {
     }
   }
 
-  if (failed.length) {
-    state.failedCount = (await outboxAll()).length;
-    try { await metaSet('failedSync', failed.slice(0, 20)); } catch { /* reporting only */ }
-  } else {
-    state.failedCount = (await outboxAll()).length;
-  }
-  state.pending = state.failedCount;
+  // A row that is merely QUEUED is not a failure — it goes up on the next cycle. Only
+  // rows that have actually been attempted and rejected are worth alarming about, or
+  // every ordinary edit would show as an error for the second between write and upload.
+  const remaining = await outboxAll();
+  state.pending = remaining.length;
+  state.failedCount = remaining.filter((o) => Number(o.tries || 0) > 0).length;
+  if (failed.length) { try { await metaSet('failedSync', failed.slice(0, 20)); } catch { /* reporting only */ } }
   emit();
 }
 
@@ -435,7 +451,9 @@ async function cycle({ full = false } = {}) {
   } finally {
     _running = false;
     state.syncing = false;
-    state.pending = (await outboxAll()).length;
+    const q = await outboxAll();
+    state.pending = q.length;
+    state.failedCount = q.filter((o) => Number(o.tries || 0) > 0).length;
     emit();
   }
 }
