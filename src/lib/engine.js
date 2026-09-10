@@ -402,10 +402,16 @@ export async function voidInvoice(app, invoiceId) {
   const stock = new Map();
   const ensure = (id) => { if (!stock.has(id)) stock.set(id, num(vById.get(id)?.stockQty)); return stock.get(id); };
   const specs = [];
-  for (const it of items) if (vById.has(it.variantId)) stock.set(it.variantId, round2(ensure(it.variantId) + num(it.qty))); // give stock back
-  for (const m of moves) specs.push({ op: 'update', table: TABLES.stockMovements, id: m.id, patch: { isActive: false } });
+  // Stamp the generation being reversed, so restore can reverse exactly this set and
+  // not every retired generation the invoice has accumulated.
+  const voidedAt = nextTimestamp();
+  for (const it of items) {
+    if (vById.has(it.variantId)) stock.set(it.variantId, round2(ensure(it.variantId) + num(it.qty))); // give stock back
+    specs.push({ op: 'update', table: TABLES.invoiceItems, id: it.id, patch: { voidedAt } });
+  }
+  for (const m of moves) specs.push({ op: 'update', table: TABLES.stockMovements, id: m.id, patch: { isActive: false, voidedAt } });
   for (const [vid, finalQty] of stock) specs.push({ op: 'update', table: TABLES.variants, id: vid, patch: { stockQty: round2(finalQty) } });
-  specs.push({ op: 'update', table: TABLES.invoices, id: invoiceId, patch: { isActive: false, deletedAt: nextTimestamp() } });
+  specs.push({ op: 'update', table: TABLES.invoices, id: invoiceId, patch: { isActive: false, deletedAt: nextTimestamp(), voidedAt } });
   await db.atomicMutations(specs);
   await Promise.all([app.refresh(TABLES.invoices), app.refresh(TABLES.invoiceItems), app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements)]);
   nudgeSync();
@@ -420,15 +426,28 @@ export async function restoreInvoice(app, invoiceId) {
     db.getAll(TABLES.variants), db.getAll(TABLES.invoiceItems), db.getAll(TABLES.stockMovements),
   ]);
   const vById = new Map(variants.map((v) => [v.id, v]));
-  const items = allItems.filter((x) => x.invoiceId === invoiceId);
-  const moves = allMoves.filter((x) => x.refType === 'invoice' && x.refId === invoiceId && x.isActive === false);
+  // ── Only the CURRENT generation ──
+  // Editing retires the previous lines rather than destroying them, so an invoice edited
+  // three times holds three generations. Restoring against all of them takes the stock
+  // several times over: 10 → 20 → 30 deducted 60 instead of 30, leaving 40 where 70 was
+  // correct. The same applies to the movements — reactivating every retired one
+  // reinstates sales that were superseded long ago.
+  //
+  // voidInvoice retires the lines it reverses, and stamps them so they can be told from
+  // older generations. Restore reverses exactly that set and nothing else.
+  const voidedAt = num((allItems.find((x) => x.invoiceId === invoiceId && num(x.voidedAt) > 0) || {}).voidedAt);
+  const items = allItems.filter((x) => x.invoiceId === invoiceId
+    && (voidedAt > 0 ? num(x.voidedAt) === voidedAt : x.isActive !== false));
+  const moves = allMoves.filter((x) => x.refType === 'invoice' && x.refId === invoiceId && x.isActive === false
+    && (voidedAt > 0 ? num(x.voidedAt) === voidedAt : true));
   const stock = new Map();
   const ensure = (id) => { if (!stock.has(id)) stock.set(id, num(vById.get(id)?.stockQty)); return stock.get(id); };
   const specs = [];
   for (const it of items) if (vById.has(it.variantId)) stock.set(it.variantId, round2(ensure(it.variantId) - num(it.qty))); // take stock again
-  for (const m of moves) specs.push({ op: 'update', table: TABLES.stockMovements, id: m.id, patch: { isActive: true } });
+  for (const it of items) specs.push({ op: 'update', table: TABLES.invoiceItems, id: it.id, patch: { voidedAt: 0 } });
+  for (const m of moves) specs.push({ op: 'update', table: TABLES.stockMovements, id: m.id, patch: { isActive: true, voidedAt: 0 } });
   for (const [vid, finalQty] of stock) specs.push({ op: 'update', table: TABLES.variants, id: vid, patch: { stockQty: round2(finalQty) } });
-  specs.push({ op: 'update', table: TABLES.invoices, id: invoiceId, patch: { isActive: true, deletedAt: null } });
+  specs.push({ op: 'update', table: TABLES.invoices, id: invoiceId, patch: { isActive: true, deletedAt: null, voidedAt: 0 } });
   await db.atomicMutations(specs);
   await Promise.all([app.refresh(TABLES.invoices), app.refresh(TABLES.invoiceItems), app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements)]);
   nudgeSync();
