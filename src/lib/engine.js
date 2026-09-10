@@ -348,7 +348,26 @@ export async function saveInvoiceAtomic(app, { editingId, invoiceData, lines, in
   for (const l of lines) {
     lineIdx++;
     const v = vById.get(l.variantId);
-    const avgCost = num(v?.purchasePriceAvg);
+    // ── The cost of a sale is fixed at the moment it was sold ──
+    // Re-reading today's catalogue cost on every save rewrites history: an invoice sold
+    // at a cost of 40 showed a cost of 90 after a later purchase raised the average, and
+    // merely opening and saving it — changing nothing — moved COGS from 400 to 900.
+    // Profit on past months would drift every time stock was replenished.
+    //
+    // So an existing line keeps the cost it was stamped with. Only genuinely new
+    // quantity is costed at today's average, which is correct: that stock really is
+    // being sold now. A line whose quantity GROWS blends the two, weighted by how much
+    // of it is old and how much is new.
+    const priorForVariant = oldItems.filter((x) => x.variantId === l.variantId);
+    const priorQty = round2(priorForVariant.reduce((sum, x) => sum + num(x.qty), 0));
+    const priorCost = priorQty > 0
+      ? round2(priorForVariant.reduce((sum, x) => sum + num(x.avgCostAtSale) * num(x.qty), 0) / priorQty)
+      : 0;
+    const todayCost = num(v?.purchasePriceAvg);
+    const billedQty = num(l.qty);
+    const avgCost = priorQty <= 0 ? todayCost
+      : billedQty <= priorQty ? priorCost
+        : round2((priorCost * priorQty + todayCost * (billedQty - priorQty)) / billedQty);
     const isGift = !!l.gift;                                      // هدية للمركز: sells at 0 but cost is still charged
     const listPrice = isGift ? 0 : num(v?.sellingPriceDefault);
     const rawUnit = isGift ? 0 : num(l.unitPrice); const qty = num(l.qty);

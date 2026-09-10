@@ -676,6 +676,55 @@ console.log('\n─── 19. Toggling VAT affects only invoices issued after it 
   ok('the printed invoice shows no VAT on a past untaxed invoice', num(bd.vat) === 0, `${bd.vat}`);
 }
 
+
+console.log('\n─── 20. Review finding F6: historical cost must not be rewritten ───');
+{
+  // Selling ten units at a cost of 40 is a fact about the past. Re-reading today's
+  // catalogue cost on every save rewrote it: after a later purchase raised the average
+  // to 90, merely opening the invoice and saving it — changing nothing — moved COGS
+  // from 400 to 900, and every past month's profit drifted whenever stock was
+  // replenished.
+  const id = await save({ lines: [{ variantId: 'a', qty: 10, unitPrice: 100 }] });
+  const P = { from: '2026-09-01', to: '2026-09-30' };
+  const cogs = () => E.pnl(app.data, P).cogs;
+  const costBefore = cogs();
+  ok('the sale is costed at the average of the day', costBefore > 0, `${costBefore}`);
+
+  // A later purchase moves the catalogue average.
+  await db.update(TABLES.variants, 'a', { purchasePriceAvg: num((await db.getAll(TABLES.variants)).find((v) => v.id === 'a').purchasePriceAvg) * 3 });
+  await all();
+
+  await save({ id, lines: [{ variantId: 'a', qty: 10, unitPrice: 100 }] });   // no-op
+  ok('saving with no change does not move COGS', cogs() === costBefore, `${cogs()} vs ${costBefore}`);
+
+  await save({ id, lines: [{ variantId: 'a', qty: 10, unitPrice: 130 }] });   // price only
+  ok('changing only the price does not move COGS', cogs() === costBefore, `${cogs()} vs ${costBefore}`);
+
+  const stockNow = num((await db.getAll(TABLES.variants)).find((v) => v.id === 'a').stockQty);
+  await save({ id, lines: [{ variantId: 'a', qty: 10, unitPrice: 130 }] });
+  ok('and moves no stock either', num((await db.getAll(TABLES.variants)).find((v) => v.id === 'a').stockQty) === stockNow);
+
+  // Genuinely NEW quantity is costed at today's average — that stock really is being
+  // sold now — so a growing line blends the two.
+  const before = cogs();
+  await save({ id, lines: [{ variantId: 'a', qty: 20, unitPrice: 130 }] });
+  ok('added quantity is costed at today\'s average', cogs() > before, `${cogs()} vs ${before}`);
+  ok('and the original ten keep their old cost', cogs() < before * 3,
+    `${cogs()} — would be ${before * 3} if the whole line were re-costed`);
+
+  // Reducing the quantity must not invent cost. Measured on THIS invoice: earlier
+  // sections of this file sell the same material on other invoices, so a whole-material
+  // total would be measuring them too.
+  const twentyCogs = cogs();
+  await save({ id, lines: [{ variantId: 'a', qty: 5, unitPrice: 130 }] });
+  ok('reducing the quantity reduces COGS', cogs() < twentyCogs, `${cogs()} vs ${twentyCogs}`);
+
+  const mine = (await db.getAll(TABLES.stockMovements))
+    .filter((m) => m.refType === 'invoice' && m.refId === id && m.isActive !== false);
+  ok('this invoice has exactly one live movement', mine.length === 1, `${mine.length}`);
+  ok('and it matches the five now billed', Math.abs(num(mine[0]?.qtyChange) + 5) < 0.001, `${mine[0]?.qtyChange}`);
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${pass + fail} checks · ${fail} finding(s)`);
 findings.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));
