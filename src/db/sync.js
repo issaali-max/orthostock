@@ -103,6 +103,31 @@ export async function unpackChildren(table, cloudRow) {
   for (const m of moves.filter((x) => x.refType === spec.refType && x.refId === id)) await idbDelete(TABLES.stockMovements, m.id);
   if (data.__lines.length) await idbBulkPut(spec.items, data.__lines);
   if (Array.isArray(data.__moves) && data.__moves.length) await idbBulkPut(TABLES.stockMovements, data.__moves);
+
+  // ── The cached stock figure cannot be merged; the ledger can ──
+  // Two devices offline from 100: A sells 10 and caches 90, B sells 20 and caches 80.
+  // Neither number is right and last-write-wins must pick one of them, so the cache
+  // said 80 while the true figure was 70. The LEDGER, though, is a set of movements —
+  // and once both invoices' movements have arrived it sums to 70 on its own.
+  //
+  // So after installing a document, the materials it touched are recomputed from their
+  // own ledger. Only those materials, and only when their history is anchored by an
+  // opening movement: without that anchor the ledger may be partial, and replaying it
+  // would invent a stock level rather than correct one.
+  const touched = new Set([...(data.__lines || []).map((l) => l.variantId),
+    ...(data.__moves || []).map((m) => m.variantId)].filter(Boolean));
+  if (!touched.size) return;
+  const [allMoves, variants] = await Promise.all([idbGetAll(TABLES.stockMovements), idbGetAll(TABLES.variants)]);
+  const updates = [];
+  for (const vid of touched) {
+    const mine = allMoves.filter((m) => m.variantId === vid && m.isActive !== false);
+    if (!mine.some((m) => m.type === 'opening')) continue;          // history not anchored — leave it alone
+    const fromLedger = Math.round(mine.reduce((sum, m) => sum + Number(m.qtyChange || 0), 0) * 100) / 100;
+    const v = variants.find((x) => x.id === vid);
+    if (!v || Math.abs(Number(v.stockQty || 0) - fromLedger) < 0.005) continue;
+    updates.push({ ...v, stockQty: fromLedger });
+  }
+  if (updates.length) await idbBulkPut(TABLES.variants, updates);
 }
 
 // Cloud wins for any field it provides, but an EMPTY cloud value never wipes a

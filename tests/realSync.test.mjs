@@ -53,6 +53,8 @@ const receiveInvoice = async (cloudRow) => {
   await all();
 };
 
+const stockOf = async (id) => num((await db.getAll(TABLES.variants)).find((v) => v.id === id)?.stockQty);
+const ledgerOf = async (id) => round2((await db.getAll(TABLES.stockMovements)).filter((m) => m.variantId === id && m.isActive !== false).reduce((s, m) => s + num(m.qtyChange), 0));
 const linesOf = async (id) => (await db.getAll(TABLES.invoiceItems))
   .filter((it) => it.invoiceId === id && it.isActive !== false)
   .map((it) => `${it.variantId}:${num(it.qty)}`).sort();
@@ -241,6 +243,62 @@ console.log('\n─── 8. Stock stays true to the ledger throughout ───'
     if (Math.abs(num(v.stockQty) - fromLedger) > 0.02) { drift++; console.log(`    ${v.id}: cached ${v.stockQty} vs ledger ${fromLedger}`); }
   }
   ok('every material agrees with its own ledger', drift === 0, `${drift} materials adrift`);
+}
+
+
+console.log('\n─── 9. Review finding F10: two devices selling offline ───');
+{
+  // Both start at 100. A sells 10 and caches 90; B sells 20 and caches 80. Neither
+  // number is right, and last-write-wins must pick one of them — so the cache said 80
+  // while the true figure was 70. The ledger is a set of movements and sums correctly
+  // on its own once both invoices have arrived.
+  const L = await import('../src/db/local.js');
+  await L.idbClear(TABLES.invoices); await L.idbClear(TABLES.invoiceItems); await L.idbClear(TABLES.stockMovements);
+  await db.insert(TABLES.stockMovements, { variantId: 'a', type: 'opening', qtyChange: 100, qtyAfter: 100, refType: 'manual', refId: null });
+  await db.update(TABLES.variants, 'a', { stockQty: 100 });
+  await all();
+  const start = await snapshot();
+
+  const idA = await save({ lines: [{ variantId: 'a', qty: 10, unitPrice: 100 }] });
+  ok('device A caches 90 after selling 10', await stockOf('a') === 90, `${await stockOf('a')}`);
+  const docA = await shipInvoice(idA);
+
+  await restore(start);
+  const idB = await save({ lines: [{ variantId: 'a', qty: 20, unitPrice: 100 }] });
+  ok('device B caches 80 after selling 20', await stockOf('a') === 80, `${await stockOf('a')}`);
+
+  await receiveInvoice(docA);
+  ok('after B receives A\'s invoice the stock is 70', await stockOf('a') === 70, `${await stockOf('a')}`);
+  ok('and the cache agrees with the ledger', await stockOf('a') === await ledgerOf('a'),
+    `${await stockOf('a')} vs ${await ledgerOf('a')}`);
+  ok('both sales are on the books', (await db.getAll(TABLES.invoices)).filter((i) => i.isActive !== false).length === 2);
+  void idB;
+
+  // Receiving it again must not deduct twice.
+  await receiveInvoice(docA);
+  ok('receiving the same document again keeps 70', await stockOf('a') === 70, `${await stockOf('a')}`);
+}
+
+console.log('\n─── 10. A material with no anchored history is left alone ───');
+{
+  // Codex's warning: a ledger without an opening movement may be partial, and replaying
+  // it would invent a stock level rather than correct one. Such materials must not be
+  // rewritten.
+  const L = await import('../src/db/local.js');
+  await db.insert(TABLES.variants, { id: 'z', nameEn: 'Unanchored', sku: 'Z', stockQty: 500, sellingPriceDefault: 10, purchasePriceAvg: 4, isActive: true });
+  await all();
+  const before = await stockOf('z');
+  ok('it has no opening movement', !(await db.getAll(TABLES.stockMovements)).some((m) => m.variantId === 'z' && m.type === 'opening'));
+
+  const id = await save({ lines: [{ variantId: 'z', qty: 3, unitPrice: 10 }] });
+  const doc = await shipInvoice(id);
+  const afterSale = await stockOf('z');
+  await receiveInvoice(doc);
+  ok('receiving the document does not replay its partial ledger', await stockOf('z') === afterSale,
+    `${await stockOf('z')} vs ${afterSale}`);
+  ok('so no stock level is invented for it', await stockOf('z') !== 0 && await stockOf('z') <= before,
+    `${await stockOf('z')}`);
+  void L;
 }
 
 console.log('\n═══════════════════════════════════════');
