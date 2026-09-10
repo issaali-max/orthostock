@@ -568,9 +568,12 @@ console.log('\n─── 17. A deliberate deletion must not be reported as missi
     invoiceNumber: 'INV-DEL', date: '2026-09-08', customerId: 'c1', currency: 'AED', status: 'active',
     total: 1000, paidAmount: 0, paymentStatus: 'unpaid', payments: [],
   });
-  // db stamps updatedAt on write, so the ordering is created by writing the LINE last:
-  // its stamp then exceeds the header's, which is the edit-in-transit shape.
-  await db.insert(TABLES.invoiceItems, { invoiceId: inv.id, variantId: 'a', qty: 4, unitPrice: 100, netUnitPrice: 100, total: 400, netTotal: 400 });
+  // db stamps updatedAt on write, so the ordering is created by touching the LINE last:
+  // its stamp then exceeds the header's, which is the edit-in-transit shape. The touch
+  // is explicit rather than relying on insert order, since other writes in the same
+  // transaction can now advance the clock between the two.
+  const pending = await db.insert(TABLES.invoiceItems, { invoiceId: inv.id, variantId: 'a', qty: 4, unitPrice: 100, netUnitPrice: 100, total: 400, netTotal: 400 });
+  await db.update(TABLES.invoiceItems, pending.id, { lineBuild: Date.now() + 1000 });
   await all();
 
   const hit = E.invoiceLineMismatches(app.data).find((x) => x.invoiceNumber === 'INV-DEL');

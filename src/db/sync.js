@@ -68,7 +68,20 @@ const carriedByParent = (table, row) => table === TABLES.invoiceItems || table =
 export async function toCloud(row, table) {
   const spec = CHILD_SPEC[table];
   if (!spec) return { id: row.id, updatedAt: row.updatedAt, data: row };
-  const [items, moves] = await Promise.all([idbGetAll(spec.items), idbGetAll(TABLES.stockMovements)]);
+  // ── One state, not two ──
+  // The queued row is a snapshot from the moment the change was made, while the children
+  // are read now. Pairing them ships a header from one version with lines from another —
+  // a correct-looking total against the wrong materials, and different books on each
+  // device. Sending a single request does not help if the payload already mixes
+  // versions.
+  //
+  // The outbox entry is a signal that this invoice changed, not the payload itself. So
+  // the CURRENT header is read alongside the current children, and the document
+  // describes one coherent state. If the row is gone locally, the snapshot is all there
+  // is and is used as-is.
+  const [parents, items, moves] = await Promise.all([idbGetAll(table), idbGetAll(spec.items), idbGetAll(TABLES.stockMovements)]);
+  const live = parents.find((p) => p.id === row.id);
+  if (live) row = live;
   return {
     id: row.id,
     updatedAt: row.updatedAt,

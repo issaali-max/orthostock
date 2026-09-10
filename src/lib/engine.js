@@ -475,6 +475,22 @@ export async function restoreInvoice(app, invoiceId) {
   for (const it of items) if (vById.has(it.variantId)) stock.set(it.variantId, round2(ensure(it.variantId) - num(it.qty))); // take stock again
   for (const it of items) specs.push({ op: 'update', table: TABLES.invoiceItems, id: it.id, patch: { voidedAt: 0 } });
   for (const m of moves) specs.push({ op: 'update', table: TABLES.stockMovements, id: m.id, patch: { isActive: true, voidedAt: 0 } });
+
+  // ── Restore must not depend on history this device happens to hold ──
+  // A voided invoice ships with no active movements — there are none to ship — so
+  // another device receives its header and lines but nothing to reactivate. Restoring
+  // there deducted the stock while the ledger stayed put, and the two disagreed by the
+  // whole invoice. A material with no movement to revive gets a fresh one, so the
+  // ledger always ends up explaining the figure.
+  const revived = new Set(moves.map((m) => m.variantId));
+  for (const it of items) {
+    if (!vById.has(it.variantId) || revived.has(it.variantId)) continue;
+    specs.push({ op: 'insert', table: TABLES.stockMovements, row: {
+      variantId: it.variantId, type: 'sale', qtyChange: -num(it.qty),
+      qtyAfter: round2(stock.get(it.variantId)), refType: 'invoice', refId: invoiceId,
+      date: todayISO(), rebuilt: true,
+    } });
+  }
   for (const [vid, finalQty] of stock) specs.push({ op: 'update', table: TABLES.variants, id: vid, patch: { stockQty: round2(finalQty) } });
   specs.push({ op: 'update', table: TABLES.invoices, id: invoiceId, patch: { isActive: true, deletedAt: null, voidedAt: 0 } });
   await db.atomicMutations(specs);

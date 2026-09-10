@@ -121,6 +121,66 @@ console.log('\n─── 4. The health check stays clean throughout ───');
   ok('and nothing it had to refuse', (res.skipped || []).length === 0, JSON.stringify(res.skipped));
 }
 
+
+console.log('\n─── 5. Review finding F2: restore on a device that lacks the history ───');
+{
+  // A voided invoice has no ACTIVE movements, so it ships with none. Another device
+  // receives its header and lines but nothing to reactivate — and restoring there
+  // deducted the stock while the ledger stayed put, so the two disagreed by the whole
+  // invoice. Restore must not depend on history this device happens to hold.
+  const S = await import('../src/db/sync.js');
+  const L = await import('../src/db/local.js');
+
+  const id = await save({ lines: [{ variantId: 'a', qty: 8, unitPrice: 100 }] });
+  const soldAt = await stock('a');
+  await E.voidInvoice(app, id); await all();
+  ok('voiding returns the stock', await stock('a') === soldAt + 8, `${await stock('a')}`);
+
+  const doc = JSON.parse(JSON.stringify(await S.toCloud((await db.getAll(TABLES.invoices)).find((i) => i.id === id), TABLES.invoices)));
+  ok('a voided invoice ships with no active movements', (doc.data.__moves || []).length === 0,
+    `${(doc.data.__moves || []).length}`);
+
+  // Simulate the other device: it holds the document but no inactive movements.
+  for (const m of (await db.getAll(TABLES.stockMovements)).filter((x) => x.refId === id)) {
+    await L.idbDelete(TABLES.stockMovements, m.id);
+  }
+  await L.idbBulkPut(TABLES.invoices, [S.fromCloud(JSON.parse(JSON.stringify(doc)))]);
+  await S.unpackChildren(TABLES.invoices, doc);
+  await all();
+  ok('it has nothing to reactivate', (await db.getAll(TABLES.stockMovements)).filter((m) => m.refId === id).length === 0);
+
+  const before = await stock('a');
+  await E.restoreInvoice(app, id); await all();
+  ok('restoring takes the stock', await stock('a') === before - 8, `${await stock('a')}`);
+  ok('and the ledger explains the figure', await ledger('a') === await stock('a'),
+    `ledger ${await ledger('a')} vs cached ${await stock('a')}`);
+  const rebuilt = (await db.getAll(TABLES.stockMovements)).filter((m) => m.refId === id && m.isActive !== false);
+  ok('a movement was created to account for it', rebuilt.length === 1, `${rebuilt.length}`);
+  ok('and it is marked as rebuilt rather than passed off as original', rebuilt[0]?.rebuilt === true);
+}
+
+console.log('\n─── 6. Review finding F3: a document must describe ONE state ───');
+{
+  // The outbox row is a snapshot from when the change was made; the children are read at
+  // upload time. Pairing them shipped a header from one version with lines from another.
+  const S = await import('../src/db/sync.js');
+  const id = await save({ lines: [{ variantId: 'b', qty: 4, unitPrice: 50 }] });
+  const stale = JSON.parse(JSON.stringify((await db.getAll(TABLES.invoices)).find((i) => i.id === id)));
+
+  // The invoice changes after that snapshot was taken.
+  await save({ id, lines: [{ variantId: 'b', qty: 9, unitPrice: 50 }] });
+  await all();
+
+  // Serialising from the STALE header must still produce the current state.
+  const doc = await S.toCloud(stale, TABLES.invoices);
+  ok('the shipped total is the current one', num(doc.data.total) === 450, `${doc.data.total}`);
+  ok('and the lines match it', doc.data.__lines.length === 1 && num(doc.data.__lines[0].qty) === 9,
+    JSON.stringify(doc.data.__lines.map((l) => l.qty)));
+  const lineSum = round2(doc.data.__lines.reduce((s, l) => s + num(l.netTotal), 0));
+  ok('header and lines agree inside one document', Math.abs(lineSum - num(doc.data.total)) < 0.02,
+    `${lineSum} vs ${doc.data.total}`);
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${pass + fail} checks · ${fail} finding(s)`);
 findings.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));
