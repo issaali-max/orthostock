@@ -599,6 +599,46 @@ console.log('\n─── 17. A deliberate deletion must not be reported as missi
   ok('and it still names the amount', real && real.gap === 600, `${real && real.gap}`);
 }
 
+
+console.log('\n─── 18. Review findings F8 and F9 ───');
+{
+  // F8 — historical VAT must not follow today's setting. Money already collected and
+  // already owed to the authority cannot be rewritten by a settings change.
+  const inv = [{ id: 'a', date: '2026-09-08', status: 'active', isActive: true, currency: 'AED', total: 105, subtotal: 100, vatAmount: 5, taxApplied: true }];
+  const its = [{ invoiceId: 'a', variantId: 'a', qty: 1, unitPrice: 100, netTotal: 100, total: 100, isActive: true }];
+  ok('VAT at the original rate', E.vatLiability(inv, its, { taxEnabled: true, taxRate: 5 }) === 5);
+  ok('raising the rate does not rewrite it', E.vatLiability(inv, its, { taxEnabled: true, taxRate: 20 }) === 5,
+    `${E.vatLiability(inv, its, { taxEnabled: true, taxRate: 20 })}`);
+  ok('switching tax off does not erase it', E.vatLiability(inv, its, { taxEnabled: false, taxRate: 0 }) === 5,
+    `${E.vatLiability(inv, its, { taxEnabled: false, taxRate: 0 })}`);
+  const legacy = [{ id: 'b', date: '2026-01-01', status: 'active', isActive: true, currency: 'AED', total: 100 }];
+  ok('an invoice with no recorded VAT still computes one', typeof E.vatLiability(legacy, [], { taxEnabled: true, taxRate: 5 }) === 'number');
+
+  // F9 — "a movement exists" is too weak. Quantities must agree per material.
+  const mk = (items, moves) => ({
+    [TABLES.invoices]: [{ id: 'x', invoiceNumber: 'INV-X', date: '2026-09-08', status: 'active', isActive: true, currency: 'AED', total: 2000 }],
+    [TABLES.invoiceItems]: items.map((i) => ({ invoiceId: 'x', isActive: true, ...i })),
+    [TABLES.stockMovements]: moves.map((m) => ({ refType: 'invoice', refId: 'x', isActive: true, type: 'sale', ...m })),
+  });
+  const short = E.invoiceLineMismatches(mk(
+    [{ variantId: 'a', qty: 20, unitPrice: 100, netTotal: 2000 }], [{ variantId: 'a', qtyChange: -10 }]));
+  ok('20 sold against a movement of 10 is flagged', short.length === 1, `${short.length}`);
+  ok('and classed as a stock fault, since the money is right', short[0]?.severity === 'stock', `${short[0]?.severity}`);
+
+  const exact = E.invoiceLineMismatches(mk(
+    [{ variantId: 'a', qty: 20, unitPrice: 100, netTotal: 2000 }], [{ variantId: 'a', qtyChange: -20 }]));
+  ok('a matching quantity is not flagged', exact.length === 0, JSON.stringify(exact));
+
+  const split = E.invoiceLineMismatches(mk(
+    [{ variantId: 'a', qty: 12, unitPrice: 100, netTotal: 1200 }, { variantId: 'a', qty: 8, unitPrice: 100, netTotal: 800 }],
+    [{ variantId: 'a', qtyChange: -20 }]));
+  ok('two lines of one material summing correctly are not flagged', split.length === 0, JSON.stringify(split));
+
+  const over = E.invoiceLineMismatches(mk(
+    [{ variantId: 'a', qty: 10, unitPrice: 100, netTotal: 1000 }], [{ variantId: 'a', qtyChange: -25 }]));
+  ok('deducting MORE than was sold is flagged too', over.length === 1, `${over.length}`);
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${pass + fail} checks · ${fail} finding(s)`);
 findings.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));

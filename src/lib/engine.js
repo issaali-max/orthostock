@@ -1021,7 +1021,18 @@ export function invoiceLineMismatches(data) {
     // Only meaningful once tracking was running AND this invoice has some movements —
     // otherwise we would flag every invoice that predates the feature.
     const preTracking = trackedFrom && (inv.date || '') < trackedFrom;
-    const noMove = (moves.length === 0 || preTracking) ? [] : mine.filter((it) => !moves.some((m) => m.variantId === it.variantId));
+    // "A movement exists" is too weak a test. Twenty units sold against a movement of
+    // −10 leaves half the stock never deducted, while the invoice's total matches its
+    // lines perfectly — so nothing else catches it. Compare QUANTITIES per material:
+    // what the lines say was sold must equal what the ledger says left the shelf.
+    const noMove = (moves.length === 0 || preTracking) ? [] : (() => {
+      const sold = new Map();
+      for (const it of mine) sold.set(it.variantId, round2((sold.get(it.variantId) || 0) + num(it.qty)));
+      const moved = new Map();
+      for (const m of moves) moved.set(m.variantId, round2((moved.get(m.variantId) || 0) + Math.abs(num(m.qtyChange))));
+      // A tolerance for floating-point noise only — not for real shortfalls.
+      return mine.filter((it) => Math.abs(num(sold.get(it.variantId)) - num(moved.get(it.variantId))) > 0.000001);
+    })();
 
     // Severity, so a few fils of rounding is never shown next to 2,000 of missing lines.
     //   empty    — a total with no lines at all: the lines were never written
@@ -1409,7 +1420,14 @@ export function vatLiability(invoices, items, settings) {
   let outputVat = 0;
   for (const inv of (invoices || [])) {
     if (inv.isActive === false || inv.status === 'returned') continue;
-    outputVat += num(invoiceBreakdown(inv, byInv.get(inv.id) || [], settings).vat);
+    // The VAT an invoice carries is the VAT that was charged on it. Recomputing from
+    // today's rate rewrites history: changing the setting from 5% to 20% turned a past
+    // invoice's 5 into 20, and switching tax off turned it into 0 — for money already
+    // collected and already owed to the authority. The stored amount wins whenever the
+    // invoice recorded one; only invoices with no recorded VAT fall back to computing
+    // it, and those predate the field.
+    const stored = num(inv.vatAmount);
+    outputVat += stored > 0 ? stored : num(invoiceBreakdown(inv, byInv.get(inv.id) || [], settings).vat);
   }
   return round2(outputVat);
 }
