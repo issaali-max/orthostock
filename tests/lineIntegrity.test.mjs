@@ -639,6 +639,43 @@ console.log('\n─── 18. Review findings F8 and F9 ───');
   ok('deducting MORE than was sold is flagged too', over.length === 1, `${over.length}`);
 }
 
+
+console.log('\n─── 19. Toggling VAT affects only invoices issued after it ───');
+{
+  // Issa's requirement, in his words: he switches VAT on and off, and turning it on
+  // must apply to the invoices he issues from then on — never to past ones.
+  const line = (id) => [{ invoiceId: id, variantId: 'a', qty: 1, unitPrice: 100, netTotal: 100, total: 100, isActive: true }];
+  const ON = { taxEnabled: true, taxRate: 5 };
+  const OFF = { taxEnabled: false, taxRate: 0 };
+
+  // An invoice issued while VAT was off — no flag recorded at all.
+  const past = [{ id: 'a', date: '2025-01-01', status: 'active', isActive: true, currency: 'AED', total: 100 }];
+  ok('a past untaxed invoice is untaxed while VAT is off', E.vatLiability(past, line('a'), OFF) === 0);
+  ok('and STAYS untaxed when VAT is switched on', E.vatLiability(past, line('a'), ON) === 0,
+    `${E.vatLiability(past, line('a'), ON)}`);
+
+  // An invoice explicitly issued without tax while the setting was on.
+  const exempt = [{ id: 'e', date: '2026-09-01', status: 'active', isActive: true, currency: 'AED', total: 100, taxApplied: false }];
+  ok('an invoice issued tax-free stays tax-free even with VAT on', E.vatLiability(exempt, line('e'), ON) === 0);
+
+  // An invoice issued WITH tax keeps it whatever happens later.
+  const taxed = [{ id: 'b', date: '2026-09-10', status: 'active', isActive: true, currency: 'AED', total: 105, subtotal: 100, vatAmount: 5, taxApplied: true }];
+  ok('a taxed invoice reports its VAT', E.vatLiability(taxed, line('b'), ON) === 5);
+  ok('switching VAT off does not erase it', E.vatLiability(taxed, line('b'), OFF) === 5,
+    `${E.vatLiability(taxed, line('b'), OFF)}`);
+  ok('raising the rate does not reprice it', E.vatLiability(taxed, line('b'), { taxEnabled: true, taxRate: 20 }) === 5,
+    `${E.vatLiability(taxed, line('b'), { taxEnabled: true, taxRate: 20 })}`);
+
+  // Mixed period: only the taxed invoice contributes.
+  ok('a mixed period counts only what was actually charged',
+    E.vatLiability([...past, ...taxed], [...line('a'), ...line('b')], ON) === 5,
+    `${E.vatLiability([...past, ...taxed], [...line('a'), ...line('b')], ON)}`);
+
+  // The customer-facing document must agree.
+  const bd = E.invoiceBreakdown(past[0], line('a'), ON);
+  ok('the printed invoice shows no VAT on a past untaxed invoice', num(bd.vat) === 0, `${bd.vat}`);
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${pass + fail} checks · ${fail} finding(s)`);
 findings.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));

@@ -1247,6 +1247,9 @@ export function repairInvoiceMoney(inv) {
 export function invoiceTotals(lines, settings, taxApplied) {
   const subtotal = lines.reduce((s, l) => s + num(l.unitPrice) * num(l.qty) - num(l.discountAmount), 0);
   // taxApplied (per-invoice) overrides the global setting when provided (true/false).
+  // For a NEW invoice being priced, taxApplied is supplied by the screen and the global
+  // setting is only the default it starts from. A stored invoice with no flag was
+  // issued without tax — see invoiceBreakdown.
   const useTax = taxApplied == null ? !!settings?.taxEnabled : !!taxApplied;
   const vat = useTax ? subtotal * safeDiv(num(settings.taxRate), 100) : 0;
   return { subtotal: round2(subtotal), vat: round2(vat), total: round2(subtotal + vat) };
@@ -1398,7 +1401,13 @@ export function invoiceBreakdown(invoice, items, settings) {
   const netSubtotal = round2(lines.reduce((s, l) => s + l.netTotal, 0));
   const discountTotal = invDisc || round2(Math.max(0, grossSubtotal - netSubtotal));
   // Per-invoice VAT flag (taxApplied) wins; older invoices without it fall back to settings.
-  const taxEnabled = invoice.taxApplied == null ? !!settings?.taxEnabled : !!invoice.taxApplied;
+  // ── The tax an invoice was ISSUED under, not today's setting ──
+  // Turning VAT on must apply to invoices issued from that point, never to past ones:
+  // a clinic that was billed 100 was billed 100, and no later settings change may
+  // reprice it. Every invoice records taxApplied when saved; one that has no flag was
+  // issued before the app recorded it, which was a period when tax was off — so absence
+  // means NO tax, not "ask the current setting".
+  const taxEnabled = invoice.taxApplied == null ? false : !!invoice.taxApplied;
   const vatRate = taxEnabled ? num(settings.taxRate) : 0;
   // Reuse invoiceTotals' exact formula on the net subtotal, honoring this invoice's flag
   const t = invoiceTotals([{ unitPrice: netSubtotal, qty: 1, discountAmount: 0 }], settings, taxEnabled);
