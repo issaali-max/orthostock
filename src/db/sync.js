@@ -210,7 +210,15 @@ async function flushInner() {
       markOnline(true);
     } catch (e) {
       const msg = String(e?.message || e);
-      if (isMissingTable(e)) { await outboxDelete(op.seq); continue; }   // table not in this cloud: nothing to do
+      // A missing cloud table is a DEPLOYMENT problem — the schema has not been applied
+      // yet — not a reason to throw away a business change the owner made. Discarding
+      // it loses data that exists only on this device. The write stays queued and
+      // uploads itself once the table exists.
+      if (isMissingTable(e)) {
+        const tries = await outboxBumpTries(op.seq);
+        if (tries === 1) failed.push({ table: op.table, id: op.id, error: `table missing in cloud: ${msg}` });
+        continue;
+      }
       // Everything else stays queued. A write that exists only on this device is
       // never thrown away; it retries, and the owner is told it is waiting.
       const tries = await outboxBumpTries(op.seq);
@@ -261,6 +269,13 @@ export async function pull({ full = false } = {}) {
       for (const cloud of rows) {
         const rec = fromCloud(cloud);
         if (!rec?.id) continue;
+        // ── One owner per row ──
+        // A movement caused by an invoice or a purchase belongs to that document and
+        // arrives inside it. The same row can also exist standalone in the cloud from
+        // before this design, and a stale copy with a newer timestamp would then fight
+        // the parent's current generation — two sync paths disagreeing about one fact.
+        // The parent is the single owner; the standalone copy is ignored.
+        if (carriedByParent(table, rec)) continue;
         const cu = Number(rec.updatedAt || cloud.updatedAt || 0);
         if (cu > maxSeen) maxSeen = cu;
         const mine = localById.get(rec.id);
@@ -373,6 +388,7 @@ export async function mergeWithCloud(onProgress) {
         for (const cloud of data) {
           const rec = fromCloud(cloud);
           if (!rec?.id) continue;
+          if (carriedByParent(table, rec)) continue;      // owned by its parent document
           const mine = localById.get(rec.id);
           rows.push(mine ? mergePreserve(mine, rec) : rec);
           await unpackChildren(table, cloud);

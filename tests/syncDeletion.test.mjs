@@ -46,7 +46,10 @@ console.log('\n─── 3. Rule 3: a local write is never discarded ───')
   ok('no operation is dropped after repeated failure', !/dropping op after/.test(sync));
   ok('failures stay queued and retry', /stays queued/i.test(sync) || /never thrown away/.test(sync));
   ok('and are reported to the owner', /failed\.push/.test(sync));
-  ok('a missing cloud table is the one safe discard', /isMissingTable\(e\)\) \{ await outboxDelete/.test(sync));
+  // Superseded by F12: a missing cloud table is a deployment problem, not a safe
+  // discard. Nothing is dropped now — see section 11.
+  ok('nothing at all is discarded on failure', !/await outboxDelete\(op\.seq\);\s*\n\s*continue;/.test(sync)
+    || /table missing in cloud/.test(sync));
 }
 
 console.log('\n─── 4. Rule 4: a pull never pushes ───');
@@ -144,6 +147,39 @@ console.log('\n─── 10. The upload must actually run ───');
   ok('failed counts only rows already rejected', /filter\(\(o\) => Number\(o\.tries \|\| 0\) > 0\)/.test(sync));
   const spots = (sync.match(/Number\(o\.tries \|\| 0\) > 0/g) || []).length;
   ok('every place that reports the count agrees', spots >= 3, `${spots} of 3`);
+}
+
+
+console.log('\n─── 11. Review findings F4, F5, F12, F13 ───');
+{
+  const engine = fs.readFileSync(new URL('../src/lib/engine.js', import.meta.url), 'utf8');
+  const settings = fs.readFileSync(new URL('../src/features/settings/Settings.jsx', import.meta.url), 'utf8');
+
+  // F4 — one owner per economic child row. A movement caused by an invoice belongs to
+  // that invoice and arrives inside it; a stale standalone copy with a newer timestamp
+  // must not fight the parent's current generation.
+  ok('pull ignores rows owned by a parent', /if \(carriedByParent\(table, rec\)\) continue;/.test(sync));
+  ok('the download half of merge ignores them too',
+    (sync.match(/carriedByParent\(table, rec\)\) continue/g) || []).length >= 2);
+  ok('the upload half filters them as well', /filter\(\(r\) => !carriedByParent\(table, r\)\)/.test(sync));
+  ok('and the reason is recorded', /One owner per row/.test(sync));
+
+  // F5 — a money change must not succeed without its history.
+  ok('the audit entry is part of the invoice transaction',
+    /specs\.push\(\{ op: 'insert', table: TABLES\.auditLog/.test(engine));
+  ok('it is no longer written after the transaction',
+    !/await db\.atomicMutations\(specs\);[\s\S]{0,400}await logAudit\(app, editingId/.test(engine));
+  ok('it records who, what and how much', /userName: app\?\.user\?\.name/.test(engine) && /note: `\$\{lines\.length\}/.test(engine));
+
+  // F12 — a missing cloud table is a deployment problem, not a reason to discard a
+  // business change that exists only on this device.
+  ok('a missing table no longer discards the write', !/isMissingTable\(e\)\) \{ await outboxDelete/.test(sync));
+  ok('the write stays queued and is reported', /table missing in cloud/.test(sync));
+
+  // F13 — the health verdict must not call the data healthy while a stock fault is
+  // listed directly beneath it.
+  ok('stock faults block the all-healthy verdict', /severity === 'stock'\)\.length === 0;/.test(settings));
+  ok('and the reason is recorded', /billed but never\s*\n?\s*\/\/ left the shelf|stop reading exactly where the problem is/.test(settings));
 }
 
 console.log('\n═══════════════════════════════════════');

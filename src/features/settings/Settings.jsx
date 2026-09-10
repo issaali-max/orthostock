@@ -491,7 +491,11 @@ export default function Settings() {
           const h = dataHealth(data);
           const payGaps = paymentLogMismatches(data);
           const lineGaps = invoiceLineMismatches(data);
-          const ok = h.orphan.length === 0 && h.hiddenDebt.length === 0 && h.dupCustomers.length === 0 && (!h.dupMaterials || h.dupMaterials.length === 0) && (!h.dupInvoiceNumbers || h.dupInvoiceNumbers.length === 0) && payGaps.length === 0 && lineGaps.filter((g) => g.severity === 'empty' || g.severity === 'lines').length === 0;
+          const ok = h.orphan.length === 0 && h.hiddenDebt.length === 0 && h.dupCustomers.length === 0 && (!h.dupMaterials || h.dupMaterials.length === 0) && (!h.dupInvoiceNumbers || h.dupInvoiceNumbers.length === 0) && payGaps.length === 0 && lineGaps.filter((g) => g.severity === 'empty' || g.severity === 'lines').length === 0
+            // A stock discrepancy is a real finding: materials were billed but never
+            // left the shelf. Declaring the data healthy while one is listed below tells
+            // the owner to stop reading exactly where the problem is.
+            && lineGaps.filter((g) => g.severity === 'stock').length === 0;
           const Row = ({ tone, children }) => <div style={{ background: tone === 'bad' ? '#FBECEC' : C.surfaceAlt, borderRadius: 8, padding: '6px 10px', fontSize: 12, color: C.textMid }}>{children}</div>;
           return (
             <div style={{ display: 'grid', gap: 10 }}>

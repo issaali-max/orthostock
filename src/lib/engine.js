@@ -396,10 +396,20 @@ export async function saveInvoiceAtomic(app, { editingId, invoiceData, lines, in
   }
   for (const [vid, finalQty] of stock) specs.push({ op: 'update', table: TABLES.variants, id: vid, patch: { stockQty: round2(finalQty) } });
 
+  // The audit entry is part of the transaction, not a note written afterwards. Written
+  // outside it — as it was — a save could succeed while its history silently failed,
+  // leaving a money change with no record of who made it or when. Issa uses that log as
+  // the reference for what happened, so a gap in it is a gap in the evidence.
+  specs.push({ op: 'insert', table: TABLES.auditLog, row: {
+    at: Date.now(), userId: app?.user?.id || '', userName: app?.user?.name || app?.user?.email || '—',
+    action: editingId ? 'edit' : 'create', entity: 'invoice',
+    ref: String(invoiceData.invoiceNumber || invId),
+    note: `${lines.length} × ${round2(num(invoiceData.total))}`,
+  } });
+
   await db.atomicMutations(specs);
-  await Promise.all([app.refresh(TABLES.invoices), app.refresh(TABLES.invoiceItems), app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements)]);
+  await Promise.all([app.refresh(TABLES.invoices), app.refresh(TABLES.invoiceItems), app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements), app.refresh(TABLES.auditLog)]);
   nudgeSync();
-  await logAudit(app, editingId ? 'edit' : 'create', 'invoice', invoiceData.invoiceNumber || invId);
   return invId;
 }
 
