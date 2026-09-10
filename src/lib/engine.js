@@ -1154,10 +1154,24 @@ export function proposeInvoiceLinesFromMovements(data, invoiceId) {
     big.lineTotal = round2(big.unitPrice * big.qty);
   }
   const sum = round2(rows.reduce((s, r) => s + r.lineTotal, 0));
+  // ── When is the price PROVEN, and when is it a guess? ──
+  // With ONE missing material the arithmetic is forced: its price is the missing value
+  // divided by a quantity the ledger already recorded. Nothing else can fit.
+  //
+  // With SEVERAL, it is not. Two materials missing 1,000 between them fit 800/200,
+  // 500/500 or 900/100 equally well — every split reproduces the total, and matching
+  // the total is therefore no evidence at all. Writing one of them stamps a guess into
+  // the ledger as though it were history, and later reports would treat it as fact.
+  //
+  // So a single-material recovery is offered for one click; a multi-material one shows
+  // the quantities, which ARE certain, and leaves the prices to the person who knows
+  // what was actually charged.
+  const pricesProven = rows.length === 1;
   return {
     invoiceId, invoiceNumber: inv.invoiceNumber, date: inv.date, total, missingValue,
     recoverable: true, reason: null, lines: rows,
     exact: Math.abs(sum - missingValue) < 0.02,
+    pricesProven,
     quantitiesCertain: true,          // straight from the movements
     pricesDerived: true,              // proportional, not recorded
   };
@@ -1176,6 +1190,10 @@ export async function applyInvoiceLineRecovery(app, invoiceId) {
   const data = app.data || {};
   const proposal = proposeInvoiceLinesFromMovements(data, invoiceId);
   if (!proposal || !proposal.recoverable) throw new Error('nothing to recover');
+  // Refuses to write a price split that the evidence does not determine. See
+  // proposeInvoiceLinesFromMovements: with more than one missing material every split
+  // reproduces the total, so choosing one would record a guess as fact.
+  if (!proposal.pricesProven) throw new Error('prices are not determined — enter them by hand');
 
   const [variants, allItems] = await Promise.all([db.getAll(TABLES.variants), db.getAll(TABLES.invoiceItems)]);
   const vById = new Map(variants.map((v) => [v.id, v]));

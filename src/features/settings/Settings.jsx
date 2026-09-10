@@ -532,14 +532,24 @@ export default function Settings() {
                           // Only the money faults can be recovered, and only when the
                           // stock movements survived to rebuild the lines from.
                           const prop = (k === 'empty' || k === 'lines') ? proposeInvoiceLinesFromMovements(data, g.id) : null;
-                          const canFix = prop && prop.recoverable && prop.exact;
+                          // Offered for one click only when the arithmetic forces the
+                          // price. With several missing materials the quantities are
+                          // still certain and worth showing — the split is not.
+                          const canFix = prop && prop.recoverable && prop.exact && prop.pricesProven;
+                          const knownQtysOnly = prop && prop.recoverable && prop.exact && !prop.pricesProven;
                           return (
                             <Row key={g.id} tone={(k === 'rounding' || k === 'pending') ? 'muted' : 'bad'}>
                               <div><b>{g.invoiceNumber}</b> · {t('total')} {cur(g.total)}
                                 {k !== 'stock' && <> · {t('lines')} {cur(g.lineSum)} · <b>{g.gap > 0 ? '+' : ''}{cur(g.gap)}</b></>}
                                 {k === 'stock' && <> · {g.missingMovements} {t('linesNoStock')}</>}
                               </div>
-                              {prop && !canFix && <div style={{ fontSize: 10.5, color: C.textMuted }}>· {t('recoverImpossible')}</div>}
+                              {knownQtysOnly && (
+                                <div style={{ fontSize: 10.5, color: C.textMid, marginTop: 4, lineHeight: 1.6 }}>
+                                  🔍 {t('recoverFound')}: {prop.lines.map((l) => `${l.name} ×${fmtNum(l.qty)}`).join(' · ')}
+                                  <div style={{ color: C.textMuted, marginTop: 2 }}>{t('recoverQtyOnly')}</div>
+                                </div>
+                              )}
+                              {prop && !canFix && !knownQtysOnly && <div style={{ fontSize: 10.5, color: C.textMuted }}>· {t('recoverImpossible')}</div>}
                               {canFix && (
                                 <div style={{ marginTop: 5 }}>
                                   <div style={{ fontSize: 10.5, color: C.textMid, marginBottom: 4 }}>

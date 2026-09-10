@@ -340,18 +340,20 @@ console.log('\n─── 9. Recovering lost lines from the movements that surviv
   ok('the missing value is the total minus what survived', p.missingValue === 2068, `${p.missingValue}`);
   ok('it is honest that prices are derived', p.pricesDerived === true && p.quantitiesCertain === true);
 
-  // Applying the proposal must make the invoice whole. Use the real apply path rather
-  // than re-deriving lines from the rounded unit prices: qty × round2(price) does not
-  // always reproduce the allocated line total, and applyInvoiceLineRecovery writes the
-  // allocated totals directly for exactly that reason.
-  await applyInvoiceLineRecovery(app, rec.id);
+  // TWO materials are missing here, so the price split is not determined — every split
+  // reproduces the total. Applying is refused rather than recording a guess as history.
+  let refusedMulti = false;
+  try { await applyInvoiceLineRecovery(app, rec.id); } catch { refusedMulti = true; }
   await all();
-  const after = invoiceLineMismatches(app.data).find((x) => x.invoiceNumber === 'INV-REC');
-  ok('after applying, the invoice reports no fault', !after || after.severity === 'rounding', JSON.stringify(after));
+  ok('a two-material recovery is refused', refusedMulti);
+  ok('and the invoice is left for the owner to complete',
+    invoiceLineMismatches(app.data).some((x) => x.invoiceNumber === 'INV-REC'));
   const fixed = (await db.getAll(TABLES.invoices)).find((i) => i.id === rec.id);
   const its = await itemsOf(rec.id);
-  ok('its lines now sum to its total', Math.abs(round2(its.reduce((s, i) => s + num(i.netTotal), 0)) - num(fixed.total)) < 0.05);
-  ok('every recovered line now moves stock', its.every((it) => (app.data[TABLES.stockMovements] || []).some((m) => m.refId === rec.id && m.variantId === it.variantId && m.isActive !== false)));
+  ok('its surviving line is untouched by the refusal', its.length === 1 && num(its[0].qty) === 10,
+    JSON.stringify(its.map((i) => [i.variantId, i.qty])));
+  ok('nothing was written for the unproven split', !its.some((i) => i.recovered), JSON.stringify(its.map((i) => i.recovered)));
+  void fixed;
 
   // An invoice with no movements cannot be recovered honestly, and says so.
   const bare = await db.insert(TABLES.invoices, { invoiceNumber: 'INV-BARE', date: '2026-09-03', customerId: 'c1', currency: 'AED', status: 'active', total: 608, paidAmount: 0, paymentStatus: 'unpaid', payments: [] });
@@ -377,8 +379,10 @@ console.log('\n─── 10. The recovery BUTTON: applying must fix the invoice 
   const dmg = await db.insert(TABLES.invoices, { invoiceNumber: 'INV-APPLY', date: '2026-09-04', customerId: 'c1', currency: 'AED', status: 'active', total: 1500, paidAmount: 600, paymentStatus: 'partial', paymentMethod: 'cash', payments: [{ date: '2026-09-04', amount: 600, method: 'cash' }] });
   await db.insert(TABLES.invoiceItems, { invoiceId: dmg.id, variantId: 'w16', qty: 10, unitPrice: 39, netUnitPrice: 39, total: 390, netTotal: 390, sortIndex: 0 });
   await db.insert(TABLES.stockMovements, { variantId: 'w16', type: 'sale', qtyChange: -10, refType: 'invoice', refId: dmg.id });
+  // ONE missing material, so its price is forced by arithmetic and the recovery can be
+  // applied. (A second missing material would make the split unprovable and be refused —
+  // covered in section 11.)
   await db.insert(TABLES.stockMovements, { variantId: 'r16', type: 'sale', qtyChange: -30, refType: 'invoice', refId: dmg.id });
-  await db.insert(TABLES.stockMovements, { variantId: 'brk', type: 'sale', qtyChange: -12, refType: 'invoice', refId: dmg.id });
   await all();
 
   const res = await applyInvoiceLineRecovery(app, dmg.id);
@@ -386,7 +390,7 @@ console.log('\n─── 10. The recovery BUTTON: applying must fix the invoice 
   // A unit price has two decimals, so qty × price cannot always reproduce the exact
   // missing value; a few fils can remain. Recovery corrects the TOTAL to what the lines
   // truly sum to, and reports that adjustment rather than hiding it.
-  ok('it reports what it added', res.added === 2 && Math.abs(res.value - 1110) < 0.1, JSON.stringify(res));
+  ok('it reports what it added', res.added === 1 && Math.abs(res.value - 1110) < 0.1, JSON.stringify(res));
   ok('any rounding adjustment is small and disclosed', Math.abs(res.totalAdjusted) < 0.5, `${res.totalAdjusted}`);
 
   const after = invoiceLineMismatches(app.data).find((x) => x.invoiceNumber === 'INV-APPLY');
@@ -394,12 +398,12 @@ console.log('\n─── 10. The recovery BUTTON: applying must fix the invoice 
 
   const fixedItems = await itemsOf(dmg.id);
   ok('the surviving line is still there, unchanged', fixedItems.some((i) => i.variantId === 'w16' && num(i.qty) === 10 && num(i.unitPrice) === 39));
-  ok('recovered lines are marked as such', fixedItems.filter((i) => i.recovered).length === 2);
+  ok('recovered lines are marked as such', fixedItems.filter((i) => i.recovered).length === 1);
   const fixedInv = (await db.getAll(TABLES.invoices)).find((i) => i.id === dmg.id);
   ok('lines now sum to the invoice total exactly',
     Math.abs(round2(fixedItems.reduce((s, i) => s + num(i.netTotal), 0)) - num(fixedInv.total)) < 0.02,
     `${fixedItems.reduce((s, i) => s + num(i.netTotal), 0)} vs ${fixedInv.total}`);
-  ok('quantities match the movements exactly', fixedItems.find((i) => i.variantId === 'r16').qty === 30 && fixedItems.find((i) => i.variantId === 'brk').qty === 12);
+  ok('the quantity matches the movement exactly', fixedItems.find((i) => i.variantId === 'r16').qty === 30);
 
   // The critical guarantee: recovery must NOT deduct stock again.
   const stockAfter = Object.fromEntries(await Promise.all(mats.map(async ([id]) => [id, (await V(id)).stockQty])));
@@ -422,7 +426,7 @@ console.log('\n─── 10. The recovery BUTTON: applying must fix the invoice 
   try { await applyInvoiceLineRecovery(app, dmg.id); } catch { threw = true; }
   await all();
   ok('applying twice is refused', threw);
-  ok('no duplicate lines were created', (await itemsOf(dmg.id)).length === 3, `${(await itemsOf(dmg.id)).length}`);
+  ok('no duplicate lines were created', (await itemsOf(dmg.id)).length === 2, `${(await itemsOf(dmg.id)).length}`);
 
   // An invoice with no movements must be refused, not guessed at.
   const bare2 = await db.insert(TABLES.invoices, { invoiceNumber: 'INV-BARE2', date: '2026-09-04', customerId: 'c1', currency: 'AED', status: 'active', total: 500, paidAmount: 0, paymentStatus: 'unpaid', payments: [] });
@@ -431,6 +435,47 @@ console.log('\n─── 10. The recovery BUTTON: applying must fix the invoice 
   try { await applyInvoiceLineRecovery(app, bare2.id); } catch { threw2 = true; }
   ok('an invoice without movements is refused', threw2);
   ok('and no line was invented for it', (await itemsOf(bare2.id)).length === 0);
+}
+
+
+console.log('\n─── 11. Review finding F11: recovery must not invent prices ───');
+{
+  // Matching the invoice total is not evidence. Two materials missing 1,000 between
+  // them fit 800/200, 500/500 or 900/100 equally well — every split reproduces the
+  // total, so choosing one writes a guess into the ledger as though it were history.
+  const inv2 = await db.insert(TABLES.invoices, { invoiceNumber: 'INV-MULTI', date: '2026-09-04', customerId: 'c1', currency: 'AED', status: 'active', total: 1000, paidAmount: 0, paymentStatus: 'unpaid', payments: [] });
+  await db.insert(TABLES.stockMovements, { variantId: 'w16', type: 'sale', qtyChange: -10, refType: 'invoice', refId: inv2.id, date: '2026-09-04' });
+  await db.insert(TABLES.stockMovements, { variantId: 'r16', type: 'sale', qtyChange: -5, refType: 'invoice', refId: inv2.id, date: '2026-09-04' });
+  await all();
+
+  const multi = proposeInvoiceLinesFromMovements(app.data, inv2.id);
+  ok('the quantities are still recovered', multi.lines.length === 2, `${multi.lines.length}`);
+  ok('and they come straight from the ledger',
+    multi.lines.find((l) => l.variantId === 'w16').qty === 10 && multi.lines.find((l) => l.variantId === 'r16').qty === 5);
+  ok('but the price split is NOT treated as proven', multi.pricesProven === false);
+
+  let refused = false;
+  try { await applyInvoiceLineRecovery(app, inv2.id); } catch { refused = true; }
+  await all();
+  ok('applying it is refused', refused);
+  ok('and no line was written', (await itemsOf(inv2.id)).length === 0, `${(await itemsOf(inv2.id)).length}`);
+
+  // ONE missing material is different: the price is forced by arithmetic.
+  const inv1 = await db.insert(TABLES.invoices, { invoiceNumber: 'INV-SINGLE', date: '2026-09-04', customerId: 'c1', currency: 'AED', status: 'active', total: 1000, paidAmount: 0, paymentStatus: 'unpaid', payments: [] });
+  await db.insert(TABLES.stockMovements, { variantId: 'w16', type: 'sale', qtyChange: -10, refType: 'invoice', refId: inv1.id, date: '2026-09-04' });
+  await all();
+
+  const single = proposeInvoiceLinesFromMovements(app.data, inv1.id);
+  ok('a single missing material has a determined price', single.pricesProven === true);
+  ok('and it is the only price that fits', single.lines[0].unitPrice === 100, `${single.lines[0].unitPrice}`);
+
+  const res = await applyInvoiceLineRecovery(app, inv1.id);
+  await all();
+  ok('so it can be applied', res.added === 1, JSON.stringify(res));
+  const line = (await itemsOf(inv1.id))[0];
+  ok('the written line matches the ledger quantity', num(line.qty) === 10);
+  ok('and the invoice reconciles', Math.abs(round2(num(line.netTotal)) - 1000) < 0.02, `${line.netTotal}`);
+  ok('the recovered line stays identifiable', line.recovered === true);
 }
 
 console.log('\n═══════════════════════════════════════');
