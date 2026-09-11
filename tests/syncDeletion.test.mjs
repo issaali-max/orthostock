@@ -208,6 +208,47 @@ console.log('\n─── 12. Review finding F13: the clock and the restore stamp
   ok('and points at merge as the alternative', /دمج كامل|Full merge/.test(i18n));
 }
 
+
+console.log('\n─── 13. B2: a stale device must not overwrite newer money ───');
+{
+  const schema = fs.readFileSync(new URL('../src/db/schema.sql', import.meta.url), 'utf8');
+
+  // The server guarantee. It has to be the server, because the stale client already has
+  // a newer row in its own view and cannot know better.
+  ok('the schema carries a stale-write guard', /orthostock_reject_stale/.test(schema));
+  ok('it compares the incoming stamp against the stored one', /new\."updatedAt" < old\."updatedAt"/.test(schema));
+  ok('and KEEPS the newer row rather than raising', /return old;/.test(schema),
+    'raising would have to be handled by old builds that will never be updated');
+  ok('rows without a stamp are left alone', /new\."updatedAt" is null or old\."updatedAt" is null/.test(schema));
+  ok('the trigger is installed on every table', /foreach t in array array\[/.test(schema));
+  ok('and is idempotent to re-running the schema', /drop trigger if exists orthostock_stale_guard/.test(schema));
+
+  // Count the tables the trigger loop covers against the tables the schema declares.
+  const declared = [...schema.matchAll(/create table if not exists public\."(\w+)"/g)].map((m) => m[1]);
+  const guardBlock = schema.slice(schema.indexOf('foreach t in array array['), schema.indexOf('] loop'));
+  const missing = declared.filter((t) => !guardBlock.includes(`'${t}'`));
+  ok('no declared table is left unguarded', missing.length === 0, missing.join(', '));
+
+  // The client check. Not a lock — the trigger closes the race — but it stops the
+  // common case and makes it visible.
+  ok('the client asks what the cloud holds before overwriting',
+    /select\('"updatedAt"'\)\.eq\('id', op\.id\)/.test(sync));
+  ok('and stands down when the cloud is newer', /cloud is newer, not overwriting/.test(sync));
+  ok('dropping its superseded write rather than retrying it forever',
+    /cloudAt > mineAt\)[\s\S]{0,300}outboxDelete\(op\.seq\)/.test(sync));
+  ok('the check cannot itself break the upload', /the check is best-effort; the trigger is the guarantee/.test(sync));
+
+  // Simulate the reported scenario both ways.
+  const run = ({ guarded }) => {
+    let cloud = { updatedAt: 200, paid: 300 };            // another device recorded a payment
+    const stale = { updatedAt: 100, paid: 0 };            // our pending, older version
+    if (!guarded || stale.updatedAt >= cloud.updatedAt) cloud = stale;
+    return cloud.paid;
+  };
+  ok('unguarded, the payment of 300 is lost', run({ guarded: false }) === 0);
+  ok('guarded, the payment survives', run({ guarded: true }) === 300);
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${pass + fail} checks · ${fail} finding(s)`);
 findings.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));

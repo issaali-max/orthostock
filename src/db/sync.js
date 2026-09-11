@@ -259,7 +259,28 @@ async function flushInner() {
         const { error } = await supabase.from(op.table).delete().eq('id', op.id);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from(op.table).upsert(await toCloud(op.row, op.table));
+        const payload = await toCloud(op.row, op.table);
+        // ── Second line of defence, in the client ──
+        // The trigger in schema.sql is the real guarantee, because it also protects
+        // against old builds that will never be updated. But it may not be deployed yet,
+        // and a client that can see it is about to overwrite newer work should not do it
+        // anyway. So: ask what the cloud holds, and stand down if it is newer.
+        //
+        // This is a check, not a lock — another device can write between the read and the
+        // upsert. That race is exactly what the trigger closes; this narrows it and makes
+        // the common case visible in the log rather than silent.
+        try {
+          const { data: cur } = await supabase.from(op.table).select('"updatedAt"').eq('id', op.id).maybeSingle();
+          const cloudAt = Number(cur?.updatedAt || 0);
+          const mineAt = Number(payload.updatedAt || 0);
+          if (cloudAt > 0 && mineAt > 0 && cloudAt > mineAt) {
+            console.warn('[sync] cloud is newer, not overwriting:', op.table, op.id, cloudAt, '>', mineAt);
+            await outboxDelete(op.seq);          // our version is superseded; the pull will bring theirs
+            continue;
+          }
+        } catch { /* the check is best-effort; the trigger is the guarantee */ }
+
+        const { error } = await supabase.from(op.table).upsert(payload);
         if (error) throw error;
       }
       await outboxDelete(op.seq);

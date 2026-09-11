@@ -277,3 +277,55 @@ alter table public."projects" enable row level security;
 do $$ begin
   create policy "projects all" on public."projects" for all to anon, authenticated using (true) with check (true);
 exception when duplicate_object then null; end $$;
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- STALE-WRITE PROTECTION
+--
+-- Every upload is an unconditional upsert, so a device that has been offline can
+-- overwrite work done since it left. A pending old invoice replaced a newer one
+-- carrying a payment of 300, and the payment was gone from the cloud and from every
+-- device — a pull cannot recover what the authoritative row no longer holds.
+--
+-- Timestamps alone do not fix this: the client already HAS a newer local row in its
+-- own view, and it is the server that must decline the write. This trigger does that.
+--
+-- It keeps the NEWER row rather than raising an error, for two reasons. A raise would
+-- have to be handled by every client, including old builds already on people's phones
+-- that will never be updated — and those are exactly the devices this protects
+-- against. And silently keeping the newer row converges: the stale client's next pull
+-- brings that row down, so both sides end up agreeing without anyone losing money.
+--
+-- A row with no updatedAt on either side is left alone, so seeding and any legacy row
+-- without the column still work.
+-- ════════════════════════════════════════════════════════════════════════════
+create or replace function public.orthostock_reject_stale()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new."updatedAt" is null or old."updatedAt" is null then
+    return new;
+  end if;
+  if new."updatedAt" < old."updatedAt" then
+    return old;          -- incoming write is older than what is stored: keep the newer
+  end if;
+  return new;
+end;
+$$;
+
+do $$
+declare t text;
+begin
+  foreach t in array array[
+    'categories','products','variants','customers','customerPrices','suppliers',
+    'purchases','purchaseItems','invoices','invoiceItems','stockMovements','expenses',
+    'expenseGroups','otherDebts','securities','cashFlows','tradeLots','tradeSells',
+    'settings','users','externalDebts','auditLog','supplierPayments','orders',
+    'orderItems','visits','projects'
+  ] loop
+    execute format('drop trigger if exists orthostock_stale_guard on public.%I', t);
+    execute format(
+      'create trigger orthostock_stale_guard before update on public.%I
+       for each row execute function public.orthostock_reject_stale()', t);
+  end loop;
+end $$;
