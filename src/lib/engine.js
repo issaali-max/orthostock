@@ -657,7 +657,12 @@ function buildPurchaseSpecs(app, purchaseData, lines, fresh) {
     }
     return 0;
   };
-  const poId = newId();
+  // Editing keeps the SAME purchase id. Minting a new one left the original row holding
+  // only retired lines while the replacements attached to an id nothing pointed at — so
+  // the purchase document shipped with no lines at all, and the other device received a
+  // purchase that bought nothing. The identity of a purchase does not change because
+  // its contents did.
+  const poId = purchaseData.id || newId();
   const stamp = nowISO();
   const poRow = { ...purchaseData, id: poId, createdAt: purchaseData.createdAt || stamp };
   const specs = [{ op: 'insert', table: TABLES.purchases, row: poRow }];
@@ -2365,7 +2370,7 @@ export async function editPurchaseAtomic(app, purchaseId, purchaseData, lines) {
   const { specs: voidSpecs, after } = buildVoidSpecs(purchaseId, fresh);
   // Validation inside buildPurchaseSpecs throws BEFORE anything is written.
   const { specs: createSpecs, poId, isFree } = buildPurchaseSpecs(app, {
-    ...purchaseData, purchaseNumber: old.purchaseNumber, createdAt: old.createdAt,   // contents change; identity and place in time do not
+    ...purchaseData, id: purchaseId, purchaseNumber: old.purchaseNumber, createdAt: old.createdAt,   // contents change; identity and place in time do not
   }, lines, after);
   const res = await db.atomicMutations([...voidSpecs, ...createSpecs]);
   await Promise.all([app.refresh(TABLES.purchases), app.refresh(TABLES.purchaseItems), app.refresh(TABLES.variants), app.refresh(TABLES.stockMovements)]);
