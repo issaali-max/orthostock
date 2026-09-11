@@ -1075,11 +1075,18 @@ export function invoiceLineMismatches(data) {
     // −10 leaves half the stock never deducted, while the invoice's total matches its
     // lines perfectly — so nothing else catches it. Compare QUANTITIES per material:
     // what the lines say was sold must equal what the ledger says left the shelf.
-    const noMove = (moves.length === 0 || preTracking) ? [] : (() => {
+    // An invoice with NO movements at all used to be skipped entirely — the loudest
+    // possible damage produced the quietest possible result. That is only safe for
+    // invoices predating movement tracking, which `preTracking` already identifies; for
+    // anything newer, zero movements IS the finding.
+    const noMove = preTracking ? [] : (() => {
       const sold = new Map();
       for (const it of mine) sold.set(it.variantId, round2((sold.get(it.variantId) || 0) + num(it.qty)));
+      // SIGNED, not absolute. A sale must REDUCE stock, so a movement of +15 against 15
+      // sold is not a match — it is the same quantity moving the wrong way, which
+      // doubles the error rather than cancelling it. Comparing magnitudes accepted it.
       const moved = new Map();
-      for (const m of moves) moved.set(m.variantId, round2((moved.get(m.variantId) || 0) + Math.abs(num(m.qtyChange))));
+      for (const m of moves) moved.set(m.variantId, round2((moved.get(m.variantId) || 0) - num(m.qtyChange)));
       // A tolerance for floating-point noise only — not for real shortfalls.
       return mine.filter((it) => Math.abs(num(sold.get(it.variantId)) - num(moved.get(it.variantId))) > 0.000001);
     })();
@@ -1107,6 +1114,18 @@ export function invoiceLineMismatches(data) {
       id: inv.id, invoiceNumber: inv.invoiceNumber, date: inv.date,
       total, lineSum, gap, lineCount: mine.length,
       missingMovements: noMove.length,
+      // What is actually wrong with each one, so the report can say so instead of
+      // calling every case "no stock movement" when the movement often exists and is
+      // simply the wrong size or the wrong direction.
+      stockDetail: noMove.map((it) => {
+        const s = round2(mine.filter((x) => x.variantId === it.variantId).reduce((t, x) => t + num(x.qty), 0));
+        const mv = round2(moves.filter((x) => x.variantId === it.variantId).reduce((t, x) => t - num(x.qtyChange), 0));
+        const any = moves.some((x) => x.variantId === it.variantId);
+        return {
+          variantId: it.variantId, sold: s, moved: mv, diff: round2(s - mv),
+          kind: !any ? 'none' : mv < 0 ? 'reversed' : mv < s ? 'short' : 'excess',
+        };
+      }),
       severity,
       issues: [...(severity === 'empty' || severity === 'lines' ? ['lines'] : []), ...(noMove.length ? ['stock'] : [])],
     });

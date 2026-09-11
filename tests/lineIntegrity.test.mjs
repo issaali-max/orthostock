@@ -583,8 +583,14 @@ console.log('\n─── 17. A deliberate deletion must not be reported as missi
   // Once the header catches up, the invoice reconciles and disappears from the report.
   await db.update(TABLES.invoices, inv.id, { total: 400, updatedAt: 1200 });
   await all();
-  ok('once the header lands it is not reported at all',
-    !E.invoiceLineMismatches(app.data).some((x) => x.invoiceNumber === 'INV-DEL'));
+  // The money question is settled once the header lands. The invoice still has no stock
+  // movement, which is now correctly reported as a stock finding rather than skipped —
+  // an invoice with NO movements used to produce the quietest possible result.
+  const settled = E.invoiceLineMismatches(app.data).find((x) => x.invoiceNumber === 'INV-DEL');
+  ok('once the header lands it is no longer a money fault', !settled || settled.severity === 'stock',
+    `${settled?.severity}`);
+  ok('and the remaining finding names the real problem', !settled || settled.stockDetail?.[0]?.kind === 'none',
+    JSON.stringify(settled?.stockDetail));
 
   // A genuinely damaged invoice — header newer than its lines — is still reported.
   const dmg = await db.insert(TABLES.invoices, {
