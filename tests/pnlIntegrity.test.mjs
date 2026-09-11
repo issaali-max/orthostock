@@ -226,7 +226,11 @@ console.log('\n─── 11. The P&L banner must agree with Data health ──�
   ok('a healthy invoice raises no missing-lines warning', p.lineIntegrityGap === 0, `${p.lineIntegrityGap}`);
   ok('even when its stored line profit has drifted', p.lineProfitGap !== 0, `${p.lineProfitGap}`);
   ok('the drift is reported separately, not as missing lines', typeof p.lineProfitGap === 'number');
-  ok('and Data health agrees there is nothing wrong', invoiceLineMismatches(healthy).length === 0);
+  // The fixture carries no stock movements, which is now a stock finding in its own
+  // right. What matters here is that it is not a MONEY fault.
+  ok('and Data health reports no money fault either',
+    invoiceLineMismatches(healthy).every((x) => x.severity === 'stock'),
+    JSON.stringify(invoiceLineMismatches(healthy).map((x) => x.severity)));
 
   // A genuine shortfall still raises it, and both screens now say the same thing.
   const short = mk({

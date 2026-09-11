@@ -71,7 +71,10 @@ console.log('\n─── 4. Once the merge completes, everything reconciles ─�
   ok('COGS is the sum of both lines', p.cogs === 200, `${p.cogs}`);
   ok('sales profit is revenue − COGS', p.salesProfit === 1800);
   ok('no gap remains', p.lineIntegrityGap === 0, `${p.lineIntegrityGap}`);
-  ok('the detector is silent', invoiceLineMismatches(d).length === 0);
+  // No movements in this fixture, which is now a stock finding in its own right. This
+  // section is about the MONEY reconciling once the merge completes.
+  ok('the detector reports no money fault', invoiceLineMismatches(d).every((x) => x.severity === 'stock'),
+    JSON.stringify(invoiceLineMismatches(d).map((x) => x.severity)));
 }
 
 console.log('\n─── 5. Payment recorded on one device only ───');
@@ -94,7 +97,8 @@ console.log('\n─── 6. Same invoice edited on BOTH devices — last write w
     ok(`${label} wins: arithmetic holds`, round2(p.revenue - p.cogs) === p.salesProfit);
     ok(`${label} wins: header and lines agree`, p.lineIntegrityGap === 0, `${p.lineIntegrityGap}`);
     ok(`${label} wins: revenue is that device's figure`, p.revenue === total);
-    ok(`${label} wins: no mismatch is reported`, invoiceLineMismatches(d).length === 0);
+    ok(`${label} wins: no money mismatch is reported`, invoiceLineMismatches(d).every((x) => x.severity === 'stock'),
+      JSON.stringify(invoiceLineMismatches(d).map((x) => x.severity)));
   }
 }
 
