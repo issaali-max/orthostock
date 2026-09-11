@@ -3,7 +3,7 @@
 // like. Every relationship printed on the screen is asserted here as an identity, and
 // each is then re-tested against deliberately damaged data — because a statement that
 // only adds up when the data is clean is the one that misleads you.
-import { pnl, invoiceLineMismatches } from '../src/lib/engine.js';
+import { pnl, invoiceLineMismatches, customerStats, emirateStats } from '../src/lib/engine.js';
 import { TABLES } from '../src/lib/constants.js';
 import { round2, num } from '../src/lib/money.js';
 
@@ -243,6 +243,37 @@ console.log('\n─── 11. The P&L banner must agree with Data health ──�
   ok('and Data health flags the same invoice', flagged.length === 1 && flagged[0].invoiceNumber === 'INV-B');
   ok('with the same amount', Math.abs(flagged[0].gap - ps.lineIntegrityGap) < 0.05,
     `${flagged[0].gap} vs ${ps.lineIntegrityGap}`);
+}
+
+
+console.log('\n─── 12. B10: reports must agree on which lines are current ───');
+{
+  // An invoice edited twice holds three generations. Counting them all multiplied this
+  // customer's profit by the number of times the invoice had ever been saved, and a
+  // device that had never seen the older generations reported something different
+  // again — the same current invoice, two different profits.
+  const gen = (live) => ({ invoiceId: 'i', variantId: 'v1', qty: 10, unitPrice: 100,
+    total: 1000, netTotal: 1000, avgCostAtSale: 40, lineProfit: 600, isActive: live });
+  const d = mk({
+    invoices: [{ id: 'i', invoiceNumber: 'INV-1', date: '2026-09-05', status: 'active', currency: 'AED', total: 1000, customerId: 'c1' }],
+    items: [gen(false), gen(false), gen(true)],
+  });
+  d[TABLES.customers] = [{ id: 'c1', name: 'Clinic', isActive: true, emirate: 'Dubai', type: 'center' }];
+
+  const truth = 600;
+  ok('the P&L counts one generation', pnl(d, B).salesProfit === truth, `${pnl(d, B).salesProfit}`);
+  ok('customerStats agrees',
+    customerStats(d[TABLES.invoices], d[TABLES.invoiceItems], 'c1', { id: 'c1' }).profit === truth,
+    `${customerStats(d[TABLES.invoices], d[TABLES.invoiceItems], 'c1', { id: 'c1' }).profit}`);
+  ok('emirateStats agrees', emirateStats(d)[0].profit === truth, `${emirateStats(d)[0].profit}`);
+
+  // A device holding ONLY the live generation must report the same figures.
+  const fresh = mk({ invoices: d[TABLES.invoices], items: [gen(true)] });
+  fresh[TABLES.customers] = d[TABLES.customers];
+  ok('a device without the history reports the same profit',
+    customerStats(fresh[TABLES.invoices], fresh[TABLES.invoiceItems], 'c1', { id: 'c1' }).profit === truth);
+  ok('and the same emirate figure', emirateStats(fresh)[0].profit === emirateStats(d)[0].profit);
+  ok('and the same P&L', pnl(fresh, B).salesProfit === pnl(d, B).salesProfit);
 }
 
 console.log('\n═══════════════════════════════════════');

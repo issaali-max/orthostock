@@ -292,6 +292,19 @@ export async function saveInvoiceAtomic(app, { editingId, invoiceData, lines, in
   // invoice item with NO movement behind it: the sale was billed, the total was right,
   // but the stock never came down and the line had nothing to render from. Reject the
   // whole save instead, so the invoice can never disagree with the ledger.
+  // One cost basis per variant, built before costing any line — see the budget note below.
+  const priorCostBudget = new Map();
+  for (const x of oldItems) {
+    const b = priorCostBudget.get(x.variantId) || { qty: 0, cost: 0 };
+    const q = num(x.qty);
+    // Unrounded: this is a per-unit basis, not money. Rounding it here and multiplying
+    // back by the quantity loses fils, and the next resave blends the loss in again, so
+    // an untouched invoice drifts a little every time it is saved.
+    b.cost = (b.qty + q) > 0 ? (b.cost * b.qty + num(x.avgCostAtSale) * q) / (b.qty + q) : 0;
+    b.qty = round2(b.qty + q);
+    priorCostBudget.set(x.variantId, b);
+  }
+
   for (const l of lines) {
     if (!vById.has(l.variantId)) throw new Error(`invoice line names an unknown material: ${l.variantId}`);
     if (!(num(l.qty) > 0)) throw new Error('invoice line has no quantity');
@@ -358,16 +371,30 @@ export async function saveInvoiceAtomic(app, { editingId, invoiceData, lines, in
     // quantity is costed at today's average, which is correct: that stock really is
     // being sold now. A line whose quantity GROWS blends the two, weighted by how much
     // of it is old and how much is new.
-    const priorForVariant = oldItems.filter((x) => x.variantId === l.variantId);
-    const priorQty = round2(priorForVariant.reduce((sum, x) => sum + num(x.qty), 0));
-    const priorCost = priorQty > 0
-      ? round2(priorForVariant.reduce((sum, x) => sum + num(x.avgCostAtSale) * num(x.qty), 0) / priorQty)
-      : 0;
+    // The prior quantity is a BUDGET shared by every line of that variant, drawn down as
+    // the lines are costed. Letting each line compare against the whole prior quantity
+    // independently meant a paid line and a gift line both claimed the same allowance:
+    // ten paid plus two gifts at 40, changed to twelve paid plus two gifts after cost
+    // rose to 55, produced 560 where the stated policy gives 590.
     const todayCost = num(v?.purchasePriceAvg);
-    const billedQty = num(l.qty);
-    const avgCost = priorQty <= 0 ? todayCost
-      : billedQty <= priorQty ? priorCost
-        : round2((priorCost * priorQty + todayCost * (billedQty - priorQty)) / billedQty);
+    const budget = priorCostBudget.get(l.variantId);
+    const billedQty = num(l.qty) + num(l.giftQty || 0);
+    let avgCost;
+    if (!budget || budget.qty <= 0) {
+      avgCost = todayCost;
+    } else {
+      const fromOld = Math.min(billedQty, budget.qty);
+      const fromNew = round2(billedQty - fromOld);
+      // Not rounded to two decimals. A blended unit cost of 42.142857… stored as 42.14
+      // and multiplied back by fourteen units loses four fils, and the next resave blends
+      // that loss in again — so an untouched invoice drifts a little every time it is
+      // saved. The line's own total is money and is rounded; the per-unit basis behind it
+      // is not.
+      avgCost = billedQty > 0
+        ? (budget.cost * fromOld + todayCost * fromNew) / billedQty
+        : budget.cost;
+      budget.qty = round2(budget.qty - fromOld);        // drawn down for the next line
+    }
     const isGift = !!l.gift;                                      // هدية للمركز: sells at 0 but cost is still charged
     const listPrice = isGift ? 0 : num(v?.sellingPriceDefault);
     const rawUnit = isGift ? 0 : num(l.unitPrice); const qty = num(l.qty);
@@ -871,7 +898,12 @@ export function customerStats(invoices, items, customerId, customer = null) {
   // is the version of this omission that would reach a client.
   const mine = invoices.filter((i) => i.customerId === customerId && i.isActive !== false && i.status !== 'returned');
   const ids = new Set(mine.map((i) => i.id));
-  const myItems = items.filter((it) => ids.has(it.invoiceId));
+  // LIVE lines only. Editing retires the previous generation rather than destroying it,
+  // so an invoice edited twice holds three. Counting them all multiplied this customer's
+  // profit by the number of times the invoice had ever been saved — 1,800 where 600 was
+  // the truth, and a device that had never seen the older generations reported something
+  // different again. The P&L already filtered them; these readers did not.
+  const myItems = items.filter((it) => it.isActive !== false && ids.has(it.invoiceId));
   const revenue = mine.reduce((s, i) => s + num(i.total), 0);
   const profit = myItems.reduce((s, it) => s + num(it.lineProfit), 0);
   const invoiceDebt = mine.reduce((s, i) => s + Math.max(0, num(i.total) - num(i.paidAmount)), 0);
@@ -1862,7 +1894,10 @@ export function emirateStats(data) {
   const customers = data[TABLES.customers] || [];
   const emOf = new Map(customers.map((c) => [c.id, c.emirate || '—']));
   const profitByInv = new Map();
-  for (const it of items) profitByInv.set(it.invoiceId, (profitByInv.get(it.invoiceId) || 0) + num(it.lineProfit));
+  for (const it of items) {
+    if (it.isActive === false) continue;                 // retired generation — not current economics
+    profitByInv.set(it.invoiceId, (profitByInv.get(it.invoiceId) || 0) + num(it.lineProfit));
+  }
   const map = {};
   for (const inv of invoices) {
     const em = emOf.get(inv.customerId) || '—';

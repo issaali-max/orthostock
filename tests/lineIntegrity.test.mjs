@@ -734,6 +734,43 @@ console.log('\n─── 20. Review finding F6: historical cost must not be rewr
   ok('and it matches the five now billed', Math.abs(num(mine[0]?.qtyChange) + 5) < 0.001, `${mine[0]?.qtyChange}`);
 }
 
+
+console.log('\n─── 21. B12: paid and gift lines share one cost budget ───');
+{
+  // The prior quantity is a budget shared by every line of that variant. Letting each
+  // line compare against the whole prior quantity meant a paid line and a gift line both
+  // claimed the same allowance.
+  const P = { from: '2026-09-01', to: '2026-09-30' };
+  const cogs = () => E.pnl(app.data, P).cogs;
+  await db.update(TABLES.variants, 'b', { purchasePriceAvg: 40, stockQty: 1000 });
+  await all();
+
+  const id = await save({ lines: [
+    { variantId: 'b', qty: 10, unitPrice: 100 },
+    { variantId: 'b', qty: 2, unitPrice: 0, gift: true },
+  ] });
+  const first = cogs();
+  ok('twelve units at 40 cost 480', first > 0, `${first}`);
+
+  await db.update(TABLES.variants, 'b', { purchasePriceAvg: 55 });
+  await all();
+  await save({ id, lines: [
+    { variantId: 'b', qty: 12, unitPrice: 100 },
+    { variantId: 'b', qty: 2, unitPrice: 0, gift: true },
+  ] });
+  // Twelve units keep their old cost of 40; the two added units take today's 55.
+  ok('the added units alone take today\'s cost', round2(cogs() - first) === 110, `${round2(cogs() - first)}`);
+  ok('and the allowance is not claimed twice', cogs() !== first + 80, `${cogs()}`);
+
+  // A resave with no change must not move it again.
+  const held = cogs();
+  await save({ id, lines: [
+    { variantId: 'b', qty: 12, unitPrice: 100 },
+    { variantId: 'b', qty: 2, unitPrice: 0, gift: true },
+  ] });
+  ok('a no-op save leaves it alone', cogs() === held, `${cogs()} vs ${held}`);
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${pass + fail} checks · ${fail} finding(s)`);
 findings.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));

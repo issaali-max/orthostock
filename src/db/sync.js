@@ -148,10 +148,19 @@ export async function unpackChildren(table, cloudRow) {
 // real edits and real deletions (isActive:false) still apply.
 function mergePreserve(local, rec) {
   if (!local) return rec;
+  // ── A newer version wins WHOLE; only genuinely absent fields fall back ──
+  // Treating '' and null as "empty, keep the old value" made clearing impossible to
+  // sync: a customer whose note or phone was deliberately erased kept the old text on
+  // every other device, and the receiver ended up with a hybrid record that matched
+  // neither the sender nor the cloud. false and 0 already applied correctly, which made
+  // the inconsistency harder to notice.
+  //
+  // Only `undefined` — a key the sender does not carry at all — falls back now. That is
+  // the real migration case: an older client that predates a field should not blank it.
+  // An explicit '' or null is a value the user chose, and it is applied.
   const out = { ...local, ...rec };
   for (const k of Object.keys(local)) {
-    const rv = out[k]; const lv = local[k];
-    if ((rv === '' || rv === null || rv === undefined) && lv !== '' && lv !== null && lv !== undefined) out[k] = lv;
+    if (out[k] === undefined && local[k] !== undefined) out[k] = local[k];
   }
   return out;
 }
