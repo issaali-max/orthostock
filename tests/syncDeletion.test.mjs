@@ -182,6 +182,28 @@ console.log('\n─── 11. Review findings F4, F5, F12, F13 ───');
   ok('and the reason is recorded', /billed but never\s*\n?\s*\/\/ left the shelf|stop reading exactly where the problem is/.test(settings));
 }
 
+
+console.log('\n─── 12. Review finding F13: the clock and the restore stamp ───');
+{
+  const clock = fs.readFileSync(new URL('../src/lib/clock.js', import.meta.url), 'utf8');
+  const i18n = fs.readFileSync(new URL('../src/lib/i18n.js', import.meta.url), 'utf8');
+
+  // The clock must stay monotonic when storage fails SILENTLY — a full quota or a
+  // cleared origin reads back as 0 with no error, and trusting that alone lets the
+  // clock go backwards mid-session.
+  ok('the in-memory mark is always part of the answer', /Math\.max\(stored, _mem\)/.test(clock));
+  ok('it is not merely a catch-block fallback', !/catch \{ return _mem; \}/.test(clock));
+  ok('and the reason is recorded', /fail silently/.test(clock));
+
+  // A restore wipes the cloud and republishes, so it must actually hold. Keeping the
+  // file's original stamps let the other device decline it and push its own back.
+  ok('restored rows are stamped as a deliberate change now',
+    /if \(rows\.length\) await idbBulkPut\(table, rows\.map\(\(r\) => \(\{ \.\.\.r, updatedAt: nextTimestamp\(\) \}\)\)\);/.test(sync));
+  ok('the reasoning is recorded for whoever reads this next', /silently defeats it/.test(sync));
+  ok('the confirmation states that other devices lose newer work', /سيُفقد|will be lost/.test(i18n));
+  ok('and points at merge as the alternative', /دمج كامل|Full merge/.test(i18n));
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${pass + fail} checks · ${fail} finding(s)`);
 findings.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));

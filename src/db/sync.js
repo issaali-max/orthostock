@@ -446,13 +446,18 @@ export async function fullRestoreFromBackup(parsed) {
       try {
         await idbClear(table);
         const rows = parsed[table];
-        // Timestamps are kept EXACTLY as the backup holds them. Re-stamping them "so the
-        // restored state wins everywhere" belongs to a world where restore meant
-        // overwrite. Under merge it is actively harmful: a noon backup restored in the
-        // evening would carry today's stamps and beat every edit the other device made
-        // in between — resurrecting invoices deleted on purpose and undoing real work.
-        // Keeping the original stamps lets last-write-wins mean what it says.
-        if (rows.length) await idbBulkPut(table, rows);
+        // ── Restoring is an explicit decision, so it must actually hold ──
+        // This operation wipes the cloud and republishes the file, which declares the
+        // backup to be the truth. Keeping the file's original timestamps looks careful
+        // but silently defeats it: the other device's rows are newer, so it declines
+        // the restored rows on its next pull and then pushes its own back over them.
+        // The restore would appear to work and be gone within the minute.
+        //
+        // So restored rows are stamped as what they are: a new, deliberate change made
+        // now. The danger this creates — a stale backup beating newer work on another
+        // device — is real, which is why the confirmation says so in those words and
+        // why merge, not restore, is the default recovery action.
+        if (rows.length) await idbBulkPut(table, rows.map((r) => ({ ...r, updatedAt: nextTimestamp() })));
         restored += rows.length;
       } catch { /* skip one table, continue */ }
     }

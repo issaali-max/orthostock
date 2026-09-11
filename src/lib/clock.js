@@ -21,8 +21,15 @@ const HWM_KEY = 'orthostock_clock_hwm';
 let _mem = 0;
 
 function readHwm() {
-  try { const v = Number(localStorage.getItem(HWM_KEY) || 0); return Number.isFinite(v) ? v : 0; }
-  catch { return _mem; }
+  // The in-memory value is always part of the answer, not a fallback used only when
+  // reading THROWS. Storage can also fail silently — a full quota, private browsing, a
+  // cleared origin — and then the stored value reads back as 0 with no error at all.
+  // Trusting it alone would let the clock go backwards mid-session, and two edits could
+  // receive the same stamp or an older one, which is how a real edit gets reverted.
+  let stored = 0;
+  try { const v = Number(localStorage.getItem(HWM_KEY) || 0); stored = Number.isFinite(v) ? v : 0; }
+  catch { stored = 0; }
+  return Math.max(stored, _mem);
 }
 function writeHwm(v) {
   _mem = v;
