@@ -29,8 +29,12 @@ console.log('\n─── 1. Rule 1: the invoice is ONE document ───');
   ok('purchases work the same way', /\[TABLES\.purchases\]: \{ items: TABLES\.purchaseItems/.test(sync));
   ok('lines are never uploaded on their own', /carriedByParent/.test(sync));
   ok('nor pulled on their own', /table === TABLES\.invoiceItems \|\| table === TABLES\.purchaseItems\) continue/.test(sync));
-  ok('downloading a document replaces that parent\'s children wholesale', /async function unpackChildren/.test(sync));
-  ok('which is what makes a deliberate deletion permanent', /idbDelete\(spec\.items, it\.id\)/.test(sync));
+  ok('downloading a document replaces that parent\'s children wholesale', /export async function installDocument/.test(sync));
+  ok('and does so in ONE transaction', /await idbAtomicMutations\(ops\)/.test(sync),
+    'a failure mid-install used to leave neither the old version nor the new one');
+  ok('a header-only document is refused', /refusing header-only document/.test(sync));
+  ok('which is what makes a deliberate deletion permanent',
+    /type: 'delete', key: it\.id/.test(sync));
   ok('the envelope fields never leak into a stored row', /delete rec\.__lines; delete rec\.__moves;/.test(sync));
 }
 
@@ -87,7 +91,7 @@ console.log('\n─── 7. What the design makes impossible ───');
     ['a header arriving without its lines', /__lines/.test(sync)],
     ['lines arriving without their header', /__lines/.test(sync)],
     ['two generations of lines coexisting', /carriedByParent/.test(sync)],
-    ['a deleted line returning from the cloud', /unpackChildren/.test(sync)],
+    ['a deleted line returning from the cloud', /installDocument/.test(sync)],
     ['a line vanishing because it was never uploaded', !/deletion reconcile/i.test(sync)],
     ['a quantity or price changing by itself', /as a WHOLE/.test(sync)],
     ['a local write being lost', !/dropping op after/.test(sync)],

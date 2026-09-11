@@ -5,7 +5,7 @@
 // REAL IndexedDB, then the REAL document functions from sync.js, and moves data
 // between two devices exactly as the network does: device A serialises an invoice with
 // toCloud, that document is the only thing that crosses, and device B applies it with
-// unpackChildren. If the shipped code loses a line, this fails.
+// installDocument. If the shipped code loses a line, this fails.
 import 'fake-indexeddb/auto';
 globalThis.window = globalThis.window || { addEventListener() {}, removeEventListener() {} };
 globalThis.localStorage = globalThis.localStorage || { getItem: () => null, setItem() {}, removeItem() {} };
@@ -45,12 +45,12 @@ const shipInvoice = async (invoiceId) => {
   return JSON.parse(JSON.stringify(await S.toCloud(inv, TABLES.invoices)));
 };
 // Applying it on the other device, exactly as pull() does.
+// Drives the production installer, which writes the parent, its children, their
+// movements and the stock caches they imply in ONE transaction.
 const receiveInvoice = async (cloudRow) => {
-  const L = await import('../src/db/local.js');
-  const rec = S.fromCloud(JSON.parse(JSON.stringify(cloudRow)));
-  await L.idbBulkPut(TABLES.invoices, [rec]);
-  await S.unpackChildren(TABLES.invoices, cloudRow);
+  const installed = await S.installDocument(TABLES.invoices, JSON.parse(JSON.stringify(cloudRow)));
   await all();
+  return installed;
 };
 
 const stockOf = async (id) => num((await db.getAll(TABLES.variants)).find((v) => v.id === id)?.stockQty);
@@ -299,6 +299,63 @@ console.log('\n─── 10. A material with no anchored history is left alone �
   ok('so no stock level is invented for it', await stockOf('z') !== 0 && await stockOf('z') <= before,
     `${await stockOf('z')}`);
   void L;
+}
+
+
+console.log('\n─── 11. B3: receiving is all-or-nothing ───');
+{
+  // A failure between deleting the old lines and writing the new ones used to leave the
+  // old header with no lines and no movements — neither version — while the sync
+  // checkpoint advanced anyway.
+  const id = await save({ lines: [{ variantId: 'a', qty: 7, unitPrice: 100 }, { variantId: 'b', qty: 3, unitPrice: 50 }] });
+  const good = await shipInvoice(id);
+  const before = { lines: (await linesOf(id)).join(), moves: (await movesOf(id)).length, sum: await sumLines(id) };
+
+  // A header-only document is half a document. Installing it would replace good lines
+  // with nothing, so it must be refused outright.
+  const headerOnly = JSON.parse(JSON.stringify(good));
+  delete headerOnly.data.__lines;
+  const installed = await receiveInvoice(headerOnly);
+  ok('a header-only document is refused', installed === false, `${installed}`);
+  ok('and the local lines are untouched', (await linesOf(id)).join() === before.lines, (await linesOf(id)).join());
+  ok('with their movements intact', (await movesOf(id)).length === before.moves);
+  ok('and the invoice still reconciles', await sumLines(id) === before.sum, `${await sumLines(id)}`);
+
+  // The good document still installs afterwards.
+  ok('a complete document installs', await receiveInvoice(good) === true);
+  ok('and the invoice is whole', (await linesOf(id)).join() === before.lines);
+}
+
+console.log('\n─── 12. B4: a removed material is reconciled too ───');
+{
+  // A line removed from an incoming invoice changes that material's stock just as much
+  // as one added. Leaving removed materials out of the touched set left a stale cache.
+  // Section 9 cleared the movements table, so only 'a' still has an opening anchor.
+  // Give 'b' one back: without it the installer deliberately leaves the material alone,
+  // which is correct behaviour but not what this section is testing.
+  await db.insert(TABLES.stockMovements, { variantId: 'b', type: 'opening', qtyChange: 1000, qtyAfter: 1000, refType: 'manual', refId: null });
+  await db.update(TABLES.variants, 'b', { stockQty: 1000 });
+  await all();
+
+  const id = await save({ lines: [{ variantId: 'a', qty: 5, unitPrice: 100 }, { variantId: 'b', qty: 6, unitPrice: 50 }] });
+  await receiveInvoice(await shipInvoice(id));
+  const bBefore = await stockOf('b');
+  ok('b reflects the sale', await stockOf('b') === await ledgerOf('b'), `${await stockOf('b')} vs ${await ledgerOf('b')}`);
+
+  // The other device removes b from the invoice and ships it.
+  await save({ id, lines: [{ variantId: 'a', qty: 5, unitPrice: 100 }] });
+  const doc = await shipInvoice(id);
+  ok('the shipped document no longer mentions b', !doc.data.__lines.some((l) => l.variantId === 'b'));
+
+  await receiveInvoice(doc);
+  ok('b is returned to stock', await stockOf('b') === bBefore + 6, `${await stockOf('b')} vs ${bBefore + 6}`);
+  ok('and its cache matches its ledger', await stockOf('b') === await ledgerOf('b'),
+    `${await stockOf('b')} vs ${await ledgerOf('b')}`);
+  ok('a still matches its own ledger', await stockOf('a') === await ledgerOf('a'),
+    `${await stockOf('a')} vs ${await ledgerOf('a')}`);
+  const rep = await E.reconcileStock(app);
+  ok('the repair finds nothing to fix for a or b',
+    !(rep.fixes || []).some((f) => f.id === 'a' || f.id === 'b'), JSON.stringify(rep.fixes));
 }
 
 console.log('\n═══════════════════════════════════════');

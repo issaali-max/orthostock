@@ -26,7 +26,8 @@
 import { createClient } from '@supabase/supabase-js';
 import { TABLES } from '../lib/constants.js';
 import { observeTimestamp, nextTimestamp } from '../lib/clock.js';
-import { idbGetAll, idbBulkPut, idbClear, idbDelete, outboxAll, outboxDelete, outboxBumpTries, metaSet, metaGet } from './local.js';
+import { round2, num } from '../lib/money.js';
+import { idbGetAll, idbBulkPut, idbClear, idbDelete, idbAtomicMutations, outboxAll, outboxDelete, outboxBumpTries, metaSet, metaGet } from './local.js';
 
 const FALLBACK_URL = 'https://eucqxzqhmubbvudmkkjz.supabase.co';
 const FALLBACK_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV1Y3F4enFobXViYnZ1ZG1ra2p6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE1NjQ5MDYsImV4cCI6MjA3NzE0MDkwNn0.SS4gDDSU9hFYUQ7pTIsyu2hV9WgPBEmqLYqO1FDpwZ4';
@@ -106,41 +107,74 @@ export const fromCloud = (c) => {
 // The document is the whole truth about its own children. Replacing them alongside
 // the parent is what makes a deliberate deletion permanent: the newer version simply
 // does not contain the removed line, so it cannot come back.
-export async function unpackChildren(table, cloudRow) {
+// Installs a received document — parent, children, their movements and the recomputed
+// stock caches — in ONE IndexedDB transaction.
+//
+// The previous version deleted old children individually, then wrote the new set, then
+// let the caller write the parent separately. A failure between those steps left the old
+// header with no lines and no movements: neither the old version nor the new one, and
+// the sync checkpoint advanced regardless. Receiving must install old-or-new, never a
+// mixture.
+//
+// Returns true when the document was installed. The caller advances its checkpoint only
+// on true, so a failed receive is retried rather than skipped.
+export async function installDocument(table, cloudRow, mergedParent) {
   const spec = CHILD_SPEC[table];
   const data = cloudRow?.data;
-  if (!spec || !data || !Array.isArray(data.__lines)) return;
-  const id = data.id;
-  const [items, moves] = await Promise.all([idbGetAll(spec.items), idbGetAll(TABLES.stockMovements)]);
-  for (const it of items.filter((x) => x[spec.itemKey] === id)) await idbDelete(spec.items, it.id);
-  for (const m of moves.filter((x) => x.refType === spec.refType && x.refId === id)) await idbDelete(TABLES.stockMovements, m.id);
-  if (data.__lines.length) await idbBulkPut(spec.items, data.__lines);
-  if (Array.isArray(data.__moves) && data.__moves.length) await idbBulkPut(TABLES.stockMovements, data.__moves);
+  const parent = mergedParent || fromCloud(cloudRow);
+  if (!parent?.id) return false;
 
-  // ── The cached stock figure cannot be merged; the ledger can ──
-  // Two devices offline from 100: A sells 10 and caches 90, B sells 20 and caches 80.
-  // Neither number is right and last-write-wins must pick one of them, so the cache
-  // said 80 while the true figure was 70. The LEDGER, though, is a set of movements —
-  // and once both invoices' movements have arrived it sums to 70 on its own.
-  //
-  // So after installing a document, the materials it touched are recomputed from their
-  // own ledger. Only those materials, and only when their history is anchored by an
-  // opening movement: without that anchor the ledger may be partial, and replaying it
-  // would invent a stock level rather than correct one.
-  const touched = new Set([...(data.__lines || []).map((l) => l.variantId),
-    ...(data.__moves || []).map((m) => m.variantId)].filter(Boolean));
-  if (!touched.size) return;
-  const [allMoves, variants] = await Promise.all([idbGetAll(TABLES.stockMovements), idbGetAll(TABLES.variants)]);
-  const updates = [];
-  for (const vid of touched) {
-    const mine = allMoves.filter((m) => m.variantId === vid && m.isActive !== false);
-    if (!mine.some((m) => m.type === 'opening')) continue;          // history not anchored — leave it alone
-    const fromLedger = Math.round(mine.reduce((sum, m) => sum + Number(m.qtyChange || 0), 0) * 100) / 100;
-    const v = variants.find((x) => x.id === vid);
-    if (!v || Math.abs(Number(v.stockQty || 0) - fromLedger) < 0.005) continue;
-    updates.push({ ...v, stockQty: fromLedger });
+  // A parent that arrives without its children is not a document — it is half of one.
+  // Installing it would replace good local lines with nothing.
+  if (spec && !Array.isArray(data?.__lines)) {
+    console.warn('[sync] refusing header-only document:', table, parent.id);
+    return false;
   }
-  if (updates.length) await idbBulkPut(TABLES.variants, updates);
+
+  const ops = [{ store: table, type: 'put', value: parent }];
+
+  if (spec) {
+    const id = parent.id;
+    const [items, moves, variants] = await Promise.all([
+      idbGetAll(spec.items), idbGetAll(TABLES.stockMovements), idbGetAll(TABLES.variants),
+    ]);
+    for (const it of items.filter((x) => x[spec.itemKey] === id)) ops.push({ store: spec.items, type: 'delete', key: it.id });
+    for (const m of moves.filter((x) => x.refType === spec.refType && x.refId === id)) ops.push({ store: TABLES.stockMovements, type: 'delete', key: m.id });
+    for (const l of data.__lines) ops.push({ store: spec.items, type: 'put', value: l });
+    for (const m of (Array.isArray(data.__moves) ? data.__moves : [])) ops.push({ store: TABLES.stockMovements, type: 'put', value: m });
+
+    // ── Stock caches, computed against the ledger this transaction will produce ──
+    // A cached total cannot be merged; a ledger can. The materials affected are those
+    // the document touches now AND those it used to touch — a line removed from an
+    // incoming invoice changes that material's stock just as much as one added, and
+    // leaving it out was how a removed material kept a stale cache.
+    const touched = new Set([
+      ...data.__lines.map((l) => l.variantId),
+      ...(Array.isArray(data.__moves) ? data.__moves : []).map((m) => m.variantId),
+      ...items.filter((x) => x[spec.itemKey] === id).map((x) => x.variantId),
+      ...moves.filter((x) => x.refType === spec.refType && x.refId === id).map((x) => x.variantId),
+    ].filter(Boolean));
+
+    if (touched.size) {
+      const replacedIds = new Set(moves.filter((x) => x.refType === spec.refType && x.refId === id).map((x) => x.id));
+      const after = moves.filter((m) => !replacedIds.has(m.id))
+        .concat(Array.isArray(data.__moves) ? data.__moves : []);
+      for (const vid of touched) {
+        const mine = after.filter((m) => m.variantId === vid && m.isActive !== false);
+        // Without an opening movement the ledger may be partial, and replaying it would
+        // invent a stock level rather than correct one. Those are left alone.
+        if (!mine.some((m) => m.type === 'opening')) continue;
+        const fromLedger = round2(mine.reduce((sum, m) => sum + num(m.qtyChange), 0));
+        const v = variants.find((x) => x.id === vid);
+        if (!v || Math.abs(num(v.stockQty) - fromLedger) < 0.005) continue;
+        // The timestamp moves so the UI's change detector, which sums timestamps, sees it.
+        ops.push({ store: TABLES.variants, type: 'put', value: { ...v, stockQty: fromLedger, updatedAt: nextTimestamp() } });
+      }
+    }
+  }
+
+  await idbAtomicMutations(ops);
+  return true;
 }
 
 // Cloud wins for any field it provides, but an EMPTY cloud value never wipes a
@@ -267,6 +301,8 @@ export async function pull({ full = false } = {}) {
   const wm = Number((await metaGet('pullWatermark')) || 0);
   const since = full ? 0 : (wm > 0 ? wm - SKEW_BUFFER_MS : 0);
   let changed = 0; let maxSeen = wm; let reached = false;
+  // A refused or failed install must not be skipped by a watermark that moved past it.
+  let incomplete = false;
 
   for (const table of Object.values(TABLES)) {
     // Children arrive inside their parent — pulling them separately would recreate
@@ -302,13 +338,18 @@ export async function pull({ full = false } = {}) {
         if (cu > maxSeen) maxSeen = cu;
         const mine = localById.get(rec.id);
         const lu = Number(mine?.updatedAt || 0);
-        if (!mine) {
-          toWrite.push(rec); changed++;
-          await unpackChildren(table, cloud);
-        } else if (cu > lu) {
+        if (!mine || cu > lu) {
           // Rule 5: a newer cloud version replaces the local one as a WHOLE.
-          toWrite.push(mergePreserve(mine, rec)); changed++;
-          await unpackChildren(table, cloud);
+          const merged = mine ? mergePreserve(mine, rec) : rec;
+          if (CHILD_SPEC[table]) {
+            // Documents install atomically — parent, children, movements and the stock
+            // caches they imply, in one transaction. A refused install leaves the local
+            // version untouched and is reported, so the checkpoint does not skip it.
+            if (await installDocument(table, cloud, merged)) changed++;
+            else incomplete = true;
+          } else {
+            toWrite.push(merged); changed++;
+          }
         }
         // Local newer or equal: keep local. Rule 4 — a pull never pushes; local
         // edits travel up through the outbox alone.
@@ -318,13 +359,17 @@ export async function pull({ full = false } = {}) {
       // Rule 2: nothing is deleted for being absent. A row this device holds and the
       // cloud lacks is simply not uploaded yet, and the outbox will carry it up.
     } catch (e) {
+      incomplete = true;                 // this table did not finish; hold the checkpoint
       console.warn('[sync] pull failed', table, e?.message || e);
     }
   }
 
   if (reached) {
     markOnline(true);
-    if (maxSeen > wm) { await metaSet('pullWatermark', maxSeen); observeTimestamp(maxSeen); }
+    // The checkpoint only advances when everything this pull saw was installed. Moving
+    // it past a refused document would mean never fetching that document again.
+    if (maxSeen > wm && !incomplete) { await metaSet('pullWatermark', maxSeen); observeTimestamp(maxSeen); }
+    else if (incomplete) observeTimestamp(maxSeen);
     state.lastSyncAt = Date.now();
     emit();
   }
@@ -412,8 +457,14 @@ export async function mergeWithCloud(onProgress) {
           if (!rec?.id) continue;
           if (carriedByParent(table, rec)) continue;      // owned by its parent document
           const mine = localById.get(rec.id);
-          rows.push(mine ? mergePreserve(mine, rec) : rec);
-          await unpackChildren(table, cloud);
+          const merged = mine ? mergePreserve(mine, rec) : rec;
+          if (CHILD_SPEC[table]) {
+            // Same atomic install as pull: a document lands whole or not at all.
+            if (await installDocument(table, cloud, merged)) down += 1;
+            else errors.push(`${table}: refused incomplete document ${rec.id}`);
+          } else {
+            rows.push(merged);
+          }
         }
         if (rows.length) { await idbBulkPut(table, rows); down += rows.length; }
       } catch (e) { errors.push(`${table}: ${e?.message || e}`); }

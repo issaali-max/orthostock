@@ -1,6 +1,6 @@
 // PURCHASES ACROSS DEVICES — the document path, on the real code.
 //
-// Invoices were tested through toCloud/unpackChildren; purchases were made documents at
+// Invoices were tested through toCloud/installDocument; purchases were made documents at
 // the same time and never were. They carry more than an invoice does: a supplier
 // payable, a moving average cost, and stock moving the other way. If the document path
 // mishandles any of it, the cost of everything sold afterwards is wrong.
@@ -47,8 +47,7 @@ const shipPurchase = async (id) => {
   return JSON.parse(JSON.stringify(await S.toCloud(po, TABLES.purchases)));
 };
 const receivePurchase = async (doc) => {
-  await L.idbBulkPut(TABLES.purchases, [S.fromCloud(JSON.parse(JSON.stringify(doc)))]);
-  await S.unpackChildren(TABLES.purchases, doc);
+  await S.installDocument(TABLES.purchases, JSON.parse(JSON.stringify(doc)));
   await all();
 };
 

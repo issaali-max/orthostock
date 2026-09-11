@@ -144,8 +144,7 @@ console.log('\n─── 5. Review finding F2: restore on a device that lacks th
   for (const m of (await db.getAll(TABLES.stockMovements)).filter((x) => x.refId === id)) {
     await L.idbDelete(TABLES.stockMovements, m.id);
   }
-  await L.idbBulkPut(TABLES.invoices, [S.fromCloud(JSON.parse(JSON.stringify(doc)))]);
-  await S.unpackChildren(TABLES.invoices, doc);
+  await S.installDocument(TABLES.invoices, JSON.parse(JSON.stringify(doc)));
   await all();
   ok('it has nothing to reactivate', (await db.getAll(TABLES.stockMovements)).filter((m) => m.refId === id).length === 0);
 
