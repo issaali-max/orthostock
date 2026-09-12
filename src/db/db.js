@@ -179,3 +179,26 @@ async function seedLocal() {
   // user is persisted locally on first login (see AppProvider.login), so accounts
   // come from the real users you create — not a built-in admin/admin123.
 }
+
+// ── One business operation at a time ────────────────────────────────────────
+// Business functions read the current state, compute against it, and only then commit.
+// Two of them running at once both read the SAME old state: two concurrent sales from
+// stock 100 left the cache at 80 while the ledger said 70, and two concurrent payments
+// of 100 and 200 stored 200 with a single entry — the first payment simply vanished.
+//
+// idbAtomicMutations makes the COMMIT atomic, which is necessary but not sufficient:
+// the lost update happens in the reading and computing that precede it. Serialising
+// those operations closes it, and costs nothing in practice because a person cannot
+// invoice twice in the same instant — the overlap comes from the UI firing two handlers
+// or a sync-triggered refresh landing mid-save.
+//
+// This is a single-runtime guard. Two browser tabs still race; that is a separate
+// problem and needs a lock the tabs share.
+let _opChain = Promise.resolve();
+export function serializeOperation(fn) {
+  const run = _opChain.then(fn, fn);
+  // Keep the chain alive whether or not this operation threw, so one failure does not
+  // wedge every later operation.
+  _opChain = run.then(() => {}, () => {});
+  return run;
+}

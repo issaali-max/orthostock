@@ -6,6 +6,7 @@ import { nextTimestamp } from './clock.js';
 // toasts) and refresh affected tables once at the end.
 // ─────────────────────────────────────────────────────────────
 import * as db from '../db/db.js';
+import { serializeOperation } from '../db/db.js';
 import { TABLES } from './constants.js';
 import { num, round2, safeDiv, prettyName } from './money.js';
 import { newId, nextDocNumber } from './ids.js';
@@ -15,7 +16,11 @@ import { todayISO, nowISO } from './dates.js';
 
 // Record a payment against an invoice: appends to its payment history,
 // updates paidAmount (capped at total) and recomputes paymentStatus.
-export async function recordInvoicePayment(app, invoiceId, amount, date, method = 'cash') {
+// Serialised: this reads current state and computes against it before committing,
+// so two concurrent calls would otherwise both compute from the same old state.
+export function recordInvoicePayment(...args) { return serializeOperation(() => _recordInvoicePayment(...args)); }
+
+async function _recordInvoicePayment(app, invoiceId, amount, date, method = 'cash') {
   const all = await db.getAll(TABLES.invoices);
   const inv = all.find((x) => x.id === invoiceId);
   if (!inv) return null;
@@ -48,7 +53,11 @@ export const rateOf = (data) => num((data[TABLES.settings] || [])[0]?.usdRate) |
 export const toAED = (amount, currency, rate) => (currency === 'USD' ? round2(num(amount) * rate) : num(amount));
 
 // Advance/set the status of a cheque payment on an invoice: received → deposited → cleared.
-export async function setChequeStatus(app, invoiceId, paymentIndex, status) {
+// Serialised: this reads current state and computes against it before committing,
+// so two concurrent calls would otherwise both compute from the same old state.
+export function setChequeStatus(...args) { return serializeOperation(() => _setChequeStatus(...args)); }
+
+async function _setChequeStatus(app, invoiceId, paymentIndex, status) {
   const all = await db.getAll(TABLES.invoices);
   const inv = all.find((x) => x.id === invoiceId);
   if (!inv || !inv.payments?.[paymentIndex]) return null;
@@ -260,7 +269,11 @@ export function allocateDiscount(lines, gross, invDisc) {
   return nets;
 }
 
-export async function saveInvoiceAtomic(app, { editingId, invoiceData, lines, invoiceDiscount = 0 }) {
+// Serialised: this reads current state and computes against it before committing,
+// so two concurrent calls would otherwise both compute from the same old state.
+export function saveInvoiceAtomic(...args) { return serializeOperation(() => _saveInvoiceAtomic(...args)); }
+
+async function _saveInvoiceAtomic(app, { editingId, invoiceData, lines, invoiceDiscount = 0 }) {
   const [variants, allItems, allMoves] = await Promise.all([
     db.getAll(TABLES.variants), db.getAll(TABLES.invoiceItems), db.getAll(TABLES.stockMovements),
   ]);
@@ -446,7 +459,11 @@ export async function saveInvoiceAtomic(app, { editingId, invoiceData, lines, in
 // its movements inactive (so the ledger/reconcile stays consistent), and flag the
 // invoice isActive=false + deletedAt. Reversible via restoreInvoice. Stock and
 // money are fully given back; reports exclude it (loadAll filters inactive).
-export async function voidInvoice(app, invoiceId) {
+// Serialised: this reads current state and computes against it before committing,
+// so two concurrent calls would otherwise both compute from the same old state.
+export function voidInvoice(...args) { return serializeOperation(() => _voidInvoice(...args)); }
+
+async function _voidInvoice(app, invoiceId) {
   const [variants, allItems, allMoves] = await Promise.all([
     db.getAll(TABLES.variants), db.getAll(TABLES.invoiceItems), db.getAll(TABLES.stockMovements),
   ]);
@@ -477,7 +494,11 @@ export async function voidInvoice(app, invoiceId) {
 
 // Restore an invoice from the recycle bin: re-deduct the stock, reactivate its
 // movements, and clear isActive/deletedAt — the inverse of voidInvoice.
-export async function restoreInvoice(app, invoiceId) {
+// Serialised: this reads current state and computes against it before committing,
+// so two concurrent calls would otherwise both compute from the same old state.
+export function restoreInvoice(...args) { return serializeOperation(() => _restoreInvoice(...args)); }
+
+async function _restoreInvoice(app, invoiceId) {
   const [variants, allItems, allMoves] = await Promise.all([
     db.getAll(TABLES.variants), db.getAll(TABLES.invoiceItems), db.getAll(TABLES.stockMovements),
   ]);
@@ -739,7 +760,11 @@ function buildPurchaseSpecs(app, purchaseData, lines, fresh) {
   return { specs, poId, isFree };
 }
 
-export async function commitPurchase(app, purchaseData, lines) {
+// Serialised: this reads current state and computes against it before committing,
+// so two concurrent calls would otherwise both compute from the same old state.
+export function commitPurchase(...args) { return serializeOperation(() => _commitPurchase(...args)); }
+
+async function _commitPurchase(app, purchaseData, lines) {
   const fresh = await readPurchaseCtx();
   const { specs, poId, isFree } = buildPurchaseSpecs(app, purchaseData, lines, fresh);
   const res = await db.atomicMutations(specs);
@@ -2417,7 +2442,11 @@ export async function voidPurchase(app, purchaseId) {
 // Edits a purchase as ONE transaction: the void of the old rows and the creation of the
 // new ones commit together or not at all. Doing them as two calls meant a failure in the
 // second left the purchase voided and gone, with its stock already reversed.
-export async function editPurchaseAtomic(app, purchaseId, purchaseData, lines) {
+// Serialised: this reads current state and computes against it before committing,
+// so two concurrent calls would otherwise both compute from the same old state.
+export function editPurchaseAtomic(...args) { return serializeOperation(() => _editPurchaseAtomic(...args)); }
+
+async function _editPurchaseAtomic(app, purchaseId, purchaseData, lines) {
   const fresh = await readPurchaseCtx();
   const old = fresh.purchases.find((p) => p.id === purchaseId);
   if (!old || old.isActive === false) throw new Error('purchase not found');

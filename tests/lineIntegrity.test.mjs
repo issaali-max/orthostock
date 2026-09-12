@@ -771,6 +771,49 @@ console.log('\n─── 21. B12: paid and gift lines share one cost budget ─�
   ok('a no-op save leaves it alone', cogs() === held, `${cogs()} vs ${held}`);
 }
 
+
+console.log('\n─── 22. B14: concurrent local operations must not lose updates ───');
+{
+  // Business functions read the current state, compute against it, and only then commit.
+  // Two running at once both read the SAME old state — the lost update happens before
+  // the atomic commit, which is why an atomic commit alone did not prevent it.
+  // A material of its own: earlier sections sell 'a'..'d' repeatedly, and a
+  // whole-material comparison here would be measuring their movements too.
+  await db.insert(TABLES.variants, { id: 'k', nameEn: 'Mat K', sku: 'K', stockQty: 100, sellingPriceDefault: 25, purchasePriceAvg: 10, isActive: true });
+  await db.insert(TABLES.stockMovements, { variantId: 'k', type: 'opening', qtyChange: 100, qtyAfter: 100, refType: 'manual', refId: null });
+  await all();
+  const startStock = num((await db.getAll(TABLES.variants)).find((v) => v.id === 'k').stockQty);
+  const startLedger = round2((await db.getAll(TABLES.stockMovements))
+    .filter((m) => m.variantId === 'k' && m.isActive !== false).reduce((s, m) => s + num(m.qtyChange), 0));
+
+  // Two sales fired at the same instant.
+  await Promise.all([
+    save({ lines: [{ variantId: 'k', qty: 10, unitPrice: 25 }] }),
+    save({ lines: [{ variantId: 'k', qty: 20, unitPrice: 25 }] }),
+  ]);
+  await all();
+  const stock = num((await db.getAll(TABLES.variants)).find((v) => v.id === 'k').stockQty);
+  const ledger = round2((await db.getAll(TABLES.stockMovements))
+    .filter((m) => m.variantId === 'k' && m.isActive !== false).reduce((s, m) => s + num(m.qtyChange), 0));
+  ok('both sales are deducted, not just the last one', stock === startStock - 30, `${stock} vs ${startStock - 30}`);
+  ok('and the cache agrees with the ledger', stock === ledger, `${stock} vs ${ledger}`);
+  void startLedger;
+
+  // Two payments on one invoice at the same instant.
+  const id = await save({ lines: [{ variantId: 'k', qty: 4, unitPrice: 25 }] });
+  await Promise.all([
+    E.recordInvoicePayment(app, id, 30, '2026-09-11'),
+    E.recordInvoicePayment(app, id, 40, '2026-09-11'),
+  ]);
+  await all();
+  const inv = (await db.getAll(TABLES.invoices)).find((i) => i.id === id);
+  ok('both payments are recorded', num(inv.paidAmount) === 70, `${inv.paidAmount}`);
+  ok('and each has its own entry', (inv.payments || []).length === 2, `${(inv.payments || []).length}`);
+  ok('the payment log matches the paid amount',
+    round2((inv.payments || []).reduce((s, p) => s + num(p.amount), 0)) === num(inv.paidAmount));
+  ok('no payment-log fault is reported', !E.paymentLogMismatches(app.data).some((x) => x.invoiceNumber === inv.invoiceNumber));
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${pass + fail} checks · ${fail} finding(s)`);
 findings.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));
