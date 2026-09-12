@@ -51,6 +51,10 @@ export async function authSignOut() { if (supabase) await supabase.auth.signOut(
 
 const isOnline = () => (typeof navigator === 'undefined' ? true : navigator.onLine !== false);
 
+// Set while a restore is rewriting everything. It must stop every upload path, not only
+// the scheduled one — declared here so flush() can see it.
+let _paused = false;
+
 // ── Rule 1: the document ──────────────────────────────────────────────────────
 // A parent and its children are one fact. These are the only two aggregates in the
 // app; everything else is a standalone row.
@@ -307,7 +311,6 @@ export async function refreshPending() {
 }
 
 let started = false;
-let _paused = false;
 let _onData = null;
 
 // ── Rule 3: the outbox never discards ─────────────────────────────────────────
@@ -318,7 +321,11 @@ let _onData = null;
 let _flushing = false;
 
 export async function flush() {
-  if (!supabase || _flushing) return;
+  // `_paused` gated the scheduler but not this, and every local write calls flush
+  // directly — so a restore that was busy wiping and republishing could have an ordinary
+  // save upload the old generation underneath it. A restore has to be able to stop ALL
+  // uploads, not just the timer.
+  if (!supabase || _flushing || _paused) return;
   _flushing = true;
   try {
     // A device behind a restore must not upload the generation that was replaced.

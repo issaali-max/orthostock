@@ -335,6 +335,32 @@ console.log('\n─── 15. B15: a restore other devices actually obey ──�
   ok('a tombstone keeps it deleted', purgeRun({ tombstone: true }) === 'stays deleted');
 }
 
+
+console.log('\n─── 16. Restore pause, and the security choice ───');
+{
+  // Section 5 of the review: _paused gated the scheduler but not flush, and every local
+  // write calls flush directly — so an ordinary save could upload the old generation
+  // while a restore was busy replacing it.
+  ok('the pause stops every upload path', /if \(!supabase \|\| _flushing \|\| _paused\) return;/.test(sync));
+  ok('and is declared before flush can read it', sync.indexOf('let _paused = false;') < sync.indexOf('export async function flush'));
+  ok('the reason is recorded', /not just the timer/.test(sync));
+
+  // B16 — I cannot see the deployed policies, only what the files say. What I can do is
+  // make the choice explicit and reversible.
+  const schema = fs.readFileSync(new URL('../src/db/schema.sql', import.meta.url), 'utf8');
+  const hardened = fs.readFileSync(new URL('../src/db/policies-authenticated.sql', import.meta.url), 'utf8');
+  ok('the permissive policies are still what schema.sql declares', /to anon, authenticated/.test(schema),
+    'stated plainly rather than quietly changed under the owner');
+  ok('a hardened alternative exists', /create policy "authenticated only"/.test(hardened));
+  ok('it removes anon rather than adding a second policy', /drop policy if exists/.test(hardened));
+  ok('it covers every declared table',
+    [...schema.matchAll(/create table if not exists public\."(\w+)"/g)].map((m) => m[1])
+      .every((t) => hardened.includes(`'${t}'`)));
+  ok('it says what to check before running it', /confirm that every device signs in/.test(hardened));
+  ok('it says it is reversible', /re-running schema\.sql restores/.test(hardened));
+  ok('and does not overstate what it achieves', /does NOT create separation between businesses/.test(hardened));
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${pass + fail} checks · ${fail} finding(s)`);
 findings.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));
