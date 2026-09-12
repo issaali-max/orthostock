@@ -553,9 +553,18 @@ async function _restoreInvoice(app, invoiceId) {
 export async function purgeInvoice(app, invoiceId) {
   const [allItems, allMoves] = await Promise.all([db.getAll(TABLES.invoiceItems), db.getAll(TABLES.stockMovements)]);
   const specs = [];
+  // ── A purge leaves evidence, it does not vanish ──
+  // Removing the row outright meant the cloud simply lacked it — and absence is not an
+  // instruction. Another device that still held the invoice pushed it straight back, so
+  // a permanent deletion undid itself. The children go, since nothing reads them once
+  // the parent is purged, but the PARENT stays as a tombstone: emptied of its business
+  // content, marked purged, and carrying a timestamp that outranks any stale copy.
   for (const it of allItems.filter((x) => x.invoiceId === invoiceId)) specs.push({ op: 'remove', table: TABLES.invoiceItems, id: it.id });
   for (const m of allMoves.filter((x) => x.refType === 'invoice' && x.refId === invoiceId)) specs.push({ op: 'remove', table: TABLES.stockMovements, id: m.id });
-  specs.push({ op: 'remove', table: TABLES.invoices, id: invoiceId });
+  specs.push({ op: 'update', table: TABLES.invoices, id: invoiceId, patch: {
+    isActive: false, purged: true, purgedAt: nextTimestamp(),
+    total: 0, subtotal: 0, paidAmount: 0, discountTotal: 0, vatAmount: 0, payments: [],
+  } });
   await db.atomicMutations(specs);
   await Promise.all([app.refresh(TABLES.invoices), app.refresh(TABLES.invoiceItems), app.refresh(TABLES.stockMovements)]);
   nudgeSync();

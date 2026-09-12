@@ -17,7 +17,10 @@ export default function InvoiceTrash({ onClose }) {
 
   const load = async () => {
     const all = await db.getAll(TABLES.invoices);
-    setRows(all.filter((i) => i.isActive === false).sort((a, b) => num(b.deletedAt) - num(a.deletedAt)));
+    // A purged invoice keeps its row as a tombstone so the deletion propagates instead of
+    // being undone by another device that still holds it. It is gone as far as the owner
+    // is concerned, so it is not offered for restore.
+    setRows(all.filter((i) => i.isActive === false && !i.purged).sort((a, b) => num(b.deletedAt) - num(a.deletedAt)));
   };
   useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 

@@ -228,6 +228,61 @@ const isMissingTable = (error) => {
     || m.includes('could not find the table') || m.includes('schema cache');
 };
 
+// ── Restore epoch ─────────────────────────────────────────────────────────────
+// A restore wipes the cloud and republishes one device's data, which declares that data
+// to be the truth. Nothing made the OTHER devices obey: their rows carried newer stamps,
+// so they declined the restored version on the next pull and pushed their own back over
+// it. A restore appeared to work and was undone within the minute — and a purged invoice
+// came back the same way.
+//
+// The epoch is a single cloud row that every client reads before it uploads. A restore
+// bumps it. A device whose local epoch is older knows its data belongs to a generation that has
+// been deliberately replaced: it must not push, and it re-bootstraps from the cloud
+// instead. That is the boundary a restore needs to mean anything across devices.
+const EPOCH_ID = '__restore_epoch__';
+
+async function cloudEpoch() {
+  if (!supabase) return 0;
+  try {
+    const { data, error } = await supabase.from(TABLES.settings).select('"updatedAt"').eq('id', EPOCH_ID).maybeSingle();
+    if (error) return 0;
+    return Number(data?.updatedAt || 0);
+  } catch { return 0; }
+}
+const localEpoch = async () => Number((await metaGet('restoreEpoch')) || 0);
+
+async function publishEpoch(value) {
+  if (!supabase) return;
+  try {
+    await supabase.from(TABLES.settings).upsert({ id: EPOCH_ID, updatedAt: value, data: { id: EPOCH_ID, restoredAt: value } });
+  } catch (e) { console.warn('[sync] could not publish restore epoch', e?.message || e); }
+  await metaSet('restoreEpoch', value);
+}
+
+// Called before every upload. Returns true when this device is behind a restore and must
+// not write. It clears local data and pulls the restored state, then adopts the epoch —
+// the same thing the owner would otherwise have to do by hand on every other device.
+async function yieldToRestore() {
+  const cloud = await cloudEpoch();
+  if (!cloud) return false;
+  const mine = await localEpoch();
+  if (cloud <= mine) return false;
+
+  console.warn('[sync] a restore happened elsewhere; rebuilding from cloud instead of uploading');
+  _paused = true;
+  try {
+    for (const table of Object.values(TABLES)) {
+      try { await idbClear(table); } catch { /* keep going */ }
+    }
+    try { await idbClear('outbox'); } catch { /* pending work belonged to the replaced generation */ }
+    await metaSet('pullWatermark', 0);
+    await metaSet('restoreEpoch', cloud);
+  } finally { _paused = false; }
+  await pull({ full: true });
+  _onData?.();
+  return true;
+}
+
 // ── State ─────────────────────────────────────────────────────────────────────
 let state = { configured: cloudConfigured, online: isOnline(), syncing: false, pending: 0, lastSyncAt: null, failedCount: 0 };
 const subs = new Set();
@@ -265,7 +320,11 @@ let _flushing = false;
 export async function flush() {
   if (!supabase || _flushing) return;
   _flushing = true;
-  try { await flushInner(); } finally { _flushing = false; }
+  try {
+    // A device behind a restore must not upload the generation that was replaced.
+    if (await yieldToRestore()) return;
+    await flushInner();
+  } finally { _flushing = false; }
 }
 
 async function flushInner() {
@@ -372,6 +431,7 @@ export async function pull({ full = false } = {}) {
       for (const cloud of rows) {
         const rec = fromCloud(cloud);
         if (!rec?.id) continue;
+        if (rec.id === EPOCH_ID) { await metaSet('restoreEpoch', Number(cloud.updatedAt || 0)); continue; }
         // ── One owner per row ──
         // A movement caused by an invoice or a purchase belongs to that document and
         // arrives inside it. The same row can also exist standalone in the cloud from
@@ -571,6 +631,9 @@ export async function fullRestoreFromBackup(parsed) {
       if (!w.ok && w.errors?.length) return { ok: false, restored, errors: w.errors };
       const r = await pushAllLocal();
       if (!r.ok) return { ok: false, restored, errors: r.errors };
+      // Published LAST, so the epoch only rises once the restored data is actually up.
+      // Other devices see it on their next upload attempt and rebuild instead of pushing.
+      await publishEpoch(nextTimestamp());
     }
     _onData?.();
     return { ok: true, restored, errors: [] };
@@ -595,7 +658,9 @@ export async function restoreSnapshotToCloud(key, onProgress) {
     }
     const w = await wipeCloud();
     if (!w.ok && w.errors?.length) return { ok: false, pushed: 0, errors: w.errors };
-    return await pushAllLocal(onProgress);
+    const res = await pushAllLocal(onProgress);
+    if (res.ok) await publishEpoch(nextTimestamp());
+    return res;
   } finally { _paused = false; }
 }
 

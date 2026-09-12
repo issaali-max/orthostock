@@ -110,8 +110,12 @@ console.log('\n─── 8. The rebuild kept what mattered and dropped what did 
     'fullRestoreFromBackup', 'restoreSnapshotToCloud', 'refreshPending', 'getSupabase']) {
     ok(`${kept} kept`, new RegExp(`export [\\w ]*${kept}\\b`).test(sync));
   }
-  const lines = sync.split('\n').length;
-  ok('the file is smaller than before the rebuild', lines < 700, `${lines} lines`);
+  // A line ceiling was useful right after the rebuild cut 791 lines to 487. It is noise
+  // now: the file has since gained pagination, the restore epoch and the stale-write
+  // check, all of which earn their space. What still matters is that the dead code
+  // removed then stays removed, which the checks above assert by name.
+  ok('the rebuild is still smaller than the 791 lines it replaced', sync.split('\n').length < 791,
+    `${sync.split('\n').length} lines`);
 }
 
 
@@ -285,6 +289,50 @@ console.log('\n─── 14. B9: every cloud read must walk all pages ───'
   ok('unpaginated reading loses the rest silently', walk(1250, 500, false) === 500);
   ok('paginated reading retrieves everything', walk(1250, 500, true) === 1250);
   ok('and an exact multiple of the page size still terminates', walk(1000, 500, true) === 1000);
+}
+
+
+console.log('\n─── 15. B15: a restore other devices actually obey ───');
+{
+  const engine = fs.readFileSync(new URL('../src/lib/engine.js', import.meta.url), 'utf8');
+  const trash = fs.readFileSync(new URL('../src/features/sales/InvoiceTrash.jsx', import.meta.url), 'utf8');
+
+  // Restore wipes the cloud and republishes one device's data. Nothing made the OTHER
+  // devices obey: their rows carried newer stamps, so they declined the restored version
+  // and pushed their own back. The restore was undone within the minute.
+  ok('a restore epoch exists', /const EPOCH_ID = '__restore_epoch__'/.test(sync));
+  ok('every upload checks it first', /if \(await yieldToRestore\(\)\) return;/.test(sync));
+  ok('a device behind a restore rebuilds instead of pushing', /rebuilding from cloud instead of uploading/.test(sync));
+  ok('it drops the queue belonging to the replaced generation', /pending work belonged to the replaced generation/.test(sync));
+  ok('and resets its checkpoint so it downloads everything', /metaSet\('pullWatermark', 0\)/.test(sync));
+  ok('the epoch is published only after the data is up', /Published LAST/.test(sync));
+  ok('both restore paths publish it', (sync.match(/publishEpoch\(nextTimestamp\(\)\)/g) || []).length === 2);
+  ok('the epoch row never lands as a settings record', /rec\.id === EPOCH_ID/.test(sync));
+
+  // A purged invoice used to come back the same way: the cloud simply lacked it, and
+  // absence is not an instruction.
+  ok('purging leaves a tombstone rather than removing the row', /purged: true, purgedAt/.test(engine));
+  ok('emptied of its business content', /total: 0, subtotal: 0, paidAmount: 0/.test(engine));
+  ok('and the recycle bin does not offer it back', /isActive === false && !i\.purged/.test(trash));
+
+  // Simulate both halves.
+  const restoreRun = ({ epoch }) => {
+    let cloud = { total: 1000, epoch: 2 };                 // the restored state
+    const stale = { total: 2000, updatedAt: 999, epoch: 1 };
+    if (epoch && stale.epoch < cloud.epoch) return cloud.total;   // stale device yields
+    return stale.total;                                            // stale device overwrites
+  };
+  ok('without an epoch the restore is undone', restoreRun({ epoch: false }) === 2000);
+  ok('with it the restored data survives', restoreRun({ epoch: true }) === 1000);
+
+  const purgeRun = ({ tombstone }) => {
+    const cloud = tombstone ? { id: 'i', purged: true, updatedAt: 200 } : null;
+    const stale = { id: 'i', purged: false, updatedAt: 100 };
+    if (!cloud) return 'resurrected';
+    return cloud.updatedAt > stale.updatedAt ? 'stays deleted' : 'resurrected';
+  };
+  ok('absence alone lets a purged invoice return', purgeRun({ tombstone: false }) === 'resurrected');
+  ok('a tombstone keeps it deleted', purgeRun({ tombstone: true }) === 'stays deleted');
 }
 
 console.log('\n═══════════════════════════════════════');
