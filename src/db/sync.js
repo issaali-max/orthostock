@@ -199,6 +199,28 @@ function mergePreserve(local, rec) {
   return out;
 }
 
+// ── Every cloud read is paginated ──
+// Supabase caps a response at 1,000 rows by default. An unpaginated `select` therefore
+// returns a SILENT prefix once a table grows past that: no error, no warning, just part
+// of the business. A fresh device would reconstruct only what fitted in the first page
+// and report a successful sync — and this database already holds thousands of stock
+// movements.
+//
+// Pages are walked until one comes back short. `ok` is false if any page failed, so the
+// caller can hold its checkpoint instead of treating a partial answer as complete.
+const PAGE = 500;
+async function readAllPages(build) {
+  const rows = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await build().range(from, from + PAGE - 1);
+    if (error) return { rows, ok: false, error };
+    const batch = data || [];
+    rows.push(...batch);
+    if (batch.length < PAGE) return { rows, ok: true };
+    if (rows.length > 500000) return { rows, ok: false, error: new Error('page limit exceeded') };
+  }
+}
+
 const isMissingTable = (error) => {
   const m = String(error?.message || error || '').toLowerCase();
   return error?.code === 'PGRST205' || error?.code === '42P01'
@@ -330,16 +352,18 @@ export async function pull({ full = false } = {}) {
     // the rival generations this design exists to prevent.
     if (table === TABLES.invoiceItems || table === TABLES.purchaseItems) continue;
     try {
-      let rows = [];
-      if (since > 0) {
-        const { data, error } = await supabase.from(table).select('*').gt('updatedAt', since);
-        if (error) { if (!isMissingTable(error)) console.warn('[sync] pull', table, error.message); continue; }
-        reached = true; rows = data || [];
-      } else {
-        const { data, error } = await supabase.from(table).select('*');
-        if (error) { if (!isMissingTable(error)) console.warn('[sync] pull', table, error.message); continue; }
-        reached = true; rows = data || [];
+      const page = await readAllPages(() => (since > 0
+        ? supabase.from(table).select('*').gt('updatedAt', since).order('updatedAt', { ascending: true })
+        : supabase.from(table).select('*').order('updatedAt', { ascending: true })));
+      if (!page.ok) {
+        if (!isMissingTable(page.error)) {
+          incomplete = true;                  // a partial answer must not advance the checkpoint
+          console.warn('[sync] pull', table, page.error?.message || page.error);
+        }
+        continue;
       }
+      reached = true;
+      const rows = page.rows;
       if (!rows.length) continue;
 
       const local = await idbGetAll(table);
@@ -440,9 +464,9 @@ export async function mergeWithCloud(onProgress) {
 
     let keys = [];
     try {
-      const { data, error } = await supabase.from(table).select('id,"updatedAt"');
-      if (error) { if (!isMissingTable(error)) errors.push(`${table}: ${error.message}`); continue; }
-      keys = data || [];
+      const page = await readAllPages(() => supabase.from(table).select('id,"updatedAt"').order('id', { ascending: true }));
+      if (!page.ok) { if (!isMissingTable(page.error)) errors.push(`${table}: ${page.error?.message || page.error}`); continue; }
+      keys = page.rows;
     } catch (e) { errors.push(`${table}: ${e?.message || e}`); continue; }
     const cloudById = new Map(keys.map((k) => [k.id, Number(k.updatedAt || 0)]));
 

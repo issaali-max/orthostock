@@ -249,6 +249,44 @@ console.log('\n─── 13. B2: a stale device must not overwrite newer money �
   ok('guarded, the payment survives', run({ guarded: true }) === 300);
 }
 
+
+console.log('\n─── 14. B9: every cloud read must walk all pages ───');
+{
+  // Supabase caps a response at 1,000 rows by default. An unpaginated select returns a
+  // SILENT prefix once a table passes that — no error, no warning — so a fresh device
+  // would reconstruct part of the business and report a successful sync. This database
+  // already holds thousands of stock movements.
+  ok('a shared pager exists', /async function readAllPages/.test(sync));
+  ok('it walks until a page comes back short', /if \(batch\.length < PAGE\) return \{ rows, ok: true \}/.test(sync));
+  ok('it reports failure rather than returning a prefix as complete', /return \{ rows, ok: false, error \}/.test(sync));
+  ok('and has a stop so a broken cursor cannot loop forever', /page limit exceeded/.test(sync));
+
+  ok('the pull uses it', /const page = await readAllPages\(\(\) => \(since > 0/.test(sync));
+  ok('the merge key listing uses it', /readAllPages\(\(\) => supabase\.from\(table\)\.select\('id,"updatedAt"'\)/.test(sync));
+  ok('reads are ordered, so pages do not overlap or skip', /\.order\('updatedAt', \{ ascending: true \}\)/.test(sync));
+  ok('a partial answer holds the checkpoint', /incomplete = true;\s*\/\/ a partial answer must not advance/.test(sync));
+
+  // No unpaginated full-table read may remain.
+  const bare = [...sync.matchAll(/supabase\.from\(table\)\.select\('\*'\)(?!\.gt|\.in|\.order)/g)];
+  ok('no unpaginated full-table read remains', bare.length === 0, `${bare.length}`);
+
+  // The paging walk, simulated against a capped response.
+  const walk = (total, cap, paged) => {
+    const cloud = Array.from({ length: total }, (_, i) => i);
+    if (!paged) return cloud.slice(0, cap).length;
+    const out = [];
+    for (let f = 0; ; f += cap) {
+      const batch = cloud.slice(f, f + cap);
+      out.push(...batch);
+      if (batch.length < cap) break;
+    }
+    return out.length;
+  };
+  ok('unpaginated reading loses the rest silently', walk(1250, 500, false) === 500);
+  ok('paginated reading retrieves everything', walk(1250, 500, true) === 1250);
+  ok('and an exact multiple of the page size still terminates', walk(1000, 500, true) === 1000);
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${pass + fail} checks · ${fail} finding(s)`);
 findings.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));
