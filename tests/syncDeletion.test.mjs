@@ -72,7 +72,8 @@ console.log('\n─── 6. One merge, both directions ───');
 {
   ok('a single merge does upload and download', /export async function mergeWithCloud/.test(sync));
   ok('it uploads what the cloud lacks', /cu === undefined \|\| Number\(r\.updatedAt \|\| 0\) > cu/.test(sync));
-  ok('and downloads what this device lacks', /!mine \|\| Number\(k\.updatedAt \|\| 0\) > Number\(mine\.updatedAt \|\| 0\)/.test(sync));
+  // Equal stamps are fetched too now, so a tie can be broken by content.
+  ok('and downloads what this device lacks', /Number\(k\.updatedAt \|\| 0\) >= Number\(mine\.updatedAt \|\| 0\)/.test(sync));
   ok('it deletes nothing on either side', !/mergeWithCloud[\s\S]{0,2000}idbDelete\(table/.test(sync));
   ok('it ignores the watermark, which is the point', /ignores the watermark/.test(sync));
 
@@ -359,6 +360,31 @@ console.log('\n─── 16. Restore pause, and the security choice ───');
   ok('it says what to check before running it', /confirm that every device signs in/.test(hardened));
   ok('it says it is reversible', /re-running schema\.sql restores/.test(hardened));
   ok('and does not overstate what it achieves', /does NOT create separation between businesses/.test(hardened));
+}
+
+
+console.log('\n─── 17. Equal timestamps must still converge ───');
+{
+  // Last-write-wins compares with `>`, so two devices holding the same stamp and
+  // different content each kept their own — forever. Neither is newer, so neither
+  // yields. The logical clock makes this rare but cannot prevent it: two devices that
+  // have not seen each other can stamp the same millisecond.
+  ok('a deterministic tiebreak exists', /function cloudWinsTie/.test(sync));
+  ok('the pull uses it', /cu === lu && cu > 0 && cloudWinsTie\(mine, rec\)/.test(sync));
+  ok('the merge uses it', /cu === lu && !cloudWinsTie\(mine, rec\)\) continue/.test(sync));
+  ok('and merge fetches equal stamps so it can compare content', /Number\(k\.updatedAt \|\| 0\) >= Number\(mine\.updatedAt \|\| 0\)/.test(sync));
+  ok('it is honest that the winner is arbitrary but agreed', /arbitrary agreed answer beats a permanent disagreement/.test(sync));
+
+  // Both devices must reach the SAME answer, whichever side runs the comparison.
+  const fn = new Function('local', 'rec',
+    sync.match(/function cloudWinsTie[\s\S]*?\n}/)[0].replace('function cloudWinsTie(local, rec) {', '').replace(/\}$/, ''));
+  const decide = (mine, other) => (fn(mine, other) ? other : mine);
+  const A = { id: 'x', total: 1000, updatedAt: 500 };
+  const Bv = { id: 'x', total: 2000, updatedAt: 500 };
+  ok('both sides pick the same version', decide(A, Bv).total === decide(Bv, A).total,
+    `${decide(A, Bv).total} vs ${decide(Bv, A).total}`);
+  ok('identical content is not swapped', fn(A, { ...A }) === false);
+  ok('the decision is stable when repeated', decide(decide(A, Bv), Bv).total === decide(A, Bv).total);
 }
 
 console.log('\n═══════════════════════════════════════');

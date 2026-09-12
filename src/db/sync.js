@@ -225,6 +225,27 @@ async function readAllPages(build) {
   }
 }
 
+// ── Deciding a tie ────────────────────────────────────────────────────────────
+// Last-write-wins compares stamps with `>`, so two devices holding the SAME stamp and
+// different content each keep their own — forever. Neither is newer, so neither yields,
+// and they never converge no matter how often they sync. The logical clock makes this
+// rare but cannot prevent it: two devices that have not seen each other can stamp the
+// same millisecond.
+//
+// A tie is broken by content instead, with a rule both sides compute identically: the
+// larger serialised form wins. It is arbitrary — nothing about the data says which is
+// right — but it is DETERMINISTIC, and that is the property convergence needs. An
+// arbitrary agreed answer beats a permanent disagreement, and the losing version is
+// still in that device's own history.
+function cloudWinsTie(local, rec) {
+  try {
+    const a = JSON.stringify(rec) || '';
+    const b = JSON.stringify(local) || '';
+    if (a.length !== b.length) return a.length > b.length;
+    return a > b;
+  } catch { return false; }
+}
+
 const isMissingTable = (error) => {
   const m = String(error?.message || error || '').toLowerCase();
   return error?.code === 'PGRST205' || error?.code === '42P01'
@@ -450,7 +471,9 @@ export async function pull({ full = false } = {}) {
         if (cu > maxSeen) maxSeen = cu;
         const mine = localById.get(rec.id);
         const lu = Number(mine?.updatedAt || 0);
-        if (!mine || cu > lu) {
+        // A tie on the stamp is resolved by content, so both devices reach the same
+        // answer instead of each keeping its own version indefinitely.
+        if (!mine || cu > lu || (cu === lu && cu > 0 && cloudWinsTie(mine, rec))) {
           // Rule 5: a newer cloud version replaces the local one as a WHOLE.
           const merged = mine ? mergePreserve(mine, rec) : rec;
           if (CHILD_SPEC[table]) {
@@ -556,7 +579,8 @@ export async function mergeWithCloud(onProgress) {
     // Deliberately ignores the watermark — that is the point of asking explicitly.
     const want = keys.filter((k) => {
       const mine = localById.get(k.id);
-      return !mine || Number(k.updatedAt || 0) > Number(mine.updatedAt || 0);
+      // Equal stamps are fetched too: the body is needed to break the tie by content.
+      return !mine || Number(k.updatedAt || 0) >= Number(mine.updatedAt || 0);
     }).map((k) => k.id);
     for (let i = 0; i < want.length; i += 100) {
       const ids = want.slice(i, i + 100);
@@ -569,6 +593,10 @@ export async function mergeWithCloud(onProgress) {
           if (!rec?.id) continue;
           if (carriedByParent(table, rec)) continue;      // owned by its parent document
           const mine = localById.get(rec.id);
+          const cu = Number(cloud.updatedAt || rec.updatedAt || 0);
+          const lu = Number(mine?.updatedAt || 0);
+          if (mine && cu < lu) continue;                                 // ours is newer
+          if (mine && cu === lu && !cloudWinsTie(mine, rec)) continue;   // tie, ours stands
           const merged = mine ? mergePreserve(mine, rec) : rec;
           if (CHILD_SPEC[table]) {
             // Same atomic install as pull: a document lands whole or not at all.
