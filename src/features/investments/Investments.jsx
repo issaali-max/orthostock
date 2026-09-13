@@ -472,9 +472,13 @@ export default function Investments() {
                 // Replace, never stack: remove prior adjustments, then book the one figure
                 // the numbers require. Adding a second row on top of the first is how the
                 // old flow drifted further from the truth each time it was used.
+                // Retired, not removed. A hard delete leaves the cloud simply lacking the
+                // row, and absence is not an instruction: the other device still held the
+                // previous settlement and pushed it back, so the two accumulated —
+                // replacing 100 with 200 gave 200 here and 300 there.
                 for (const f of (data[TABLES.cashFlows] || []).filter((x) => x.isActive !== false && (x.account || 'investment') === 'investment' && x.type === 'pastProfit')) {
                   // eslint-disable-next-line no-await-in-loop
-                  await deleteRow(TABLES.cashFlows, f.id);
+                  await updateRow(TABLES.cashFlows, f.id, { isActive: false, deletedAt: Date.now() });
                 }
                 if (Math.abs(needed) >= 0.01) {
                   await createRow(TABLES.cashFlows, {

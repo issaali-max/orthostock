@@ -262,6 +262,58 @@ console.log('\n─── 10. Reconciliation must account for every part of cash 
   ok('the label exists in both languages', (i18n.match(/totalPnLLabel/g) || []).length === 2);
 }
 
+
+console.log('\n─── 11. A price refresh must not revive a deleted security ───');
+{
+  // db.update writes the WHOLE row with a fresh timestamp, so a price refresh carried
+  // whatever business state that device held. A device that had not yet downloaded a
+  // deletion refreshed the price and pushed the security back as ACTIVE, outranking the
+  // deletion because its stamp was newer. The stale-write guard cannot catch it: the
+  // write really is newer, it just carries old meaning.
+  const prices = fs.readFileSync(new URL('../src/lib/prices.js', import.meta.url), 'utf8');
+  ok('the row is re-read immediately before writing', /const now = \(await db\.getAll\(TABLES\.securities\)\)\.find/.test(prices));
+  ok('and a deletion seen meanwhile is respected', /now\.isActive === false\) continue/.test(prices));
+  ok('the reason is recorded', /A price is not a business decision/.test(prices));
+
+  // Behaviour, against the real store.
+  await newSecurity('s5');
+  await db.update(TABLES.securities, 's5', { currentPrice: 10 });
+  await db.update(TABLES.securities, 's5', { isActive: false });   // deleted elsewhere
+  await all();
+  const before = (await db.getAll(TABLES.securities)).find((x) => x.id === 's5');
+  ok('it is deleted', before.isActive === false);
+
+  const { refreshAllPrices } = await import('../src/lib/prices.js');
+  // Pass the STALE copy, as a device that had not yet downloaded the deletion would.
+  await refreshAllPrices([{ ...before, isActive: true, currentPrice: 10 }], null).catch(() => {});
+  await all();
+  const after = (await db.getAll(TABLES.securities)).find((x) => x.id === 's5');
+  ok('a price refresh does not bring it back', after.isActive === false, `${after.isActive}`);
+}
+
+console.log('\n─── 12. Broker settlements replace rather than accumulate ───');
+{
+  // The screen deleted prior pastProfit rows and wrote a new one. A hard delete leaves
+  // the cloud simply lacking the row, so the other device still held the previous
+  // settlement and pushed it back: replacing 100 with 200 gave 200 here and 300 there.
+  const ui = fs.readFileSync(new URL('../src/features/investments/Investments.jsx', import.meta.url), 'utf8');
+  ok('prior settlements are retired, not removed',
+    /await updateRow\(TABLES\.cashFlows, f\.id, \{ isActive: false, deletedAt: Date\.now\(\) \}\)/.test(ui));
+  ok('and the reason is recorded', /absence is not an instruction/.test(ui));
+
+  // A retired settlement must not count anywhere.
+  const withBoth = {
+    [TABLES.securities]: [], [TABLES.tradeLots]: [], [TABLES.tradeSells]: [], [TABLES.projects]: [],
+    [TABLES.cashFlows]: [
+      { id: 'old', account: 'investment', type: 'pastProfit', amount: 100, currency: 'USD', date: '2026-09-01', isActive: false },
+      { id: 'new', account: 'investment', type: 'pastProfit', amount: 200, currency: 'USD', date: '2026-09-02' },
+    ],
+  };
+  const st = E.portfolioStats(withBoth, () => 0);
+  ok('only the current settlement counts', st.pastProfit === 200, `${st.pastProfit}`);
+  ok('and cash reflects that one figure', st.cash === 200, `${st.cash}`);
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${pass + fail} checks · ${fail} finding(s)`);
 findings.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));
