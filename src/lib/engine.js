@@ -2004,7 +2004,11 @@ export function topCustomers(data, n = 10, { type, emirate, bounds, sortBy = 'pr
 //   • currentPrice entered manually drives unrealized P/L
 // Cash flows (deposit/withdraw/dividend/fee/interest) track capital.
 // ─────────────────────────────────────────────────────────────
-export async function commitBuy(app, { securityId, buyDate, qty, pricePerShare, fees, fundFrom, rate }) {
+// Serialised for the same reason as commitSell, and because a bank-funded buy moves cash
+// before it records the purchase — two of those at once could double-spend the balance.
+export function commitBuy(...args) { return serializeOperation(() => _commitBuy(...args)); }
+
+async function _commitBuy(app, { securityId, buyDate, qty, pricePerShare, fees, fundFrom, rate }) {
   const q = num(qty), price = num(pricePerShare), f = num(fees);
   const cost = round2(q * price + f);
   // Where the money comes from. The investment account is a separate pot: a buy spends
@@ -2029,26 +2033,59 @@ export async function commitBuy(app, { securityId, buyDate, qty, pricePerShare, 
   await app.refresh(TABLES.tradeLots);
 }
 
-export async function commitSell(app, { securityId, sellDate, qty, pricePerShare, fees }) {
+// Serialised: it reads the remaining quantities and computes an allocation against them
+// before writing, so two concurrent sells would otherwise both allocate the same shares.
+export function commitSell(...args) { return serializeOperation(() => _commitSell(...args)); }
+
+async function _commitSell(app, { securityId, sellDate, qty, pricePerShare, fees }) {
   const lots = (await db.getAll(TABLES.tradeLots))
     .filter((l) => l.securityId === securityId && num(l.qtyRemaining) > 0)
-    .sort((a, b) => (a.buyDate || '').localeCompare(b.buyDate || '')); // FIFO
-  let remaining = num(qty), costMatched = 0;
+    // FIFO, and only lots bought on or before the sale date: shares cannot be sold
+    // before they were owned. Matching a later purchase silently invented a cost basis
+    // and let a mistyped date look like a valid trade.
+    .filter((l) => !sellDate || !l.buyDate || l.buyDate <= sellDate)
+    .sort((a, b) => (a.buyDate || '').localeCompare(b.buyDate || ''));
+
+  // ── Refuse rather than quietly sell less ──
+  // Asking to sell 15 of 10 recorded a sale of 10 and returned success. The trader
+  // believes 15 left the account, the broker statement says 15, and the books say 10 —
+  // and nothing anywhere says the request was reduced.
+  const available = round2(lots.reduce((sum, l) => sum + num(l.qtyRemaining), 0));
+  const want = num(qty);
+  if (!(want > 0)) throw new Error('sell quantity must be greater than zero');
+  if (want > available + 0.000001) {
+    throw new Error(`cannot sell ${want}: only ${available} held${sellDate ? ` on ${sellDate}` : ''}`);
+  }
+
+  let remaining = want, costMatched = 0;
+  const specs = [];
   for (const lot of lots) {
     if (remaining <= 0) break;
     const take = Math.min(remaining, num(lot.qtyRemaining));
     costMatched += take * safeDiv(num(lot.costBasis), num(lot.qtyBought), num(lot.buyPricePerShare));
-    await db.update(TABLES.tradeLots, lot.id, { qtyRemaining: round2(num(lot.qtyRemaining) - take) });
+    specs.push({ op: 'update', table: TABLES.tradeLots, id: lot.id, patch: { qtyRemaining: round2(num(lot.qtyRemaining) - take) } });
     remaining -= take;
   }
-  const soldQty = round2(num(qty) - Math.max(0, remaining));
+  const soldQty = round2(want - Math.max(0, remaining));
   const price = num(pricePerShare), f = num(fees);
   const proceeds = round2(soldQty * price - f);
-  await db.insert(TABLES.tradeSells, {
+
+  // ── One transaction ──
+  // The lot reductions and the sale record are one economic event. Written separately, a
+  // failure after the reductions left the shares gone with no sale and no proceeds: the
+  // money simply vanished from the books.
+  specs.push({ op: 'insert', table: TABLES.tradeSells, row: {
     securityId, sellDate, qty: soldQty, sellPricePerShare: price, sellFees: f,
     proceeds, costBasisMatched: round2(costMatched), realizedPnL: round2(proceeds - costMatched), currency: 'USD', notes: '',
-  });
-  await Promise.all([app.refresh(TABLES.tradeLots), app.refresh(TABLES.tradeSells)]);
+  } });
+  specs.push({ op: 'insert', table: TABLES.auditLog, row: {
+    at: Date.now(), userId: app?.user?.id || '', userName: app?.user?.name || app?.user?.email || '—',
+    action: 'sell', entity: 'security', ref: String(securityId),
+    note: `${soldQty} @ ${price} → ${proceeds}`,
+  } });
+
+  await db.atomicMutations(specs);
+  await Promise.all([app.refresh(TABLES.tradeLots), app.refresh(TABLES.tradeSells), app.refresh(TABLES.auditLog)]);
   nudgeSync();
 }
 
@@ -2247,7 +2284,11 @@ function periodKey(iso, mode) { return mode === 'year' ? (iso || '').slice(0, 4)
 // so we replay the whole security: lots (buyDate order) feed sells (sellDate
 // order); every sell's proceeds/realizedPnL and every lot's qtyRemaining are
 // recomputed. Validates in memory BEFORE persisting. Returns { ok, error }.
-export async function applyTradeChange(app, securityId, change) {
+// Serialised: it replays FIFO over the whole history, so a concurrent trade landing
+// mid-replay would be allocated against quantities that are about to be rewritten.
+export function applyTradeChange(...args) { return serializeOperation(() => _applyTradeChange(...args)); }
+
+async function _applyTradeChange(app, securityId, change) {
   let L = (app.data[TABLES.tradeLots] || []).filter((l) => l.securityId === securityId).map((l) => ({ ...l }));
   let S = (app.data[TABLES.tradeSells] || []).filter((x) => x.securityId === securityId).map((x) => ({ ...x }));
   if (change.deleteLot) L = L.filter((l) => l.id !== change.deleteLot);
