@@ -382,7 +382,10 @@ export default function Investments() {
                   <div style={{ fontSize: 11.5, opacity: .9 }}>{t('accountValue') || 'قيمة الحساب'} {cur(stats.accountValue)} − {t('depositedTotal') || 'المودَع'} {cur(stats.netCapital)}</div>
                   <div style={{ fontSize: 10.5, opacity: .85, marginTop: 2 }}>
                     {num(stats.pastProfit) !== 0 && <>🕰️ {t('pastProfit') || 'أرباح صفقات قديمة'} {stats.pastProfit >= 0 ? '+' : ''}{cur(stats.pastProfit)} · </>}
-                    💹 {t('unrealizedPnL') || 'غير محقق'} {stats.totalPnL >= 0 ? '+' : ''}{cur(stats.totalPnL)}
+                    {/* This figure is realised + unrealised + dividends, so calling it
+                        "unrealised" put two different numbers under one name — the card
+                        below shows the actual unrealised figure and they disagreed. */}
+                    💹 {t('totalPnLLabel') || 'إجمالي الربح والخسارة'} {stats.totalPnL >= 0 ? '+' : ''}{cur(stats.totalPnL)}
                   </div>
                 </>
               );
@@ -427,7 +430,13 @@ export default function Investments() {
         // has to subtract that realized profit — otherwise it is counted twice and cash
         // lands exactly `realized` above the real balance, which is what happened.
         const realized = round2(num(stats.totalRealized));
-        const needed = round2(holdCost + num(reconCash) - num(stats.netCapital) - realized);
+        // Dividends, interest and fees are part of cash too, and leaving them out made
+        // the adjustment wrong by exactly their amount: with a 1,000 deposit and a 100
+        // dividend the app and the broker both said 1,100, yet this proposed a further
+        // 100 and applying it pushed cash to 1,200. Solve against every component that
+        // feeds the cash figure, not a subset of them.
+        const otherCash = round2(num(stats.dividends) + num(stats.interest) - num(stats.fees));
+        const needed = round2(holdCost + num(reconCash) - num(stats.netCapital) - realized - otherCash);
         const delta = round2(needed - existing);
         const off = Math.abs(round2(num(stats.cash) - num(reconCash)));
         if (!reconOpen) {

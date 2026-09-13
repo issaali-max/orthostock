@@ -2134,12 +2134,23 @@ export function portfolioStats(data, priceOf) {
   // It repairs CASH (the money exists and was reinvested) but is NOT a deposit —
   // "deposited since start" must stay the owner's true capital.
   const pastProfit = sum(flows, 'pastProfit');
-  // Cash must be consistent with holdings: only count trades of ACTIVE securities.
-  // A deleted or merged-away duplicate leaves orphan lots pointing at an inactive
-  // security; those must NOT keep draining cash while being absent from holdings.
-  const activeIds = new Set(securities.map((s) => s.id));
-  const liveLots = lots.filter((l) => activeIds.has(l.securityId));
-  const liveSells = sells.filter((x) => activeIds.has(x.securityId));
+  // ── Hiding a security is not a cash event ──
+  // Cash counted only trades of ACTIVE securities while realised profit counted all of
+  // them, so deactivating a security moved the cash figure with no money going anywhere:
+  // buying for 200 and selling for 150 showed cash −50, and hiding the security showed
+  // 0. The trades were real, the money moved, and no ledger entry says otherwise.
+  //
+  // The original reason for the filter was sound: a merged-away duplicate leaves orphan
+  // lots that must not drain cash twice. But `isActive` on a security was carrying two
+  // meanings — "archived from view" and "these trades never happened" — and only the
+  // second justifies changing cash. Deleting a security now RETIRES its trades
+  // explicitly (see deleteSecurityCascade), so the trade's own isActive answers the
+  // question and the security's does not have to.
+  //
+  // Cash and realised profit therefore read the same set, which is what made them
+  // disagree in the first place.
+  const liveLots = lots;
+  const liveSells = sells;
   const buysCost = liveLots.reduce((a, l) => a + num(l.costBasis), 0);
   const sellsProceeds = liveSells.reduce((a, x) => a + num(x.proceeds), 0);
   const netCapital = round2(deposits - withdrawals);

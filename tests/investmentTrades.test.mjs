@@ -13,6 +13,7 @@ const { TABLES } = await import('../src/lib/constants.js');
 const db = await import('../src/db/db.js');
 const E = await import('../src/lib/engine.js');
 const { round2, num } = await import('../src/lib/money.js');
+const fs = await import('node:fs');
 
 let pass = 0, fail = 0; const findings = [];
 const ok = (l, c, d = '') => { if (c) { pass++; console.log('✓', l); } else { fail++; findings.push(`${l}${d ? ` — ${d}` : ''}`); console.log('✗', l, d ? `— ${d}` : ''); } };
@@ -207,6 +208,58 @@ console.log('\n─── 8. Cascading a security delete propagates too ───
     `${after.totalRealized} vs ${before.totalRealized}`);
   ok('and it is gone from the positions', !after.positions.some((p) => p.id === 's4'),
     JSON.stringify(after.positions.map((p) => p.id)));
+}
+
+
+console.log('\n─── 9. Archiving a security is not a cash event ───');
+{
+  // Cash counted only trades of ACTIVE securities while realised profit counted all of
+  // them. Deactivating a security therefore moved the cash figure with no money going
+  // anywhere: bought for 200, sold for 150, cash −50; hide the security and cash showed
+  // 0. The trades were real and no ledger entry says otherwise.
+  const mk = (secActive, tradesActive) => ({
+    [TABLES.securities]: [{ id: 'q', symbol: 'Q', currency: 'USD', isActive: secActive, currentPrice: 10 }],
+    [TABLES.tradeLots]: [{ id: 'l', securityId: 'q', buyDate: '2026-09-01', qtyBought: 10, qtyRemaining: 5, buyPricePerShare: 20, costBasis: 200, isActive: tradesActive }],
+    [TABLES.tradeSells]: [{ id: 'x', securityId: 'q', sellDate: '2026-09-05', qty: 5, sellPricePerShare: 30, proceeds: 150, costBasisMatched: 100, realizedPnL: 50, isActive: tradesActive }],
+    [TABLES.cashFlows]: [], [TABLES.projects]: [],
+  });
+  const active = E.portfolioStats(mk(true, true), () => 10);
+  const archived = E.portfolioStats(mk(false, true), () => 10);
+  ok('archiving does not move cash', active.cash === archived.cash, `${active.cash} vs ${archived.cash}`);
+  ok('and does not change realised profit', active.totalRealized === archived.totalRealized);
+  ok('cash reflects the trades that happened', active.cash === -50, `${active.cash}`);
+
+  // Deleting the security retires its trades, and THAT removes their effect.
+  const deleted = E.portfolioStats(mk(false, false), () => 10);
+  ok('deleting the trades removes their cash effect', deleted.cash === 0, `${deleted.cash}`);
+  ok('and their realised profit', deleted.totalRealized === 0, `${deleted.totalRealized}`);
+  ok('so cash and realised profit always read the same set',
+    (active.cash === archived.cash) === (active.totalRealized === archived.totalRealized));
+}
+
+console.log('\n─── 10. Reconciliation must account for every part of cash ───');
+{
+  // The formula ignored dividends, interest and fees, so it was wrong by exactly their
+  // amount: with a 1,000 deposit and a 100 dividend the app and the broker both said
+  // 1,100, yet it proposed a further 100 and applying that pushed cash to 1,200.
+  const ui = fs.readFileSync(new URL('../src/features/investments/Investments.jsx', import.meta.url), 'utf8');
+  ok('the adjustment subtracts the other cash components', /const otherCash = round2\(num\(stats\.dividends\) \+ num\(stats\.interest\) - num\(stats\.fees\)\)/.test(ui));
+  ok('and uses them in the calculation', /- realized - otherCash\)/.test(ui));
+
+  // Reproduce the arithmetic the screen performs.
+  const solve = ({ holdCost, brokerCash, netCapital, realized, dividends, interest, fees }, withOther) => {
+    const other = withOther ? round2(dividends + interest - fees) : 0;
+    return round2(holdCost + brokerCash - netCapital - realized - other);
+  };
+  const scenario = { holdCost: 0, brokerCash: 1100, netCapital: 1000, realized: 0, dividends: 100, interest: 0, fees: 0 };
+  ok('the old formula invented a 100 adjustment', solve(scenario, false) === 100);
+  ok('the corrected one proposes nothing', solve(scenario, true) === 0);
+
+  // The mislabelled line: totalPnL is realised + unrealised + dividends.
+  ok('the line is no longer called "unrealised"', !/t\('unrealizedPnL'\).*stats\.totalPnL/.test(ui));
+  ok('it is named for what it actually sums', /totalPnLLabel/.test(ui));
+  const i18n = fs.readFileSync(new URL('../src/lib/i18n.js', import.meta.url), 'utf8');
+  ok('the label exists in both languages', (i18n.match(/totalPnLLabel/g) || []).length === 2);
 }
 
 console.log('\n═══════════════════════════════════════');
