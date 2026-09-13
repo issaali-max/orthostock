@@ -141,6 +141,74 @@ console.log('\n─── 6. The books still add up ───');
   }
 }
 
+
+console.log('\n─── 7. Deleting a trade must travel to the other device ───');
+{
+  // Removing the row outright meant the cloud simply lacked it, and absence is not an
+  // instruction: a device that still held the trade pushed it straight back. Two devices
+  // then disagreed about cash and realised profit while holding identical share counts —
+  // the exact shape of the difference between the two phones.
+  await newSecurity('s3');
+  await E.commitBuy(app, { securityId: 's3', buyDate: '2026-09-01', qty: 10, pricePerShare: 50, fees: 0, fundFrom: 'none' });
+  await E.commitSell(app, { securityId: 's3', sellDate: '2026-09-05', qty: 5, pricePerShare: 60, fees: 0 });
+  await all();
+
+  const sale = (await sells('s3'))[0];
+  const statsBefore = E.portfolioStats(app.data, () => 0);
+  // Scoped to this security: earlier sections of this suite trade s1 and s2, so a
+  // portfolio total would be measuring them too.
+  const realizedFor = (sid) => {
+    const p = E.portfolioStats(app.data, () => 0).positions.find((x) => x.id === sid);
+    return p ? round2(num(p.realized)) : 0;
+  };
+  ok('the sale counts before deletion', num(sale.qty) === 5 && realizedFor('s3') === 50, `${realizedFor('s3')}`);
+
+  await E.applyTradeChange(app, 's3', { deleteSell: sale.id });
+  await all();                       // applyTradeChange refreshes its own tables; the
+                                     // test reads app.data and must see the result too
+  const row = (await db.getAll(TABLES.tradeSells)).find((x) => x.id === sale.id);
+  ok('the row survives as evidence rather than vanishing', !!row,
+    'a removed row cannot tell another device that the trade is gone');
+  ok('and is marked deleted', row.isActive === false && num(row.deletedAt) > 0);
+
+  ok('the deleted sale no longer counts toward realised profit', realizedFor('s3') === 0, `${realizedFor('s3')}`);
+  ok('nor toward the portfolio total',
+    E.portfolioStats(app.data, () => 0).totalRealized === round2(statsBefore.totalRealized - 50),
+    `${E.portfolioStats(app.data, () => 0).totalRealized} vs ${round2(statsBefore.totalRealized - 50)}`);
+  // Deleting the sale replays FIFO, which returns those shares to the lot — the trade
+  // never happened, so the shares were never sold.
+  ok('the shares return to the lot', await held('s3') === 10, `${await held('s3')}`);
+
+  // A device receiving this row applies an ordinary update and reaches the same result,
+  // which is the whole point of keeping it.
+  const asReceived = { ...row };
+  ok('the evidence carries everything a receiver needs', asReceived.isActive === false && !!asReceived.id);
+}
+
+console.log('\n─── 8. Cascading a security delete propagates too ───');
+{
+  await newSecurity('s4');
+  await E.commitBuy(app, { securityId: 's4', buyDate: '2026-09-01', qty: 8, pricePerShare: 20, fees: 0, fundFrom: 'none' });
+  await E.commitSell(app, { securityId: 's4', sellDate: '2026-09-06', qty: 3, pricePerShare: 25, fees: 0 });
+  await all();
+  const before = E.portfolioStats(app.data, () => 0);
+
+  await E.deleteSecurityCascade(app, 's4');
+  await all();
+
+  const lotsLeft = (await db.getAll(TABLES.tradeLots)).filter((l) => l.securityId === 's4');
+  const sellsLeft = (await db.getAll(TABLES.tradeSells)).filter((x) => x.securityId === 's4');
+  ok('its rows are retired, not removed', lotsLeft.length > 0 && sellsLeft.length > 0);
+  ok('and all are marked deleted',
+    lotsLeft.every((l) => l.isActive === false) && sellsLeft.every((x) => x.isActive === false));
+
+  const after = E.portfolioStats(app.data, () => 0);
+  ok('its realised profit no longer counts', after.totalRealized === before.totalRealized - 15,
+    `${after.totalRealized} vs ${before.totalRealized}`);
+  ok('and it is gone from the positions', !after.positions.some((p) => p.id === 's4'),
+    JSON.stringify(after.positions.map((p) => p.id)));
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${pass + fail} checks · ${fail} finding(s)`);
 findings.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));

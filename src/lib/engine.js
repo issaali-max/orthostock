@@ -131,6 +131,7 @@ export function accountLedger(appOrData) {
   //    account belong to the investment and are handled by portfolioStats, not here —
   //    except transfers touching bank/drawer which are written with explicit accounts.
   for (const f of (data[TABLES.cashFlows] || [])) {
+    if (f.isActive === false) continue;      // a deleted flow is not money
     if (f.isActive === false) continue;
     const account = f.account || 'investment';
     if (account !== 'bank' && account !== 'drawer') continue;
@@ -224,6 +225,7 @@ export function investmentMovements(data) {
   const symbolOf = (sid) => (data[TABLES.securities] || []).find((s) => s.id === sid)?.symbol || '';
   const moves = [];
   for (const f of (data[TABLES.cashFlows] || [])) {
+    if (f.isActive === false) continue;      // a deleted flow is not money
     if (f.isActive === false || (f.account || 'investment') !== 'investment') continue;
     const dirIn = f.type === 'deposit' || f.type === 'dividend' || f.type === 'interest' || f.type === 'transferIn';
     moves.push({ account: 'investment', date: f.date, direction: dirIn ? 'in' : 'out', amount: num(f.amount), currency: 'USD', type: f.type, reason: f.reason || f.notes || '', symbol: symbolOf(f.securityId), otherAccount: f.toAccount || f.fromAccount, flowId: f.id });
@@ -2091,11 +2093,14 @@ async function _commitSell(app, { securityId, sellDate, qty, pricePerShare, fees
 
 export function portfolioStats(data, priceOf) {
   const securities = (data[TABLES.securities] || []).filter((s) => s.isActive !== false);
-  const lots = data[TABLES.tradeLots] || [];
-  const sells = data[TABLES.tradeSells] || [];
+  // Deleted trades are retired, not removed, so the deletion can travel to other
+  // devices. Every reader must therefore exclude them — a soft delete that the readers
+  // ignore changes nothing except where the row is stored.
+  const lots = (data[TABLES.tradeLots] || []).filter((l) => l.isActive !== false);
+  const sells = (data[TABLES.tradeSells] || []).filter((x) => x.isActive !== false);
   // Only investment-account flows: bank/drawer movements share the cashFlows table
   // (records without an account are legacy investment rows).
-  const flows = (data[TABLES.cashFlows] || []).filter((f) => (f.account || 'investment') === 'investment');
+  const flows = (data[TABLES.cashFlows] || []).filter((f) => f.isActive !== false && (f.account || 'investment') === 'investment');
   const priceFor = (s) => { const p = priceOf ? priceOf(s.id) : undefined; return p != null ? num(p) : num(s.currentPrice); };
 
   const positions = securities.map((s) => {
@@ -2256,9 +2261,9 @@ export function projectsTotalAED(data, rate) {
 
 // Unified, chronological transaction ledger for one security.
 export function stockLedger(data, securityId) {
-  const buys = (data[TABLES.tradeLots] || []).filter((l) => l.securityId === securityId)
+  const buys = (data[TABLES.tradeLots] || []).filter((l) => l.isActive !== false && l.securityId === securityId)
     .map((l) => ({ kind: 'buy', date: l.buyDate, qty: num(l.qtyBought), price: num(l.buyPricePerShare), fees: num(l.buyFees), amount: round2(num(l.costBasis)), id: l.id }));
-  const sells = (data[TABLES.tradeSells] || []).filter((x) => x.securityId === securityId)
+  const sells = (data[TABLES.tradeSells] || []).filter((x) => x.isActive !== false && x.securityId === securityId)
     .map((x) => ({ kind: 'sell', date: x.sellDate, qty: num(x.qty), price: num(x.sellPricePerShare), fees: num(x.sellFees), amount: round2(num(x.proceeds)), realizedPnL: num(x.realizedPnL), id: x.id }));
   const cash = (data[TABLES.cashFlows] || []).filter((f) => f.securityId === securityId)
     .map((f) => ({ kind: f.type, date: f.date, qty: 0, price: 0, amount: round2(num(f.amount)), id: f.id }));
@@ -2289,8 +2294,8 @@ function periodKey(iso, mode) { return mode === 'year' ? (iso || '').slice(0, 4)
 export function applyTradeChange(...args) { return serializeOperation(() => _applyTradeChange(...args)); }
 
 async function _applyTradeChange(app, securityId, change) {
-  let L = (app.data[TABLES.tradeLots] || []).filter((l) => l.securityId === securityId).map((l) => ({ ...l }));
-  let S = (app.data[TABLES.tradeSells] || []).filter((x) => x.securityId === securityId).map((x) => ({ ...x }));
+  let L = (app.data[TABLES.tradeLots] || []).filter((l) => l.isActive !== false && l.securityId === securityId).map((l) => ({ ...l }));
+  let S = (app.data[TABLES.tradeSells] || []).filter((x) => x.isActive !== false && x.securityId === securityId).map((x) => ({ ...x }));
   if (change.deleteLot) L = L.filter((l) => l.id !== change.deleteLot);
   if (change.deleteSell) S = S.filter((x) => x.id !== change.deleteSell);
   if (change.patchLot) L = L.map((l) => (l.id === change.patchLot.id ? { ...l, ...change.patchLot } : l));
@@ -2311,8 +2316,14 @@ async function _applyTradeChange(app, securityId, change) {
     x.proceeds = round2(num(x.qty) * num(x.sellPricePerShare) - num(x.sellFees));
     x.realizedPnL = round2(x.proceeds - cost);
   }
-  if (change.deleteLot) await db.remove(TABLES.tradeLots, change.deleteLot);
-  if (change.deleteSell) await db.remove(TABLES.tradeSells, change.deleteSell);
+  // ── Deleting a trade leaves evidence ──
+  // Removing the row outright meant the cloud simply lacked it, and absence is not an
+  // instruction: another device that still held the trade pushed it straight back, and
+  // running a merge there restored it to the cloud as well. Two devices then disagreed
+  // about cash and realised profit while holding identical share counts — which is
+  // exactly the shape of the difference between Issa's phone and his brother's.
+  if (change.deleteLot) await db.update(TABLES.tradeLots, change.deleteLot, { isActive: false, deletedAt: nextTimestamp() });
+  if (change.deleteSell) await db.update(TABLES.tradeSells, change.deleteSell, { isActive: false, deletedAt: nextTimestamp() });
   for (const l of lotsR) await db.update(TABLES.tradeLots, l.id, { buyDate: l.buyDate, qtyBought: num(l.qtyBought), buyPricePerShare: num(l.buyPricePerShare), buyFees: num(l.buyFees), costBasis: l.costBasis, qtyRemaining: l.rem });
   for (const x of sellsR) await db.update(TABLES.tradeSells, x.id, { sellDate: x.sellDate, qty: num(x.qty), sellPricePerShare: num(x.sellPricePerShare), sellFees: num(x.sellFees), proceeds: x.proceeds, realizedPnL: x.realizedPnL });
   return { ok: true };
@@ -2321,9 +2332,11 @@ async function _applyTradeChange(app, securityId, change) {
 // Hard-delete a security AND everything attached to it (lots, sells, dividend
 // cash flows) so the owner can re-enter it from scratch.
 export async function deleteSecurityCascade(app, securityId) {
-  for (const l of (app.data[TABLES.tradeLots] || []).filter((x) => x.securityId === securityId)) await db.remove(TABLES.tradeLots, l.id);
-  for (const x of (app.data[TABLES.tradeSells] || []).filter((y) => y.securityId === securityId)) await db.remove(TABLES.tradeSells, x.id);
-  for (const f of (app.data[TABLES.cashFlows] || []).filter((y) => y.securityId === securityId)) await db.remove(TABLES.cashFlows, f.id);
+  // Same reasoning as above: a cascade that removes rows cannot propagate, so the whole
+  // security comes back from any device that still has it.
+  for (const l of (app.data[TABLES.tradeLots] || []).filter((x) => x.securityId === securityId)) await db.update(TABLES.tradeLots, l.id, { isActive: false, deletedAt: nextTimestamp() });
+  for (const x of (app.data[TABLES.tradeSells] || []).filter((y) => y.securityId === securityId)) await db.update(TABLES.tradeSells, x.id, { isActive: false, deletedAt: nextTimestamp() });
+  for (const f of (app.data[TABLES.cashFlows] || []).filter((y) => y.securityId === securityId)) await db.update(TABLES.cashFlows, f.id, { isActive: false, deletedAt: nextTimestamp() });
   await db.remove(TABLES.securities, securityId);
 }
 
