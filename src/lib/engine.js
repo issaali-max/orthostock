@@ -2032,6 +2032,13 @@ async function _commitBuy(app, { securityId, buyDate, qty, pricePerShare, fees, 
     buyPricePerShare: price, buyFees: f, costBasis: cost, currency: 'USD', notes: '', // investment account = USD
     fundedFrom: fundFrom || 'investment',
   });
+  // Audited like the sale: the review found investment operations left no trace at all,
+  // so a purchase that funded itself from the bank had no record of who made it.
+  await db.insert(TABLES.auditLog, {
+    at: Date.now(), userId: app?.user?.id || '', userName: app?.user?.name || app?.user?.email || '—',
+    action: 'buy', entity: 'security', ref: String(securityId), note: `${num(qty)} @ ${num(pricePerShare)}`,
+  });
+  await app.refresh(TABLES.auditLog);
   await app.refresh(TABLES.tradeLots);
 }
 
@@ -2282,9 +2289,22 @@ export function stockLedger(data, securityId) {
 }
 
 // Record a per-stock cash event (dividend/fee/interest tied to a security).
-export async function commitDividend(app, { securityId, date, amount, type = 'dividend' }) {
-  await db.insert(TABLES.cashFlows, { type, date, amount: num(amount), securityId, currency: 'AED', notes: '' });
-  await app.refresh(TABLES.cashFlows);
+export function commitDividend(...args) { return serializeOperation(() => _commitDividend(...args)); }
+
+async function _commitDividend(app, { securityId, date, amount, type = 'dividend' }) {
+  // Tagged USD, not AED. The amount is added to the investment cash balance exactly as
+  // written, and that balance is in dollars — so the row was labelling a dollar figure
+  // as dirhams. Nothing converted it, so no number was wrong yet, but any future code
+  // that trusted the tag would have converted a figure that needed no converting.
+  await db.atomicMutations([
+    { op: 'insert', table: TABLES.cashFlows, row: { account: 'investment', type, date, amount: num(amount), securityId, currency: 'USD', notes: '' } },
+    { op: 'insert', table: TABLES.auditLog, row: {
+      at: Date.now(), userId: app?.user?.id || '', userName: app?.user?.name || app?.user?.email || '—',
+      action: type, entity: 'security', ref: String(securityId), note: `${num(amount)}`,
+    } },
+  ]);
+  await Promise.all([app.refresh(TABLES.cashFlows), app.refresh(TABLES.auditLog)]);
+  nudgeSync();
 }
 
 // Unified trend for the dashboard chart. mode: 'month' | 'year'.
@@ -2325,6 +2345,11 @@ async function _applyTradeChange(app, securityId, change) {
     }
     if (need > 0) return { ok: false, error: 'oversell' };
     x.proceeds = round2(num(x.qty) * num(x.sellPricePerShare) - num(x.sellFees));
+    // The replay computed the matched cost and then threw it away, writing only the new
+    // profit. The row was left saying proceeds 300, cost 250, profit 100 — and 300 − 250
+    // is 50. Three fields that must agree, and one of them silently stale. They are
+    // recomputed and stored together.
+    x.costBasisMatched = round2(cost);
     x.realizedPnL = round2(x.proceeds - cost);
   }
   // ── Deleting a trade leaves evidence ──
@@ -2336,7 +2361,13 @@ async function _applyTradeChange(app, securityId, change) {
   if (change.deleteLot) await db.update(TABLES.tradeLots, change.deleteLot, { isActive: false, deletedAt: nextTimestamp() });
   if (change.deleteSell) await db.update(TABLES.tradeSells, change.deleteSell, { isActive: false, deletedAt: nextTimestamp() });
   for (const l of lotsR) await db.update(TABLES.tradeLots, l.id, { buyDate: l.buyDate, qtyBought: num(l.qtyBought), buyPricePerShare: num(l.buyPricePerShare), buyFees: num(l.buyFees), costBasis: l.costBasis, qtyRemaining: l.rem });
-  for (const x of sellsR) await db.update(TABLES.tradeSells, x.id, { sellDate: x.sellDate, qty: num(x.qty), sellPricePerShare: num(x.sellPricePerShare), sellFees: num(x.sellFees), proceeds: x.proceeds, realizedPnL: x.realizedPnL });
+  for (const x of sellsR) await db.update(TABLES.tradeSells, x.id, { sellDate: x.sellDate, qty: num(x.qty), sellPricePerShare: num(x.sellPricePerShare), sellFees: num(x.sellFees), proceeds: x.proceeds, costBasisMatched: x.costBasisMatched, realizedPnL: x.realizedPnL });
+  await db.insert(TABLES.auditLog, {
+    at: Date.now(), userId: app?.user?.id || '', userName: app?.user?.name || app?.user?.email || '—',
+    action: change.deleteSell || change.deleteLot ? 'delete-trade' : 'edit-trade',
+    entity: 'security', ref: String(securityId),
+    note: JSON.stringify(Object.keys(change)),
+  });
   return { ok: true };
 }
 

@@ -120,8 +120,10 @@ console.log('\n─── 4. A sale is one transaction, or none of it ───')
 
 console.log('\n─── 5. Every trade leaves an audit record ───');
 {
-  const audits = (await db.getAll(TABLES.auditLog)).filter((a) => a.entity === 'security' && a.action === 'sell');
-  ok('sales are audited', audits.length >= 1, `${audits.length}`);
+  const audits = (await db.getAll(TABLES.auditLog)).filter((a) => a.entity === 'security');
+  const kinds = new Set(audits.map((a) => a.action));
+  ok('sales are audited', kinds.has('sell'), [...kinds].join(','));
+  ok('and so are purchases', kinds.has('buy'), [...kinds].join(','));
   ok('the record names who did it', audits.every((a) => a.userName));
   ok('and what it was', audits.every((a) => a.ref && a.note));
 }
@@ -312,6 +314,54 @@ console.log('\n─── 12. Broker settlements replace rather than accumulate �
   const st = E.portfolioStats(withBoth, () => 0);
   ok('only the current settlement counts', st.pastProfit === 200, `${st.pastProfit}`);
   ok('and cash reflects that one figure', st.cash === 200, `${st.cash}`);
+}
+
+
+console.log('\n─── 13. Editing a trade keeps its three figures consistent ───');
+{
+  // The replay recomputed profit but discarded the matched cost, leaving the row saying
+  // proceeds 300, cost 250, profit 100 — and 300 − 250 is 50.
+  await newSecurity('s6');
+  await E.commitBuy(app, { securityId: 's6', buyDate: '2026-09-01', qty: 10, pricePerShare: 20, fees: 0, fundFrom: 'none' });
+  await E.commitSell(app, { securityId: 's6', sellDate: '2026-09-05', qty: 10, pricePerShare: 30, fees: 0 });
+  await all();
+  const lot = (await db.getAll(TABLES.tradeLots)).find((l) => l.securityId === 's6');
+  const consistent = async () => {
+    const x = (await sells('s6'))[0];
+    return Math.abs(round2(num(x.proceeds) - num(x.costBasisMatched)) - num(x.realizedPnL)) < 0.01;
+  };
+  ok('they agree after the sale', await consistent());
+
+  // Correct the purchase price: profit changes, and so must the matched cost.
+  await E.applyTradeChange(app, 's6', { patchLot: { id: lot.id, buyPricePerShare: 10, costBasis: 100 } });
+  await all();
+  const x = (await sells('s6'))[0];
+  ok('profit follows the corrected cost', num(x.realizedPnL) === 200, `${x.realizedPnL}`);
+  ok('and the matched cost is rewritten with it', num(x.costBasisMatched) === 100, `${x.costBasisMatched}`);
+  ok('so proceeds − cost still equals profit', await consistent(),
+    `${x.proceeds} − ${x.costBasisMatched} vs ${x.realizedPnL}`);
+}
+
+
+console.log('\n─── 14. Dividends are tagged in the account\'s own currency ───');
+{
+  // The amount is added to the investment cash balance exactly as written, and that
+  // balance is in dollars — so tagging the row AED labelled a dollar figure as dirhams.
+  // No number was wrong yet, but any code that trusted the tag would convert a figure
+  // needing no conversion.
+  await newSecurity('s7');
+  await E.commitDividend(app, { securityId: 's7', date: '2026-09-07', amount: 120 });
+  await all();
+  const flow = (await db.getAll(TABLES.cashFlows)).find((f) => f.securityId === 's7');
+  ok('the dividend is recorded', !!flow && num(flow.amount) === 120);
+  ok('tagged USD, matching the balance it joins', flow.currency === 'USD', `${flow.currency}`);
+  ok('and on the investment account', (flow.account || 'investment') === 'investment');
+  ok('it is audited', (await db.getAll(TABLES.auditLog)).some((a) => a.action === 'dividend' && a.ref === 's7'));
+
+  const trades = (await db.getAll(TABLES.auditLog)).filter((a) => a.entity === 'security');
+  ok('trade edits and deletes are audited too',
+    trades.some((a) => a.action === 'edit-trade' || a.action === 'delete-trade'),
+    [...new Set(trades.map((a) => a.action))].join(','));
 }
 
 console.log('\n═══════════════════════════════════════');
