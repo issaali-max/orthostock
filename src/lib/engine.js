@@ -2272,8 +2272,19 @@ export function customersWithLoans(data) {
 }
 
 // Projects (off-market investments) valued in AED, USD ones converted at the rate.
+// Capital CURRENTLY committed to off-market projects.
+//
+// A project is money placed outside the market: while it runs it is invested capital, and
+// when it ends the money comes back and the gain or loss is recorded by hand. So a
+// completed project is no longer invested — counting it overstated the investment figure
+// by the whole amount, and disagreed with investmentBreakdown, which already excluded
+// them. The two now answer the same question the same way.
+//
+// `isActive === false` means deleted; `status === 'completed'` means finished and repaid.
+// Both are excluded, for different reasons.
 export function projectsTotalAED(data, rate) {
-  return round2((data[TABLES.projects] || []).filter((p) => p.isActive !== false)
+  return round2((data[TABLES.projects] || [])
+    .filter((p) => p.isActive !== false && p.status !== 'completed')
     .reduce((s, p) => s + toAED(p.amount, p.currency, rate), 0));
 }
 

@@ -46,7 +46,7 @@ console.log('\nALL INVESTMENT TESTS PASSED');
 const deq = (a, b, m) => { if (JSON.stringify(a) !== JSON.stringify(b)) { console.error(`✗ ${m}:`, a, 'want', b); process.exit(1); } console.log(`✓ ${m}`); };
 const nq = (a, b, m) => { if (Math.abs(a - b) > 0.001) { console.error(`✗ ${m}: ${a} != ${b}`); process.exit(1); } console.log(`✓ ${m} = ${a}`); };
 // ═══ مثال عيسى حرفياً: أودع ~98 ألفاً، الأسهم الآن 115 ألفاً → ربح 17 ألفاً ═══
-import { planSecurityMerge, projectsTotalAED, portfolioStats as pstats2 } from '/home/claude/orthostock/src/lib/engine.js';
+import { planSecurityMerge, projectsTotalAED, portfolioStats as pstats2 } from '../src/lib/engine.js';
 {
   const d = {
     securities: [{ id: 's1', symbol: 'TTD', currentPrice: 115 }],
@@ -70,6 +70,14 @@ import { planSecurityMerge, projectsTotalAED, portfolioStats as pstats2 } from '
     { id: 'p3', amount: 999, currency: 'AED', isActive: false },
   ]}, 3.6725);
   nq(total, 53672.5, 'المشاريع: 50000 + 1000$×3.6725 والملغى مستثنى');
+
+  // المشروع مالٌ موضوع خارج البورصة: ما دام جارياً فهو رأس مال مستثمَر، وحين ينتهي
+  // يعود المال ويُسجَّل الربح أو الخسارة يدوياً — فالمكتمل لم يعد مستثمَراً.
+  const withDone = projectsTotalAED({ projects: [
+    { id: 'p1', amount: 200000, currency: 'AED', isActive: true },
+    { id: 'p2', amount: 50000, currency: 'AED', isActive: true, status: 'completed' },
+  ] }, 3.6725);
+  nq(withDone, 200000, 'المشاريع: المكتمل مستثنى — عاد ماله');
 }
 console.log('SIMPLE-PNL / MERGE / PROJECTS TESTS PASSED');
 
