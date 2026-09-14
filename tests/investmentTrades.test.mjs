@@ -394,6 +394,34 @@ console.log('\n─── 15. Reconciling to a zero broker balance ───');
   ok('a matching balance needs no change', Math.abs(matched - 16140.89) < 0.01, `${matched}`);
 }
 
+
+console.log('\n─── 16. A device must keep a way back in ───');
+{
+  // Issa logged out on his laptop and could not sign back in. An account created through
+  // Supabase was stored locally with NO password, so the local gate could never admit it:
+  // verifyPassword compared the typed password against `undefined`. While Supabase
+  // answered, that was invisible; the moment it did not, there was no way in at all on a
+  // device that had accepted the same password many times.
+  const provider = fs.readFileSync(new URL('../src/app/AppProvider.jsx', import.meta.url), 'utf8');
+  ok('a confirmed password is stored locally as a hash', /const hashed = await makeHashedPassword\(password\)/.test(provider));
+  ok('a new local account carries it', /role: 'admin', isActive: true, password: hashed/.test(provider));
+  ok('and an existing account without one is filled in', /else if \(!u\.password\)/.test(provider));
+  ok('the reasoning is recorded', /Keep a local way back in/.test(provider));
+
+  // The hash must not be reversible to the password.
+  const { makeHashedPassword, verifyPassword } = await import('../src/lib/auth.js');
+  const h = await makeHashedPassword('correct horse');
+  ok('the stored value is not the password', !h.includes('correct horse'));
+  ok('the right password verifies', (await verifyPassword('correct horse', h)).ok);
+  ok('a wrong one does not', !(await verifyPassword('wrong', h)).ok);
+  ok('and an empty stored value admits nobody', !(await verifyPassword('anything', undefined)).ok,
+    'this is exactly what locked him out');
+
+  const i18n = fs.readFileSync(new URL('../src/lib/i18n.js', import.meta.url), 'utf8');
+  ok('the reset hint says it is device-only', /لا تُغيّر كلمة مرورك في الحساب السحابي/.test(i18n));
+  ok('in English too', /does not change your cloud account password/.test(i18n));
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${pass + fail} checks · ${fail} finding(s)`);
 findings.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));

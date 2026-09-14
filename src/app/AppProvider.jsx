@@ -155,12 +155,23 @@ export function AppProvider({ children }) {
         const res = await authSignIn(mail, password);
         if (res.ok) {
           let u = await db.findBy(TABLES.users, 'email', mail);
+          // ── Keep a local way back in ──
+          // The account was stored without a password, so the local gate could never
+          // admit it: verifyPassword compared the typed password against `undefined`.
+          // While Supabase answered, that was invisible. The moment it did not — offline,
+          // a network hiccup, a session that would not refresh — there was no way in at
+          // all, on a device that had already accepted this password a hundred times.
+          //
+          // Supabase has just confirmed this password is correct, so storing its hash
+          // costs nothing and keeps the local gate usable. The hash is not the password
+          // and cannot be turned back into one.
+          const hashed = await makeHashedPassword(password);
           if (!u) {
-            // Persist the signed-in account locally (deterministic id = same on
-            // every device, so upsert never duplicates) so it appears in the user
-            // list and offline login works next time.
-            u = { id: 'user-' + mail, name: mail.split('@')[0], email: mail, role: 'admin', isActive: true };
+            // Deterministic id = same on every device, so upsert never duplicates.
+            u = { id: 'user-' + mail, name: mail.split('@')[0], email: mail, role: 'admin', isActive: true, password: hashed };
             try { await db.insert(TABLES.users, u); } catch { /* may already exist via sync */ }
+          } else if (!u.password) {
+            try { await db.update(TABLES.users, u.id, { password: hashed }); u = { ...u, password: hashed }; } catch { /* non-fatal */ }
           }
           setUser(u); try { localStorage.setItem(SESSION_KEY, mail); } catch {}
           return true;
