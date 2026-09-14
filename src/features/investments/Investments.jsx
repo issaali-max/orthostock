@@ -444,7 +444,14 @@ export default function Investments() {
             <div style={{ background: C.warning + '18', border: `1px solid ${C.warning}55`, borderRadius: 14, padding: 12, marginBottom: 14 }}>
               <div style={{ fontSize: 13, fontWeight: 800, color: C.text }}>⚖️ {t('reconcileBroker')}</div>
               <div style={{ fontSize: 12, color: C.textMid, margin: '4px 0 9px', lineHeight: 1.6 }}>{t('reconcileBrokerHint')}</div>
-              <Btn size="sm" onClick={() => { setReconCash(String(round2(num(stats.cash)))); setReconOpen(true); }}>⚖️ {t('reconcileBroker')}</Btn>
+              {/* Opens EMPTY, not pre-filled with the app's own cash. Pre-filling it meant
+                  the field already held the wrong figure the owner came to correct, so he
+                  had to clear it first — and clearing a number field shows blank, which
+                  looks like the entry did not register. Worse, leaving it as offered
+                  reconciles the balance to itself and changes nothing. The broker's
+                  figure is the one piece of information the app does not have; it should
+                  be typed, and an empty field means zero. */}
+              <Btn size="sm" onClick={() => { setReconCash(''); setReconOpen(true); }}>⚖️ {t('reconcileBroker')}</Btn>
             </div>
           );
         }
@@ -453,6 +460,11 @@ export default function Investments() {
             <div style={{ fontSize: 13, fontWeight: 900, color: C.text, marginBottom: 8 }}>⚖️ {t('reconcileBroker')}</div>
             <Field label={t('realBrokerCash')} hint={t('realBrokerCashHint')}>
               <Input type="number" inputMode="decimal" value={reconCash} onChange={setReconCash} placeholder="0.00" style={{ fontSize: 20, fontWeight: 900 }} />
+              <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
+                {reconCash === '' || reconCash == null
+                  ? (t('reconEmptyMeansZero') || 'الحقل فارغ = صفر. اتركه فارغاً إن كان رصيدك عند الوسيط صفراً.')
+                  : `${t('realBrokerCash')}: ${fmtUSD(num(reconCash))}`}
+              </div>
             </Field>
             <div style={{ display: 'grid', gap: 4, fontSize: 12, background: '#fff', borderRadius: 10, padding: 10, marginBottom: 10 }}>
               <Line label={t('depositedTotal')} value={fmtUSD(stats.netCapital)} />

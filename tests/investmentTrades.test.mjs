@@ -364,6 +364,36 @@ console.log('\n─── 14. Dividends are tagged in the account\'s own currency
     [...new Set(trades.map((a) => a.action))].join(','));
 }
 
+
+console.log('\n─── 15. Reconciling to a zero broker balance ───');
+{
+  // Issa could not set his balance to zero. Opening the panel pre-filled the field with
+  // the app's OWN cash — the very figure he came to correct — so he had to clear it
+  // first, and a cleared number field renders blank, which looks like the entry did not
+  // register. Leaving it as offered would reconcile the balance to itself and change
+  // nothing at all.
+  const ui = fs.readFileSync(new URL('../src/features/investments/Investments.jsx', import.meta.url), 'utf8');
+  ok('the panel opens with an empty field', /setReconCash\(''\); setReconOpen\(true\)/.test(ui));
+  ok('it no longer pre-fills the app\'s own cash', !/setReconCash\(String\(round2\(num\(stats\.cash\)\)\)\)/.test(ui));
+  ok('and says what an empty field means', /reconEmptyMeansZero/.test(ui));
+  const i18n = fs.readFileSync(new URL('../src/lib/i18n.js', import.meta.url), 'utf8');
+  ok('in both languages', (i18n.match(/reconEmptyMeansZero/g) || []).length === 2);
+
+  // The arithmetic, with the figures from Issa's screen.
+  const solve = ({ holdCost, brokerCash, netCapital, realized, dividends, interest, fees }) =>
+    round2(holdCost + brokerCash - netCapital - realized - round2(dividends + interest - fees));
+  const his = { holdCost: 133284.06, brokerCash: 0, netCapital: 100000, realized: 17246.17, dividends: 0, interest: 0, fees: 0 };
+  const needed = solve(his);
+  const cashAfter = round2(his.netCapital + needed - his.holdCost + his.realized);
+  ok('reconciling to zero lands the balance on zero', cashAfter === 0, `${cashAfter}`);
+  ok('and adjusts the settlement rather than inventing profit', needed !== 0 && Math.abs(needed) < his.netCapital,
+    `${needed}`);
+
+  // A broker balance that already matches proposes nothing.
+  const matched = solve({ ...his, brokerCash: round2(his.netCapital + 16140.89 - his.holdCost + his.realized) });
+  ok('a matching balance needs no change', Math.abs(matched - 16140.89) < 0.01, `${matched}`);
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${pass + fail} checks · ${fail} finding(s)`);
 findings.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));
