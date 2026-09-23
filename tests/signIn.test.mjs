@@ -78,6 +78,49 @@ console.log('\n─── 4. A successful cloud sign-in keeps a local way back in
   ok('and for an existing one missing it', /else if \(!u\.password\)/.test(provider));
 }
 
+
+console.log('\n─── 5. The same contract, across the WHOLE app ───');
+{
+  // authConfigured was one instance of a general fault: a module changed what it exports
+  // and a caller elsewhere kept using the old shape. Nothing in the build catches that for
+  // a value that is called — Vite bundles it happily and it throws only at runtime. So
+  // every named import of a plain JS module is checked against what that module exports.
+  const path = await import('node:path');
+  const root = new URL('../src/', import.meta.url).pathname;
+  const walk = (d) => fs.readdirSync(d, { withFileTypes: true })
+    .flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]));
+  const files = walk(root).filter((f) => /\.(jsx?|mjs)$/.test(f));
+  const loaded = {};
+  const problems = [];
+  let checked = 0;
+  for (const f of files) {
+    const src = fs.readFileSync(f, 'utf8');
+    for (const m of src.matchAll(/import \{([^}]+)\} from '(\.[^']+)'/g)) {
+      let target = path.resolve(path.dirname(f), m[2]);
+      if (!/\.(jsx?|mjs)$/.test(target)) {
+        for (const ext of ['.js', '.jsx']) if (fs.existsSync(target + ext)) { target += ext; break; }
+      }
+      if (!/\.js$/.test(target)) continue;          // JSX modules need a bundler to load
+      if (!(target in loaded)) { try { loaded[target] = await import(target); } catch { loaded[target] = null; } }
+      const mod = loaded[target];
+      if (!mod) continue;
+      for (let n of m[1].split(',').map((x) => x.trim()).filter(Boolean)) {
+        n = n.split(/\s+as\s+/)[0].trim();
+        checked++;
+        if (!(n in mod)) { problems.push(`${path.relative(root, f)}: '${n}' is not exported`); continue; }
+        if (new RegExp(`\\b${n}\\(`).test(src) && typeof mod[n] !== 'function') {
+          problems.push(`${path.relative(root, f)}: calls ${n}() but it is a ${typeof mod[n]}`);
+        }
+      }
+    }
+  }
+  ok('the scan covers the app', checked > 100, `${checked} imports checked`);
+  ok('no import names something its module does not export', !problems.some((p) => p.includes('not exported')),
+    problems.filter((p) => p.includes('not exported')).join(' | '));
+  ok('nothing that is called is anything but a function', !problems.some((p) => p.includes('calls ')),
+    problems.filter((p) => p.includes('calls ')).join(' | '));
+}
+
 console.log('\n═══════════════════════════════════════');
 console.log(`${pass + fail} checks · ${fail} finding(s)`);
 findings.forEach((f, i) => console.log(`  ${i + 1}. ${f}`));
