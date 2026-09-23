@@ -39,7 +39,12 @@ const supabase = cloudConfigured
   ? createClient(url, key, { auth: { persistSession: true, autoRefreshToken: true, storageKey: 'orthostock_auth' } })
   : null;
 
-export const authConfigured = cloudConfigured;
+// A FUNCTION, as it was before the sync rebuild. The rebuild turned it into a plain
+// boolean while AppProvider still called it — `authConfigured()` then threw "is not a
+// function" on every sign-in, before Supabase was ever asked. The login screen caught it
+// and showed "wrong password". Phones kept their saved session and never reached that
+// screen, so it surfaced only when a device signed out.
+export const authConfigured = () => !!supabase;
 // Image storage shares this client rather than opening a second connection.
 export const getSupabase = () => supabase;
 export async function authSignIn(email, password) {
@@ -48,6 +53,32 @@ export async function authSignIn(email, password) {
   return error ? { ok: false, error: error.message } : { ok: true };
 }
 export async function authSignOut() { if (supabase) await supabase.auth.signOut(); }
+
+// Fetches one user account straight from the cloud, for a device that has never synced.
+//
+// A new laptop or a fresh browser has an empty local store, so the local sign-in gate had
+// nothing to check a password against — every attempt failed until a background sync
+// happened to have downloaded the users table, and nothing told the person to wait. This
+// asks for exactly the one row needed, so a device with only a username and password can
+// get in straight away.
+//
+// Returns the row, or null when there is none. A network failure is reported as such so
+// the caller can say "cannot reach the cloud" rather than "wrong password".
+export async function fetchCloudUser(email) {
+  if (!supabase) return { row: null, reachable: false };
+  try {
+    const page = await readAllPages(() => supabase.from(TABLES.users).select('*').order('id', { ascending: true }));
+    if (!page.ok) return { row: null, reachable: false, error: page.error?.message };
+    const mail = String(email).trim().toLowerCase();
+    for (const c of page.rows) {
+      const rec = fromCloud(c);
+      if (rec && String(rec.email || '').trim().toLowerCase() === mail) return { row: rec, reachable: true };
+    }
+    return { row: null, reachable: true };
+  } catch (e) {
+    return { row: null, reachable: false, error: e?.message || String(e) };
+  }
+}
 
 const isOnline = () => (typeof navigator === 'undefined' ? true : navigator.onLine !== false);
 

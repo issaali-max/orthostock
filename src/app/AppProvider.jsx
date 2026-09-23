@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import * as db from '../db/db.js';
 import { verifyPassword, makeHashedPassword } from '../lib/auth.js';
-import { startSync, nudgeSync, authConfigured, authSignIn, authSignOut } from '../db/sync.js';
+import { startSync, nudgeSync, authConfigured, authSignIn, authSignOut, fetchCloudUser } from '../db/sync.js';
 import { TABLES } from '../lib/constants.js';
 import { makeT } from '../lib/i18n.js';
 
@@ -147,24 +147,22 @@ export function AppProvider({ children }) {
   // succeed, ALWAYS fall back to the local gate — the local gate only unlocks the
   // UI + local data (cloud access still needs a valid Supabase session under RLS),
   // so it is a safe recovery/offline path and can never lock the owner out. ──
+  // Returns { ok, reason } rather than a bare boolean. Every failure used to surface as
+  // "wrong password", whatever actually went wrong — an unconfirmed email, an account
+  // that did not exist in the cloud, a network that did not answer — so the owner could
+  // not tell a typo from a broken connection. The reason is now carried to the screen.
   const login = useCallback(async (email, password) => {
     const mail = String(email).trim().toLowerCase();
-    // 1) Supabase Auth (when online + configured). On success, prefer it.
-    if (authConfigured() && navigator.onLine) {
+    let cloudError = '';
+
+    // 1) Supabase Auth, when reachable.
+    if (authConfigured() && navigator.onLine !== false) {
       try {
         const res = await authSignIn(mail, password);
         if (res.ok) {
           let u = await db.findBy(TABLES.users, 'email', mail);
-          // ── Keep a local way back in ──
-          // The account was stored without a password, so the local gate could never
-          // admit it: verifyPassword compared the typed password against `undefined`.
-          // While Supabase answered, that was invisible. The moment it did not — offline,
-          // a network hiccup, a session that would not refresh — there was no way in at
-          // all, on a device that had already accepted this password a hundred times.
-          //
-          // Supabase has just confirmed this password is correct, so storing its hash
-          // costs nothing and keeps the local gate usable. The hash is not the password
-          // and cannot be turned back into one.
+          // Keep a local way back in: store the hash of a password Supabase has just
+          // confirmed, so the local gate still works when the cloud does not answer.
           const hashed = await makeHashedPassword(password);
           if (!u) {
             // Deterministic id = same on every device, so upsert never duplicates.
@@ -174,18 +172,42 @@ export function AppProvider({ children }) {
             try { await db.update(TABLES.users, u.id, { password: hashed }); u = { ...u, password: hashed }; } catch { /* non-fatal */ }
           }
           setUser(u); try { localStorage.setItem(SESSION_KEY, mail); } catch {}
-          return true;
+          return { ok: true };
         }
-      } catch { /* network/auth error — fall through to local gate */ }
+        cloudError = res.error || '';
+      } catch (e) { cloudError = e?.message || String(e); }
     }
-    // 2) Local gate (recovery / offline / before Supabase Auth is set up)
-    const u = await db.findBy(TABLES.users, 'email', mail);
-    if (!u || u.isActive === false) return false;
+
+    // 2) The local account — or, on a device that has never synced, the cloud's copy.
+    // A fresh laptop has an empty store, so there was nothing to check against and every
+    // attempt failed until a background sync happened to finish. Fetch the one row needed.
+    let u = await db.findBy(TABLES.users, 'email', mail);
+    let reachable = true;
+    if (!u) {
+      const got = await fetchCloudUser(mail);
+      reachable = got.reachable;
+      if (got.row) {
+        u = got.row;
+        try { await db.insert(TABLES.users, u); } catch { /* arrived via sync meanwhile */ }
+      }
+    }
+
+    if (!u) {
+      if (!reachable) return { ok: false, reason: 'offline' };
+      return { ok: false, reason: 'no_account', detail: cloudError };
+    }
+    if (u.isActive === false) return { ok: false, reason: 'disabled' };
+
+    // An account that has only ever signed in through the cloud has no local password,
+    // so there is nothing to compare against here. Saying "wrong password" would be
+    // false; the password may well be right.
+    if (!u.password) return { ok: false, reason: 'cloud_only', detail: cloudError };
+
     const { ok, needsUpgrade } = await verifyPassword(password, u.password);
-    if (!ok) return false;
+    if (!ok) return { ok: false, reason: 'wrong_password', detail: cloudError };
     if (needsUpgrade) { try { await db.update(TABLES.users, u.id, { password: await makeHashedPassword(password) }); } catch { /* non-fatal */ } }
     setUser(u); try { localStorage.setItem(SESSION_KEY, mail); } catch {}
-    return true;
+    return { ok: true };
   }, []);
 
   // Local password reset (no email server — see note in the UI). Returns true if the email exists.

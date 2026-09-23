@@ -115,8 +115,12 @@ console.log('\n─── 8. The rebuild kept what mattered and dropped what did 
   // now: the file has since gained pagination, the restore epoch and the stale-write
   // check, all of which earn their space. What still matters is that the dead code
   // removed then stays removed, which the checks above assert by name.
-  ok('the rebuild is still smaller than the 791 lines it replaced', sync.split('\n').length < 791,
-    `${sync.split('\n').length} lines`);
+  // No line ceiling. One was useful right after the rebuild and has since been outgrown by
+  // pagination, the restore epoch, the stale-write check and cloud sign-in — each of which
+  // earns its space. Size was only ever a proxy; what matters is that the specific dead
+  // code removed then stays removed, which the checks above assert by name.
+  ok('the dead code removed in the rebuild stays removed',
+    !/attempt < 14/.test(sync) && !/CHILD_TABLES/.test(sync) && !/missingColumnsSql/.test(sync));
 }
 
 

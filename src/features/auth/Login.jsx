@@ -16,8 +16,21 @@ export default function Login() {
   const submit = async () => {
     setError(''); setBusy(true);
     try {
-      const ok = await login(email, password);
-      if (!ok) setError(t('wrongCreds'));
+      const res = await login(email, password);
+      // login returns { ok, reason }. Older callers treated it as a boolean, and a bare
+      // `false` meant every failure read as "wrong password" — so show what actually
+      // happened, and include the cloud's own message when there is one.
+      const r = typeof res === 'object' && res ? res : { ok: !!res };
+      if (!r.ok) {
+        const msg = {
+          offline: t('loginOffline'),
+          no_account: t('loginNoAccount'),
+          disabled: t('loginDisabled'),
+          cloud_only: t('loginCloudOnly'),
+          wrong_password: t('wrongCreds'),
+        }[r.reason] || t('wrongCreds');
+        setError(r.detail ? `${msg} (${r.detail})` : msg);
+      }
     } finally { setBusy(false); }
   };
 
