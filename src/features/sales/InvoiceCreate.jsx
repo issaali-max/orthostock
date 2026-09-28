@@ -41,6 +41,9 @@ export default function InvoiceCreate({ open, onClose, editing }) {
   const [showQuickOrder, setShowQuickOrder] = useState(false);
   const [taxApplied, setTaxApplied] = useState(editing?.taxApplied != null ? !!editing.taxApplied : !!settings?.taxEnabled);
   const [showTrn, setShowTrn] = useState(editing?.showTrn != null ? !!editing.showTrn : true);
+  // Whether the PDF title reads "TAX INVOICE" or just "INVOICE". Defaults to showing it,
+  // so every invoice looks exactly as it did before unless this is switched off.
+  const [showTaxWord, setShowTaxWord] = useState(editing?.showTaxWord != null ? !!editing.showTaxWord : true);
   const [custEmirate, setCustEmirate] = useState('');
   const [custCity, setCustCity] = useState('');
   // city list follows the chosen emirate (fixed Arabic cities), else every city
@@ -172,7 +175,7 @@ export default function InvoiceCreate({ open, onClose, editing }) {
         invoiceData: {
           invoiceNumber: number, customerId: customerId || null, date,
           subtotal: netSubtotal, discountTotal: round2(invDisc), total: totals.total,
-          paidAmount: paid, paymentStatus: settledStatus, paymentMethod, status: 'active', currency: 'AED', notes: '', payments, taxApplied, showTrn,
+          paidAmount: paid, paymentStatus: settledStatus, paymentMethod, status: 'active', currency: 'AED', notes: '', payments, taxApplied, showTrn, showTaxWord,
         },
         // One cart line can carry BOTH a paid qty and a gift qty for the same material —
         // split here into a normal item (priced) and a gift item (price 0, cost still charged).
@@ -434,6 +437,12 @@ export default function InvoiceCreate({ open, onClose, editing }) {
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: C.textMid, cursor: 'pointer' }}>
             <input type="checkbox" checked={showTrn} onChange={(e) => setShowTrn(e.target.checked)} />
             {t('showTrnOnInvoice') || 'إظهار TRN على الفاتورة (الشركة والعميل)'}
+          </label>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', padding: '4px 0' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: C.textMid, cursor: 'pointer' }}>
+            <input type="checkbox" checked={showTaxWord} onChange={(e) => setShowTaxWord(e.target.checked)} />
+            {t('showTaxWord') || 'كلمة TAX في عنوان الفاتورة (TAX INVOICE)'}
           </label>
         </div>
         <Row label={t('finalTotal')} value={fmtCur(totals.total, displayCurrency, usdRate)} bold />

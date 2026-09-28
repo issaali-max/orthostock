@@ -283,7 +283,9 @@ function buildHtml({ invoice, items, settings, customer, variantById }) {
         <div style="width:150px;display:flex;align-items:center;justify-content:center;background:${st.bg};color:${st.fg};border-radius:6px;font-weight:900;font-size:14px;letter-spacing:1px">${st.label}</div>
       </div>`;
   return paginate(rows, {
-    settings, title: 'TAX INVOICE', taxOn, totalsHtml,
+    // Only the word TAX is optional — everything else on the page is unchanged. An
+    // invoice that predates the option has no flag, and keeps "TAX INVOICE".
+    settings, title: invoice.showTaxWord === false ? 'INVOICE' : 'TAX INVOICE', taxOn, totalsHtml,
     billingAddress: esc(customer?.address || ''),
     showTrn: invoice.showTrn !== false,
     party: [['Customer', custName], ...(invoice.showTrn !== false ? [['Customer TRN#', esc(customer?.trn || '')]] : []), ['Notes', esc(invoice.notes || '')]],
