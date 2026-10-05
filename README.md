@@ -69,5 +69,5 @@ exact current step, open issues, and the prioritized roadmap.
 
 **A new AI/developer continuing this project should read `AI_HANDOFF.md` first.**
 
-**OrthoStock Next** (the planned successor): discovery, architecture and migration plan are in
+**OrthoStock Next** (the planned successor, built as a separate system): analysis and plan are in
 [`docs/orthostock-next/`](docs/orthostock-next/README.md).

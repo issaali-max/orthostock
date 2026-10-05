@@ -6,6 +6,10 @@ so it can be checked.
 
 Reference point: `main` as of commit `205108f` (package version 2.7.0).
 
+> Plan v2: Legacy is **not changed**. The weaknesses below are documented as reference for
+> designing Next and for explaining Legacy vs Next differences at migration time. They are
+> not a list of Legacy fixes.
+
 ---
 
 ## 1. What OrthoStock currently does
@@ -286,9 +290,9 @@ Ordered by impact. (Section 5, the functional inventory, is in its own file.)
 7. **Payments are identified by array index.** Cheque status changes target `payments[i]`. Two
    devices appending payments to the same invoice concurrently is an LWW conflict on the whole
    array, so one payment can be lost.
-8. **Document numbering is client-side**, then repaired by renumbering after the fact (§1 of the
-   README).
-9. **VAT is not persisted** (`vatAmount` is never written on save; reproduced, see README).
+8. **Document numbering is client-side**, then repaired by renumbering after the fact
+   (`autoFixDuplicateNumbers`), so an issued invoice's number can change.
+9. **VAT is not persisted** (`vatAmount` is never written on save; reproduced: a 5 % invoice reports VAT 200 instead of 50 after the rate is set to 20 %).
    `invoiceBreakdown` prints VAT at the *current* rate next to a stored total.
 10. **Several things are stored as arrays inside other rows:** `payments[]`,
     `openingPayments[]`, `materialLoans[]` and `externalDebts.txns[]`. These are economic events

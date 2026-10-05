@@ -1,13 +1,26 @@
-# 05 · Testing Strategy
+# 09 · Testing and Verification
 
-Assessment item 13. The goal is that the **classes** of bug Legacy suffered cannot come back
-silently, not just the individual bugs.
+The goal is that the **classes** of bug Legacy suffered cannot come back silently, not just
+the individual bugs. Next is verified in two stages: first on **generated test data** (§5),
+and later against **real Legacy data** during the migration phase ([08 §5](08-legacy-migration.md#5-legacy-vs-next-comparison)).
 
-## 13.1 Test levels
+## 1. What "verified" means before go-live
+
+| Evidence | From |
+|---|---|
+| All test levels green in CI | §2 |
+| Every invariant enforced by code and a test | §3 |
+| Every historical Legacy bug has a passing regression test | §4 |
+| Generated-business run: reports equal the core definitions; multi-device runs converge | §5 |
+| Real data: 0 unexplained Legacy vs Next differences in two consecutive rehearsals | [08 §6](08-legacy-migration.md#6-rehearsals-and-the-final-switch) |
+| New-device restore and backup restore drill pass with real data | [06 §7](06-cloud-offline-sync.md#7-a-completely-new-device), [06 §8](06-cloud-offline-sync.md#8-cloud-recovery) |
+| Owner has completed the acceptance script | §5 |
+
+## 2. Test levels
 
 | Level | What it covers | Tooling | Runs |
 |---|---|---|---|
-| **Unit (domain)** | Pure business rules: money, discount allocation, VAT, COGS budget, moving average, FIFO, allocation, statements, P&L definitions | Vitest | Every commit (< 30 s) |
+| **Unit (core)** | Pure business rules: money, discount allocation, VAT, COGS budget, moving average, FIFO, allocation, statements, P&L definitions | Vitest | Every commit (< 30 s) |
 | **Property-based** | Invariants over thousands of random operation sequences (the successor of Legacy's `invoiceStress` / `fullCycle` audits), with fixed seeds for reproducibility | fast-check | Every commit (short), nightly (long) |
 | **Command integration** | Each command end to end through the application layer into **real Postgres**: atomicity, idempotency, version conflicts, permissions, audit and change-log rows | Vitest + Supabase local (Docker) / PGlite tier | Every PR |
 | **Database** | Migrations apply from zero and from the previous release; constraints, append-only triggers, RLS (a non-member sees nothing; `authenticated` cannot write) | Vitest/pgTAP against Supabase local | Every PR |
@@ -16,15 +29,14 @@ silently, not just the individual bugs.
 | **Multi-device** | N simulated devices (separate caches and outboxes) against one real API + DB, with random interleavings, offline periods, duplicated and reordered deliveries; asserts convergence and invariants | Custom harness (Node) | PR (short), nightly (long, many seeds) |
 | **Offline E2E** | Real browser goes offline, issues an invoice, reloads, comes back online; also a second browser context as the second device | Playwright (`context.setOffline`) | PR (smoke), nightly (full) |
 | **E2E user journeys** | Core flows in AR and EN, mobile and desktop viewports | Playwright | PR (smoke), nightly (full) |
-| **Migration** | Fixture snapshots → expected Next output; run-twice = no-op; every anomaly class → correct status | Vitest | Every PR touching `packages/legacy` |
-| **Bridge** | Replay of a recorded change log; duplicates, out-of-order revisions, deletes, a Legacy restore event (circuit breaker trips), missing dependencies (parked, never placeholders) | Vitest + both DBs locally | Every PR touching the bridge |
-| **Parity** | Legacy oracle vs Next on fixture snapshots (must be green or explained); in staging/prod, the nightly reconciliation run | Vitest + reconciliation package | PR + nightly |
+| **Migration** *(migration phase)* | Fixture exports → expected Next output; run-twice = no-op; every anomaly class → correct status; device-only data detected | Vitest | Every PR touching `tools/legacy-import` |
+| **Legacy vs Next comparison** *(migration phase)* | Legacy's own calculation functions vs Next reports on real exported data; every difference matched or explained | Migration tool | Every rehearsal |
 | **Regression** | One file per confirmed historical bug (catalogue below), named after the bug | Vitest/Playwright | Every PR |
 | **Visual / document** | Invoice and statement PDFs: Next output vs Legacy golden PDFs for migrated invoices (text layer comparison) | Playwright + pdf text diff | PR touching documents |
 | **Backup/restore drill** | Restore the latest dump into scratch, run migrations check and integrity suite | Scheduled CI job | Monthly (and before cutover) |
 | **Performance** | Synthetic business at 10× current size: dashboard, invoice issue, statement, bootstrap times under budget | Vitest bench / k6-style script | Nightly |
 
-## 13.2 Invariants the tests protect
+## 3. Invariants the tests protect
 
 Each invariant has an ID used in code comments, tests and `docs/domain/invariants.md`.
 
@@ -61,9 +73,9 @@ Each invariant has an ID used in code comments, tests and `docs/domain/invariant
 | INV-SYNC-03 | Bootstrap on an empty device reproduces the full working set (no silent page limits) |
 | INV-AUD-01 | Every committed command writes exactly one audit event in the same transaction; audit rows cannot be modified |
 | INV-SEC-01 | A non-member reads nothing; no client role can write a table directly |
-| INV-MIG-01 | Migration and bridge are idempotent; Legacy historical figures are copied, never recomputed |
+| INV-MIG-01 | The migration is idempotent; Legacy historical figures are copied, never recomputed |
 
-## 13.3 Historical Legacy bugs → permanent regression tests
+## 4. Historical Legacy bugs → permanent regression tests
 
 Sources: the Legacy git history, `docs/SYNC-SPEC.md`, the explanatory comments in `engine.js`
 and `sync.js`, and the existing Legacy suites. Each confirmed bug becomes
@@ -119,13 +131,38 @@ exists and proves it.
 | R44 | Investment buy funded from bank did several separate writes | Atomicity | Buy with funding is one command | INV-CMD-02 |
 | R45 | **(Found in this review)** `todayISO()` uses UTC → wrong default date after midnight in Dubai | Dates | Business date computed in the business timezone | — |
 | R46 | **(Found in this review)** Hard-deleted expenses, cash flows, projects and supplier payments stay alive on other devices, and "merge with cloud" re-uploads them | Resurrection | Deletion is a versioned command (void/archive) that every device receives through the change feed | INV-SYNC-01 |
+| R47 | **(Found in this review)** Revenue includes VAT on some screens (customer stats, emirates, dashboard KPIs) but not in the P&L | Duplicated rule | All revenue figures come from `sales_facts.net_fils`; a test compares every screen's figure for one period | INV-RPT-01 |
+| R48 | **(Found in this review)** Three supplier-balance definitions disagree (`paidAmount: null` counted as unpaid in one, paid in another) | Duplicated rule | One balance definition; supplier page, payables and Home show the same number | INV-RPT-04 |
+| R49 | **(Found in this review)** Dashboard KPI and "sold materials" drill-down include retired line generations | Filtering | Reports read only current lines of issued invoices (`sales_facts`) | INV-RPT-04 |
+| R50 | **(Found in this review)** Two different "inventory value" figures (negative stock counted vs clamped) | Duplicated rule | One stock-value definition, documented, used everywhere | — |
 
 Legacy's own suites (`tests/*.test.mjs`) are kept as **scenario sources**: their numbers and
 stories are ported, and their expected values become Next fixtures. The Legacy `invoiceStress`
 and `fullCycle` randomised audits become fast-check properties with the same seeds as a
 starting point.
 
-## 13.4 Definition of done for any change
+## 5. Testing Next with test data (Phase 6), before any real data
+
+Next must be proven **before** real Legacy data is migrated:
+
+1. **A synthetic business generator** (`tests/fixtures/generate.ts`, seeded) builds a
+   realistic company: about 300 customers across emirates, 500 materials with band grids, 2
+   years of purchases and invoices (discounts, gifts, VAT on and off, revisions, voids),
+   payments in all methods, cheques in every state, loans, orders, expenses in AED and USD, and
+   an investment portfolio. Sizes up to 10× today's business are used for performance tests.
+2. **Scenario fixtures** port every Legacy test story (`tests/*.test.mjs` in Legacy) with its
+   original numbers and expected results.
+3. **Golden reports:** for the generated business, P&L, VAT, balances, stock and statements
+   are computed independently from the core definitions and compared with the SQL reports.
+4. **Multi-device and offline runs** on the generated business: several simulated devices,
+   random offline periods and retries; all invariants must hold and every device must
+   converge.
+5. **New-device and restore drills** on the generated business, exactly as later with real
+   data.
+6. **Owner acceptance:** the owner works through scripted daily tasks on staging (issue,
+   revise, pay, purchase, count stock, statement, reports) and records anything unclear.
+
+## 6. Definition of done for any change
 
 1. Domain rule changed → unit and property tests updated; the invariant ID referenced.
 2. Command added or changed → integration test covering success, validation error, version

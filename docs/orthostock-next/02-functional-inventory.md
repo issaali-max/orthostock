@@ -11,7 +11,8 @@ small but important features are not forgotten.
 - **Unclear:** needs a decision from the owner.
 
 "Legacy ref" points to where the behaviour lives. Each row becomes a checklist item for
-functional parity (Phase 5) and, where marked ✱, a reconciliation metric (Phase 4–6).
+functional parity (Phase 5) and, where marked ✱, a Legacy vs Next comparison metric in the
+migration phase (Phases 8–9). Where each feature lives in Next: [07 §4](07-ux-and-feature-map.md#4-feature-map-every-legacy-feature-has-a-home).
 
 ## A. Catalogue & stock
 
@@ -64,7 +65,7 @@ functional parity (Phase 5) and, where marked ✱, a reconciliation metric (Phas
 |---|---|---|---|---|
 | C1 | Record purchase (supplier, lines, unit cost, paid at purchase, paid from, invoice ref, notes) | `Purchases.jsx`, `commitPurchase` | Keep ✱ | Paid-at-purchase becomes a `SupplierPayment` allocated to the purchase |
 | C2 | Moving-average cost update + min/max/latest cost | `buildPurchaseSpecs` | Keep ✱ | Server-side, append-only cost layers |
-| C3 | Edit purchase (atomic void + recreate, cost replay) | `editPurchaseAtomic` | Redesign ✱ | Versioned revision; COGS of past sales unchanged (policy, see 03 §10.6) |
+| C3 | Edit purchase (atomic void + recreate, cost replay) | `editPurchaseAtomic` | Redesign ✱ | Versioned revision; COGS of past sales unchanged (policy, see 10 Q9) |
 | C4 | Void purchase | `voidPurchase` | Keep ✱ | |
 | C5 | Purchase planning: one shopping list per supplier from low stock + open orders | `PurchasePlanning.jsx`, `recommendedQtyByVariant` | Keep | Absorbs A13; can create draft purchases |
 | C6 | Suppliers: profile, contact, location, currency | `Suppliers.jsx` | Keep | |
@@ -165,5 +166,5 @@ functional parity (Phase 5) and, where marked ✱, a reconciliation metric (Phas
 | **Total features** | **100** |
 
 The 39 ✱ features are the ones whose **numbers** must match between Legacy and Next
-during parallel operation. They define the reconciliation scope in
-[04-migration-bridge-parity.md](04-migration-bridge-parity.md).
+after migration. They define the comparison scope in
+[08 §5](08-legacy-migration.md#5-legacy-vs-next-comparison).
